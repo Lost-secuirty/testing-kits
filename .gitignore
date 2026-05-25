@@ -1,0 +1,9 @@
+.DS_Store
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# Dice Duel runtime artifacts can be regenerated and are large/noisy.
+dice_duel_lab/artifacts/logs/*.csv
+dice_duel_lab/artifacts/manifests/*.json
+dice_duel_lab/artifacts/*.txt
