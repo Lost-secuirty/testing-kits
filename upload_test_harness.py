@@ -314,8 +314,8 @@ class DecompressionBombChecker:
 
                     entry_bytes = bytes(entry_data)
 
-                    # Recurse into nested zips
-                    if info.filename.lower().endswith(".zip") and depth < self.max_depth:
+                    # Recurse into nested zips (depth guard at top of function)
+                    if info.filename.lower().endswith(".zip"):
                         nested = self.check_zip(entry_bytes, depth=depth + 1)
                         for k, v in nested.items():
                             result[f"{info.filename}/{k}"] = v
