@@ -1,9 +1,9 @@
 # Test Harness Inventory
 
-**Total: 36 harnesses | 2,927 harness tests | All green**
+**Total: 43 harnesses | 3,079 harness tests | All green**
 
 > Harnesses 20–24 were added after a 2020–2026 gap audit of failure modes most
-> commonly missed by AI-assisted / "vibe" coding: time/timezone correctness,
+> commonly missed by AI-assisted / “vibe” coding: time/timezone correctness,
 > idempotency & retry-safety, state-machine validity, numeric/money precision,
 > and authorization (broken access control). Same pure-stdlib pattern as the
 > rest.
@@ -24,8 +24,17 @@
 > complements the injection-focused Security harness #6. The audit also produced a
 > per-harness within-harness gap list and a project-hygiene backlog — see
 > `HARNESS_ROADMAP.md`.
+>
+> Harnesses 37–43 are pharmacy-domain-specific, added after auditing
+> `lostsoulfs/pharmacy-app`. Each fills a gap the 36 generic harnesses could not
+> cover: SM-2 spaced-repetition algorithm correctness and DB persistence,
+> clinical calculator safety oracles (patient-harm-critical domain), temporal
+> PIN lockout (time-windowed attempt counting), SQLite online backup/restore
+> lifecycle, rotating-capped audit log ring-buffer semantics, date-window expiry
+> alerting (calendar arithmetic + SQLite under a controllable clock), and
+> partial-fill two-phase ledger (open→resolve exactly-once contract).
 
-All harnesses are pure Python stdlib — zero external dependencies. Almost all include a mock HTTP server (the Database and CLI harnesses are the exceptions — SQLite- and subprocess-driven respectively, with no networked server), a CLI with `--self-test` mode, and a matching root-level `test_*.py` unittest suite. The Dice Duel reliability lab is isolated under `dice_duel_lab/` and is not part of generic harness discovery.
+All harnesses are pure Python stdlib — zero external dependencies. Almost all include a mock HTTP server (the Database, CLI, SRS, Backup-Restore, and Expiry-Window harnesses are the exceptions — SQLite- and subprocess-driven respectively, with no networked server), a CLI with `--self-test` mode, and a matching root-level `test_*.py` unittest suite. The Dice Duel reliability lab is isolated under `dice_duel_lab/` and is not part of generic harness discovery.
 
 ---
 
@@ -167,7 +176,7 @@ Defines invariants (properties) that must hold across thousands of random inputs
 **Tests:** `test_mutation_test_harness.py` — 47 tests
 **Port:** 18980
 
-Injects small code changes (mutants) into Python source code and checks if a test suite catches them. If tests still pass with a mutant, it "survived" — revealing a gap in test coverage. Six mutation operators work on source strings via regex: arithmetic swap, comparison swap, constant swap, boolean swap, return swap, and condition negation.
+Injects small code changes (mutants) into Python source code and checks if a test suite catches them. If tests still pass with a mutant, it “survived” — revealing a gap in test coverage. Six mutation operators work on source strings via regex: arithmetic swap, comparison swap, constant swap, boolean swap, return swap, and condition negation.
 
 **Key components:** Mutator (6 operators), MutationRunner, MutationReport, SourceMutator, MutationResult (KILLED/SURVIVED/ERROR/TIMEOUT), MockMutationHandler
 
@@ -275,7 +284,7 @@ Targets the single most common AI-code time bug class. Uses an injectable `Clock
 **Tests:** `test_idempotency_test_harness.py` — 66 tests
 **Port:** 19070
 
-Tests retry-safety: idempotency keys, an atomic check-and-set dedup store (PENDING/COMPLETED/FAILED + TTL + persisted response artifact), retry convergence (replay returns identical cached response, side-effect counter does not advance), concurrent duplicate suppression via `threading.Barrier` (exactly-once execution), and the "state-only store loses the response" failure mode. Classifies idempotent vs non-idempotent HTTP methods.
+Tests retry-safety: idempotency keys, an atomic check-and-set dedup store (PENDING/COMPLETED/FAILED + TTL + persisted response artifact), retry convergence (replay returns identical cached response, side-effect counter does not advance), concurrent duplicate suppression via `threading.Barrier` (exactly-once execution), and the “state-only store loses the response” failure mode. Classifies idempotent vs non-idempotent HTTP methods.
 
 **Key components:** IdempotencyStore, StateOnlyStore, KeyDedupTester, RetryConvergenceTester, ConcurrentDedupTester, InProgressTester, TTLTester, ResponsePersistenceTester, SafeMethodTester, ServerIdempotencyTester, MockIdempotencyHandler
 
@@ -299,7 +308,7 @@ Validates finite-state-machine correctness with a generic `StateMachine` (states
 **Tests:** `test_numeric_test_harness.py` — 102 tests
 **Port:** 19090
 
-Demonstrates and guards against silent numeric bugs. A `Money` helper on `decimal.Decimal` (configurable rounding, default banker's ROUND_HALF_EVEN, largest-remainder allocation) is the correct reference against which naive float math is shown to fail: 0.1+0.2≠0.3, accumulation drift, wrong-rounding, big+small precision loss (1e16+1==1e16), float overflow to inf, NaN comparison oddities, and `Fraction` exactness. Bill-splitting allocations sum back to the exact total with no lost cent.
+Demonstrates and guards against silent numeric bugs. A `Money` helper on `decimal.Decimal` (configurable rounding, default banker’s ROUND_HALF_EVEN, largest-remainder allocation) is the correct reference against which naive float math is shown to fail: 0.1+0.2≠0.3, accumulation drift, wrong-rounding, big+small precision loss (1e16+1==1e16), float overflow to inf, NaN comparison oddities, and `Fraction` exactness. Bill-splitting allocations sum back to the exact total with no lost cent.
 
 **Key components:** Money, FloatPitfallTester, RoundingModeTester, CurrencyTester, OverflowTester, PrecisionTester, ComparisonTester, ServerNumericTester, MockNumericHandler
 
@@ -311,7 +320,7 @@ Demonstrates and guards against silent numeric bugs. A `Money` helper on `decima
 **Tests:** `test_authz_test_harness.py` — 110 tests
 **Port:** 19100
 
-Focuses on authorization correctness (OWASP #1, distinct from the injection-focused Security harness). A `Role` enum (ANONYMOUS/USER/EDITOR/ADMIN) and `AccessControl` engine combine RBAC grants with per-resource ownership checks, deny-by-default, and revocation-overrides-grant. Asserts the full role×action matrix, vertical privilege escalation denials, horizontal/IDOR denials (user A cannot touch user B's object), least-privilege defaulting on forged/missing role claims, and token-scope defense-in-depth. The mock server enforces identical rules over HTTP via a `Bearer id:role:scopes` token, returning 200/401/403/404.
+Focuses on authorization correctness (OWASP #1, distinct from the injection-focused Security harness). A `Role` enum (ANONYMOUS/USER/EDITOR/ADMIN) and `AccessControl` engine combine RBAC grants with per-resource ownership checks, deny-by-default, and revocation-overrides-grant. Asserts the full role×action matrix, vertical privilege escalation denials, horizontal/IDOR denials (user A cannot touch user B’s object), least-privilege defaulting on forged/missing role claims, and token-scope defense-in-depth. The mock server enforces identical rules over HTTP via a `Bearer id:role:scopes` token, returning 200/401/403/404.
 
 **Key components:** Role, Permission, Resource, AccessControl, RBACTester, VerticalEscalationTester, HorizontalEscalationTester, PrivilegeBoundaryTester, TokenScopeTester, ServerAuthzTester, MockAuthzHandler
 
@@ -347,7 +356,7 @@ Targets the #1 AI-generated-code failure mode: happy-path-only code that skips e
 **Tests:** `test_cache_test_harness.py` — 118 tests
 **Port:** 19130
 
-Tests the classic silent-failure surface: caches that "work" in the demo but serve stale/wrong data under writes and concurrency. A `Cache` (injectable clock, per-entry TTL, max-size LRU) is the correct reference; a `BuggyCache` that skips invalidation proves the harness catches stale-after-write. Covers TTL expiry (just-before vs just-after via clock advance), invalidation-on-write, cache stampede / thundering herd (a `SingleFlightCache` computes a cold key exactly once via per-key lock while a `NaiveCache` races to N loader calls), negative caching with its own TTL, true LRU eviction (least-recently-*used*, recency updated on touch), and namespace key-collision isolation. CacheStats tracks hits/misses/evictions/ratio.
+Tests the classic silent-failure surface: caches that “work” in the demo but serve stale/wrong data under writes and concurrency. A `Cache` (injectable clock, per-entry TTL, max-size LRU) is the correct reference; a `BuggyCache` that skips invalidation proves the harness catches stale-after-write. Covers TTL expiry (just-before vs just-after via clock advance), invalidation-on-write, cache stampede / thundering herd (a `SingleFlightCache` computes a cold key exactly once via per-key lock while a `NaiveCache` races to N loader calls), negative caching with its own TTL, true LRU eviction (least-recently-*used*, recency updated on touch), and namespace key-collision isolation. CacheStats tracks hits/misses/evictions/ratio.
 
 **Key components:** Cache, BuggyCache, SingleFlightCache, NaiveCache, CacheEntry, CacheStats, CacheTestResult, CacheReport, MockCacheHandler
 
@@ -407,7 +416,7 @@ Tests pagination correctness over a mutable dataset. A thread-safe `BackingStore
 **Tests:** `test_a11y_test_harness.py` — 127 tests
 **Port:** 19180
 
-Static WCAG-flavored accessibility checks on HTML, parsed with stdlib `html.parser` (no bs4/lxml). Checkers: AltTextChecker (missing/empty/redundant alt), LabelChecker (orphan inputs/selects/textareas lacking `<label for>` / aria-label), HeadingOrderChecker (skipped levels, multiple h1), AriaChecker (invalid roles, missing required aria-* attrs, aria-hidden on focusable), ContrastChecker (WCAG sRGB linearization + relative-luminance + contrast-ratio math from scratch, AA 4.5:1 / 3:1 thresholds, parses #rrggbb/#rgb/rgb()), LangChecker, LinkTextChecker ("click here"/empty), TableChecker (data table missing th/scope). Explicitly static-only — catches ~30–40% of real a11y issues, no browser/runtime DOM.
+Static WCAG-flavored accessibility checks on HTML, parsed with stdlib `html.parser` (no bs4/lxml). Checkers: AltTextChecker (missing/empty/redundant alt), LabelChecker (orphan inputs/selects/textareas lacking `<label for>` / aria-label), HeadingOrderChecker (skipped levels, multiple h1), AriaChecker (invalid roles, missing required aria-* attrs, aria-hidden on focusable), ContrastChecker (WCAG sRGB linearization + relative-luminance + contrast-ratio math from scratch, AA 4.5:1 / 3:1 thresholds, parses #rrggbb/#rgb/rgb()), LangChecker, LinkTextChecker (“click here”/empty), TableChecker (data table missing th/scope). Explicitly static-only — catches ~30–40% of real a11y issues, no browser/runtime DOM.
 
 **Key components:** AltTextChecker, LabelChecker, HeadingOrderChecker, AriaChecker, ContrastChecker, LangChecker, LinkTextChecker, TableChecker, A11yIssue, A11yReport, MockA11yHandler
 
@@ -431,7 +440,7 @@ Tests AI-agent control-flow and tool-use correctness — the top 2026 agent fail
 **Tests:** `test_supplychain_test_harness.py` — 156 tests
 **Port:** 19200
 
-Tests dependency and build integrity against a mock package registry. PinningChecker flags floating/wildcard version specifiers; IntegrityChecker verifies artifact sha256 against the lockfile with constant-time compare and rejects tampered artifacts; LockfileDriftChecker detects manifest-vs-lock divergence; NonexistentPackageChecker catches hallucinated dependencies (the "slopsquatting" failure) and warns on Levenshtein-1 typosquats; ReproducibleBuildChecker builds the same inputs twice and detects nondeterminism (embedded timestamp); KnownVulnChecker matches locked versions against a mock advisory range; TransitiveDepChecker resolves the dep tree and finds pin gaps and phantom deps.
+Tests dependency and build integrity against a mock package registry. PinningChecker flags floating/wildcard version specifiers; IntegrityChecker verifies artifact sha256 against the lockfile with constant-time compare and rejects tampered artifacts; LockfileDriftChecker detects manifest-vs-lock divergence; NonexistentPackageChecker catches hallucinated dependencies (the “slopsquatting” failure) and warns on Levenshtein-1 typosquats; ReproducibleBuildChecker builds the same inputs twice and detects nondeterminism (embedded timestamp); KnownVulnChecker matches locked versions against a mock advisory range; TransitiveDepChecker resolves the dep tree and finds pin gaps and phantom deps.
 
 **Key components:** LockedDep, PinningChecker, IntegrityChecker, LockfileDriftChecker, NonexistentPackageChecker, ReproducibleBuildChecker, KnownVulnChecker, TransitiveDepChecker, SupplyChainReport, MockRegistryHandler
 
@@ -458,6 +467,90 @@ Tests file-ingestion safety — a classic silent-DoS / type-confusion surface. M
 Complements the injection-focused Security harness #6 by covering the OWASP-heavy classes most over-represented in AI-generated code, each with a vulnerable-vs-hardened demonstration. SSRFChecker blocks private/loopback/link-local/metadata ranges and `file://`/`gopher://` via the `ipaddress` module; DeserializationChecker detects dangerous pickle opcodes, PyYAML `!!python/object`, and Java serialization magic by signature (never unpickling untrusted data; insecure deserialization is ~2.74× more common in AI code); JWTChecker catches `alg:none`, HS/RS algorithm confusion, expired `exp`, and `iss`/`aud` mismatch with `hmac`-verified HS256; OpenRedirectChecker, MassAssignmentChecker (allow-list binder), and XXEChecker (DOCTYPE/ENTITY detection without resolution) round it out.
 
 **Key components:** SSRFChecker, DeserializationChecker, JWTChecker, OpenRedirectChecker, MassAssignmentChecker, XXEChecker, SecFinding, AppSecReport, MockAppSecHandler
+
+---
+
+## 37. Spaced-Repetition (SRS) Test Harness
+
+**File:** `srs_test_harness.py`
+**Tests:** `test_srs_test_harness.py` — 22 tests
+**Port:** none (SQLite backend; no networked mock server)
+
+Tests the SM-2 spaced-repetition algorithm used by the pharmacy PTCB-prep app: initial-state outputs, interval ladder (1→6→EF-scaled), incorrect-answer reset (interval=0, reps=0), ease floor at 1.3, monotonicity invariants (ease never decreases on correct, interval grows for reps≥2), convergence (20 correct cycles → interval > 100 days), ease upper bound (1000 correct → ease ≤ 105), junk-input fallback, and full DB round-trip (sm2_update → upsert → retrieve → values match). Also tests `calculate_weight`: overdue path (cap 50), not-yet-due path, monotone with increasing days_since, and legacy-NULL fallback. `MockMasteryStore` uses in-memory SQLite with thread-safe locking.
+
+**Key components:** `_sm2_update`, `_weight_from_stats`, `MockMasteryStore`, `SRSSimulator`, `run_all_scenarios`, `build_parser`
+
+---
+
+## 38. Clinical Calculator Test Harness
+
+**File:** `clinical_calc_test_harness.py`
+**Tests:** `test_clinical_calc_test_harness.py` — 28 tests
+**Port:** 19240
+
+Tests medical calculators as a **patient-safety-critical** domain, with independent reference implementations as oracles. BSA Mosteller: formula identity verified to 2 dp, plausibility bounds [0.10, 4.00] m², strict monotonicity in height and weight. Cockcroft-Gault CrCl: formula identity, female factor exactly 0.85×, strictly decreasing with age and SCr, age boundary (141 raises ValueError). Peds dose: dimensional consistency both legs. Days supply: floor division convention (qty=31, daily=3 → 10). Insulin: priming-waste subtracted (F-06 fix), 3650-day cap. Cross-calculator: doubling weight increases both BSA and CrCl.
+
+**Key components:** `_ref_bsa`, `_ref_crcl`, `calc_bsa_mosteller`, `calc_crcl`, `calc_peds_dose`, `calc_days_supply`, `calc_insulin_days`, `ClinicalCalcHandler`, `build_parser`
+
+---
+
+## 39. Temporal PIN Lockout Test Harness
+
+**File:** `lockout_test_harness.py`
+**Tests:** `test_lockout_test_harness.py` — 20 tests
+**Port:** 19250
+
+Tests time-windowed PIN lockout — a gap not covered by the AuthZ (RBAC) or Rate-Limiting (throughput) harnesses. `FakeClock` (injectable, `now()` + `advance()`) enables deterministic boundary testing without real sleeps. `LockoutManager` tracks `{username: {count, locked_since}}` with a `threading.Lock` and configurable `threshold`/`lockout_seconds`. Covers: first attempt never locked, THRESHOLD-1 still permitted, exact threshold locks, t=299s still locked (exclusive), t=300s released (inclusive), counter resets on expiry, successful attempt resets before threshold, per-user isolation (locking A does not affect B), ±1s boundary precision, `BuggyLockoutManager` (never unlocks) detected, configurable thresholds (1 and 5), and concurrent attempts → lockout fires exactly once. Mock HTTP server on 19250: `POST /login` → 200/401/423.
+
+**Key components:** `FakeClock`, `LockoutManager`, `BuggyLockoutManager`, `BuggyLockoutManager2`, `LockoutHandler`, `run_all_scenarios`, `build_parser`
+
+---
+
+## 40. Backup / Restore Lifecycle Test Harness
+
+**File:** `backup_restore_test_harness.py`
+**Tests:** `test_backup_restore_test_harness.py` — 20 tests
+**Port:** none (filesystem + SQLite; no networked mock server)
+
+Tests SQLite online backup/restore lifecycle — a gap not covered by the generic DB harness which tests only CRUD/transactions. Uses `sqlite3.Connection.backup()` (WAL-safe, transactional). Scenarios: magic bytes at offset 0, backup immediately readable with all source tables, data-faithful row comparison, timestamp-pattern filename, `db_list_backups()` newest-first, full round-trip (snapshot → mutate → restore → mutation gone), atomic restore (live DB readable after), non-existent path raises `OperationalError`/`OSError`, empty (schema-only) DB, NULL columns survive intact, WAL mode does not corrupt, unlistable directory returns `[]` (no raise), corrupt `.db` bytes raise on restore without overwriting live DB. All paths in `tempfile.mkdtemp()` isolated directories.
+
+**Key components:** `SQLITE_MAGIC`, `_make_test_db`, `_db_backup`, `_db_restore`, `_db_list_backups`, `BackupResult`, `run_all_scenarios`, `build_parser`
+
+---
+
+## 41. Rotating-Capped Audit Log Test Harness
+
+**File:** `auditlog_cap_test_harness.py`
+**Tests:** `test_auditlog_cap_test_harness.py` — 20 tests
+**Port:** 19270
+
+Tests a DB-backed ring-buffer audit log with a hard row cap — a gap not covered by the Logging harness (format/sensitive-data) or the DB harness (generic CRUD). `AuditLogStore` prunes with `DELETE FROM AuditLog WHERE id NOT IN (SELECT id ... ORDER BY id DESC LIMIT cap)`. Scenarios: single write, newest-first retrieval, no-premature-prune at cap-1, cap triggers at cap+1 (exactly cap rows remain), newest rows retained after prune, idempotent overflow (3×cap inserts → always exactly cap rows), `LowCapAuditLog` (cap=3) prunes at 4th insert, auto-increment IDs not reset after prune, text-filter correct after prune cycle, integration export (10 rows), export file header format (`Pharmacy Audit Log Export`, `Generated:`, `Total entries:`, `---`), concurrent writes (10 threads × 5 rows → ≤ cap, no missing rows), `BuggyAuditLog` (skips DELETE) detected. Mock HTTP server on 19270.
+
+**Key components:** `AuditLogStore`, `BuggyAuditLogStore`, `LowCapAuditLog`, `AuditLogHandler`, `run_all_scenarios`, `build_parser`
+
+---
+
+## 42. Date-Window Expiry Alerting Test Harness
+
+**File:** `expiry_window_test_harness.py`
+**Tests:** `test_expiry_window_test_harness.py` — 22 tests
+**Port:** 19280
+
+Tests inventory expiration alerting — calendar boundary semantics combined with SQLite queries under a controllable clock. A gap distinct from the DateTime harness (pure date math) and DB harness (generic CRUD): the combined pattern of calendar arithmetic + parameterized SQL under an injected `today` string. `ExpiryStore` (in-memory SQLite): `expiring(within_days, today)` uses `<= cutoff` (inclusive); `expired(today)` uses `< today` (strictly exclusive). `DateWindowOracle` is the stdlib-only reference. Scenarios: today+30 in 30-day window (inclusive), today+31 NOT in window, already-expired in `expiring`, today NOT in `expired`, yesterday in `expired`, leap day 2024-02-29 as expired on 2024-03-01, month-end rollover (Jan 31 + 1 = Feb 01), year-end rollover (Dec 31 + 1 = Jan 01 next year), ASC sort by exp_date then name, empty result, `within_days=0`, 365-day scan, LIKE wildcard escape (`%`, `_`, `\` chars). Mock HTTP server on 19280.
+
+**Key components:** `_like_escape`, `ExpiryStore`, `DateWindowOracle`, `ExpiryHandler`, `run_all_scenarios`, `build_parser`
+
+---
+
+## 43. Partial-Fill Two-Phase Ledger Test Harness
+
+**File:** `partial_fill_test_harness.py`
+**Tests:** `test_partial_fill_test_harness.py` — 20 tests
+**Port:** 19290
+
+Tests pharmacy partial dispensing — a domain-specific open→resolve two-phase lifecycle not covered by the Idempotency harness (which targets HTTP idempotency keys and response artifacts). `PartialFillStore` (in-memory SQLite, `threading.Lock`): `add()` returns id; `list_open()` filters `resolved=0` newest-first; `count_open()` counts only unresolved; `resolve(pid)` issues `UPDATE ... WHERE id=? AND resolved=0` and returns `rowcount > 0`. Scenarios: fields correct on open, resolved disappears from `list_open`, True on first resolve, False on second (idempotent), False on nonexistent id, count=5, count=3 after 2 resolved, newest-first ordering, resolving #2 of 3 leaves #1 and #3, `AuditCapture` logs exactly once on True, `qty_owed=99` persisted correctly, concurrent race (2 threads, exactly one True + one False). `BuggyPartialFillStore` (always True) and `BuggyPartialFillStore2` (no WHERE filter) prove both failure directions. Mock HTTP server on 19290: `POST /partials` → 201, `GET /partials` → 200, `POST /partials/{id}/resolve` → 200/409.
+
+**Key components:** `PartialFillStore`, `BuggyPartialFillStore`, `BuggyPartialFillStore2`, `AuditCapture`, `PartialFillHandler`, `run_all_scenarios`, `build_parser`
 
 ---
 
@@ -489,43 +582,48 @@ production packaging, or CLI expansion.
 
 ## Port Map
 
-| Port  | Harness                 |
-|-------|-------------------------|
-| 8080  | Stress                  |
-| 18900 | API / REST              |
-| 18910 | Web Scraper             |
-| 18920 | Security                |
-| 18930 | Chaos / Resilience      |
-| 18940 | Memory / Soak           |
-| 18950 | Concurrency             |
-| 18960 | Fuzz                    |
-| 18970 | Property-Based          |
-| 18980 | Mutation                |
-| 18990 | Regression & Snapshot   |
-| 19000 | Contract / Interface    |
-| 19010 | Serialization           |
-| 19020 | Configuration           |
-| 19030 | Logging / Observability |
-| 19040 | Network / Protocol      |
-| 19050 | Data Pipeline / ETL     |
-| 19060 | Time / DateTime         |
-| 19070 | Idempotency / Retry     |
-| 19080 | State Machine           |
-| 19090 | Numeric / Money         |
-| 19100 | Authorization           |
-| 19110 | LLM / AI-Feature Eval   |
-| 19120 | Error-Path / Negative   |
-| 19130 | Caching Correctness     |
-| 19140 | Rate Limiting           |
-| 19150 | Webhook Delivery        |
-| 19160 | i18n / Unicode          |
-| 19170 | Pagination / Cursor     |
-| 19180 | Accessibility (a11y)    |
-| 19190 | Agentic AI / Tools      |
-| 19200 | Supply-Chain / Repro    |
-| 19210 | File Upload / Bomb      |
-| 19220 | App-Security            |
-| —     | Database, CLI — no networked mock server (SQLite / subprocess) |
+| Port  | Harness                        |
+|-------|--------------------------------|
+| 8080  | Stress                         |
+| 18900 | API / REST                     |
+| 18910 | Web Scraper                    |
+| 18920 | Security                       |
+| 18930 | Chaos / Resilience             |
+| 18940 | Memory / Soak                  |
+| 18950 | Concurrency                    |
+| 18960 | Fuzz                           |
+| 18970 | Property-Based                 |
+| 18980 | Mutation                       |
+| 18990 | Regression & Snapshot          |
+| 19000 | Contract / Interface           |
+| 19010 | Serialization                  |
+| 19020 | Configuration                  |
+| 19030 | Logging / Observability        |
+| 19040 | Network / Protocol             |
+| 19050 | Data Pipeline / ETL            |
+| 19060 | Time / DateTime                |
+| 19070 | Idempotency / Retry            |
+| 19080 | State Machine                  |
+| 19090 | Numeric / Money                |
+| 19100 | Authorization                  |
+| 19110 | LLM / AI-Feature Eval          |
+| 19120 | Error-Path / Negative          |
+| 19130 | Caching Correctness            |
+| 19140 | Rate Limiting                  |
+| 19150 | Webhook Delivery               |
+| 19160 | i18n / Unicode                 |
+| 19170 | Pagination / Cursor            |
+| 19180 | Accessibility (a11y)           |
+| 19190 | Agentic AI / Tools             |
+| 19200 | Supply-Chain / Repro           |
+| 19210 | File Upload / Bomb             |
+| 19220 | App-Security                   |
+| 19240 | Clinical Calculators           |
+| 19250 | Temporal PIN Lockout           |
+| 19270 | Rotating Audit Log             |
+| 19280 | Date-Window Expiry             |
+| 19290 | Partial-Fill Ledger            |
+| —     | Database, CLI, SRS, Backup-Restore, Expiry-Window — no networked mock server (SQLite / subprocess) |
 
 ## Running Everything
 
@@ -533,7 +631,7 @@ production packaging, or CLI expansion.
 python -m unittest discover -s . -p "test_*.py"
 ```
 
-**Result: 36 harnesses, 2,927 harness tests, all passing.** Dice Duel is isolated
+**Result: 43 harnesses, 3,079 harness tests, all passing.** Dice Duel is isolated
 under `dice_duel_lab/` and should be run with its own lab sweep instead of root
 discovery.
 
@@ -545,6 +643,10 @@ discovery.
 > - Batch 2 (#31–36, 761 tests): `python3 -m unittest test_pagination_test_harness
 >   test_a11y_test_harness test_agentic_test_harness test_supplychain_test_harness
 >   test_upload_test_harness test_appsec_test_harness` (≈6s).
+> - Batch 3 (#37–43, 152 tests): `python3 -m unittest test_srs_test_harness
+>   test_clinical_calc_test_harness test_lockout_test_harness
+>   test_backup_restore_test_harness test_auditlog_cap_test_harness
+>   test_expiry_window_test_harness test_partial_fill_test_harness` (≈3s).
 >
 > All new harnesses are stdlib-only and each `--self-test` exits 0.
 
