@@ -51,22 +51,28 @@ def rewrite_text(text: str, index: dict[str, str]) -> tuple[str, int]:
 
     def replace_from(match: re.Match) -> str:
         nonlocal count
-        flat = match.group(1)
+        indent, flat = match.group(1), match.group(2)
         if flat in index:
             count += 1
-            return f"from {index[flat]} import"
+            return f"{indent}from {index[flat]} import"
         return match.group(0)
 
     def replace_import(match: re.Match) -> str:
         nonlocal count
-        flat = match.group(1)
+        indent, flat = match.group(1), match.group(2)
         if flat in index:
             count += 1
-            return f"import {index[flat]} as {flat}"
+            return f"{indent}import {index[flat]} as {flat}"
         return match.group(0)
 
-    text = re.sub(r"^from\s+([a-zA-Z_][a-zA-Z_0-9]*)\s+import\b", replace_from, text, flags=re.M)
-    text = re.sub(r"^import\s+([a-zA-Z_][a-zA-Z_0-9]*)\s*$", replace_import, text, flags=re.M)
+    text = re.sub(
+        r"^([ \t]*)from\s+([a-zA-Z_][a-zA-Z_0-9]*)\s+import\b",
+        replace_from, text, flags=re.M,
+    )
+    text = re.sub(
+        r"^([ \t]*)import\s+([a-zA-Z_][a-zA-Z_0-9]*)\s*$",
+        replace_import, text, flags=re.M,
+    )
     return text, count
 
 
