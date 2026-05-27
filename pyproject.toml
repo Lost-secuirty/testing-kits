@@ -1,0 +1,21 @@
+[project]
+name = "testing-kits"
+version = "0.2.0"
+description = "Pure-stdlib Python testing-harness collection. Zero runtime dependencies."
+requires-python = ">=3.10"
+readme = "README.md"
+
+[project.optional-dependencies]
+dev = ["ruff"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["B011"]
+"experiments/**/*.py" = ["F401", "F841"]
