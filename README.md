@@ -2,7 +2,7 @@
 
 Pure-Python stdlib testing-harness collection. **Zero runtime dependencies.**
 
-62 harnesses across reliability, security, AI, and pharmacy-domain testing,
+67 harnesses across reliability, security, AI, and pharmacy-domain testing,
 each as a single self-contained file with a paired unittest suite and a
 built-in `--self-test` mode.
 

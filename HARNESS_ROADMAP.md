@@ -66,28 +66,33 @@ the last stranded-work loose end.
 
 ---
 
+## Batch 6 — shipped 2026-05-29
+
+5 harnesses, grounding the entire "Next-batch candidates" deferred list (gRPC,
+browser/E2E, IoT, drift detection, multi-turn agent eval). Research-grounded
+against 2024–2026 sources (gRPC deadline postmortems, MQTT 5.0 QoS semantics,
+Playwright/Cypress flakiness studies, Evidently/Arize/WhyLabs drift guides,
+τ-bench / "LLMs Get Lost in Multi-Turn"). All in-process (no ports).
+
+| # | Path | Direction | Self-test | Unit tests |
+|---|---|---|---|---|
+| 63 | `harnesses/ai/agent_eval_test_harness.py` | AI/LLM (multi-turn agent eval) | 23 | 20 |
+| 64 | `harnesses/core/iot_telemetry_test_harness.py` | New vertical (IoT/telemetry) | 24 | 22 |
+| 65 | `harnesses/core/grpc_contract_test_harness.py` | Gap-fill (RPC contract) | 23 | 26 |
+| 66 | `harnesses/core/browser_e2e_test_harness.py` | Gap-fill (E2E surrogate) | 22 | 23 |
+| 67 | `harnesses/ai/drift_detection_test_harness.py` | AI/LLM (model/embedding drift) | 24 | 17 |
+
+116 self-test scenarios + 108 unit tests. Three in `core`, two in `ai`.
+Self-contained per repo convention (no cross-harness imports; local
+`FakeClock`/`MsClock`/`EventLoop` and hand-rolled drift math).
+
+---
+
 ## Next-batch candidates
 
-Deferred; pick from these when next adding harnesses.
-
-### Gap-fill / general-purpose
-
-- **gRPC contract** — proto round-trip, deadline propagation, stream
-  half-close semantics, status-code coverage.
-- **browser/E2E surrogate** — headless-browser-free DOM-event scripting
-  against a mock server, focus management, form-state regressions.
-
-### New verticals
-
-- **IoT / telemetry** — out-of-order MQTT-like ingest, duplicate dedupe,
-  device-identity rotation, store-and-forward replay.
-
-### AI/LLM deeper
-
-- **drift detection** — embedding-space drift between model versions,
-  prompt-template drift, output-distribution drift.
-- **multi-turn agent eval** — task-completion across N turns, tool-use
-  recovery from intermediate errors, state-leak between turns.
+The previous deferred list (gRPC, browser/E2E, IoT, drift detection, multi-turn
+agent eval) was fully landed in batch 6 — the list is now empty. Add new
+candidates here as they surface.
 
 ---
 
@@ -110,11 +115,6 @@ is a known thinness that could be filled without a whole new harness.
 - `ai/agentic` — tool-call safety; no system-prompt-leakage probes
   (subsumed by `ai/prompt_injection`).
 - `pharmacy/srs` — SM-2 correctness only; no multi-user-leak / privacy surface.
-- `core/numeric` — `PrecisionTester.float_inexact_sum()` sums to *exactly* 1.0 on
-  CPython, so `test_float_inexact_sum_not_exactly_one` and the precision-endpoint
-  test assert inexactness and fail (2 unit tests). Pre-existing; fix by choosing
-  genuinely-inexact operands (e.g. `0.1 + 0.2`) or relaxing the assertion. No
-  `--self-test` impact.
 - (Add entries here as `make selftest` reports surface them.)
 
 ### Resolved 2026-05-29 — STATUS.md now 59/59 green (self-test 138s → 50s)
@@ -130,6 +130,12 @@ is a known thinness that could be filled without a whole new harness.
   `ai/prompt_injection` + `pharmacy/partial_fill` reconfigure stdout to UTF-8 at
   import; `core/numeric` `--self-test` returns immediately instead of timing out
   (6a55f16, 13543d8).
+- **`core/numeric` float inexactness on Python 3.12** — `float_inexact_sum()` used
+  the built-in `sum()`, which CPython 3.12 special-cases with Neumaier compensated
+  summation, yielding exactly 1.0 and failing `test_float_inexact_sum_not_exactly_one`
+  + the precision endpoint on the 3.12 CI leg (3.10/3.11 were unaffected). Switched
+  to a plain `+=` accumulation loop, which is inexact on every CPython. Landed with
+  the batch-6 PR.
 
 ---
 

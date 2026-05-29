@@ -704,6 +704,66 @@ the batch-4 branch (port reassigned 19310 → 19410).
 
 ---
 
+## 63. Multi-Turn Agent Eval Test Harness
+
+**File:** `harnesses/ai/agent_eval_test_harness.py`
+**Tests:** `tests/ai/test_agent_eval_test_harness.py` — 20 tests
+**Port:** none (in-process)
+
+Scores fixed scripted multi-turn agent transcripts against annotated goal states and a mock tool schema — the failure modes single-turn graders miss. The oracle checks task completion (final state == goal), tool-call validity (known name + required args + arg types), hallucinated-tool detection, error recovery (a tool error must be followed by a valid retry or escalation, not a fabricated claim), looping (no-progress repeat rate), instruction retention (an early `forbid:` constraint obeyed through later turns), premature-success claims, and unsafe actions (a dangerous tool called without confirmation). Four good transcripts meet all floors; six bad ones each trip one invariant. Seven buggy graders — claim-trusting, name-only validity, no-hallucination-check, recovery-blind, loop-ignoring, constraint-amnesiac, confirmation-blind — each miss one failure class the oracle catches, via injected scoring functions. Floors: resolved ≥ 0.90, validity ≥ 0.95, recovery ≥ 0.90, retention ≥ 0.95, loop ≤ 0.20; zero hallucinated/premature/unsafe. 23 self-test scenarios. Distinct from `ai/agentic` (single-turn server-style tool-call fidelity).
+
+**Key components:** `ToolSig`, `ToolCall`, `ToolResult`, `Turn`, `Transcript`, `AgentEvalConfig`, `AgentEvalReport`, `evaluate`, `GOOD_TRANSCRIPTS`, `BAD_TRANSCRIPTS`
+
+---
+
+## 64. IoT / Telemetry Ingest Test Harness
+
+**File:** `harnesses/core/iot_telemetry_test_harness.py`
+**Tests:** `tests/core/test_iot_telemetry_test_harness.py` — 22 tests
+**Port:** none (in-process)
+
+Models an MQTT-like telemetry ingest path as pure data with an injectable `FakeClock` for server-ingest time. The oracle `ingest()` enforces QoS semantics (QoS-2 exactly-once, QoS-1 at-least-once-deduped, QoS-0 best-effort), per-topic re-sequencing by `seq` (final order strictly increasing), idempotency-key dedupe, clock-skew handling (flag > 60s, reject > 1h, canonical timestamp = server ingest, skewed event-time excluded from windowing), watermark/allowed-lateness windowing, retained-latest-only, persistent-session replay on reconnect, and last-will on abnormal disconnect. Eight buggy ingesters each break one invariant and are caught: QoS-2 at-least-once, no-resequence, no-dedupe, device-clock-truster, non-persistent-session, retain-all, no-watermark, no-last-will. 24 self-test scenarios. Distinct from `core/queue` (broker delivery) and `core/clock_skew` (TTL/LWW).
+
+**Key components:** `Message`, `Record`, `DeviceSession`, `IotReport`, `IngestResult`, `IotConfig`, `ingest`, `reconnect`, `on_disconnect`, `STREAM`, `SESSIONS`
+
+---
+
+## 65. gRPC / Proto Contract Test Harness
+
+**File:** `harnesses/core/grpc_contract_test_harness.py`
+**Tests:** `tests/core/test_grpc_contract_test_harness.py` — 26 tests
+**Port:** none (in-process)
+
+Models protos and a mock gRPC service as pure data (no grpc/protobuf libs) and audits the contract rules LLM-written glue breaks. The oracle enforces proto-evolution safety (reserve removed field numbers, no number reuse, no wire-type change on kept fields), open-vs-closed enum unknown-value handling, deadline propagation (downstream ≤ original − elapsed, ±5 ms via a `MsClock`), streaming half-close (handler stops emitting after CloseSend), status-code correctness (RESOURCE_EXHAUSTED vs PERMISSION_DENIED across the 17 canonical codes), metadata propagation (`x-request-id` survives a hop), send/recv size-limit symmetry, and unary idempotency (exactly one side effect on retry). Nine buggy implementations each break one rule via injected components, surfaced as per-class violation counters with a `meets_contract()` predicate. 23 self-test scenarios.
+
+**Key components:** `FieldDescriptor`, `MessageDescriptor`, `EnumDescriptor`, `RpcSpec`, `WireField`, `STATUS_CODES`, `validate_evolution`, `roundtrip`, `audit`, `GrpcReport`, `MsClock`
+
+---
+
+## 66. Browser / E2E Surrogate Test Harness
+
+**File:** `harnesses/core/browser_e2e_test_harness.py`
+**Tests:** `tests/core/test_browser_e2e_test_harness.py` — 23 tests
+**Port:** none (in-process)
+
+A deterministic DOM/E2E surrogate (no real browser, no asyncio): the DOM is immutable data, re-render is a pure tree mutation (`apply_mutation`), and async work is a manually-drained FIFO `EventLoop`. The oracle re-resolves selectors against the current DOM before clicking (no stale handle), asserts only after the loop settles, enforces event order (focus < input, change < click), raises `UnmockedRequestError` on unmocked requests, detects hydration structural mismatches (server vs client preorder), and prefers role/testid selectors over brittle absolute XPath. Six buggy implementations reproduce one flake each: stale-handle clicker, eager asserter, reordered event emitter, silent-404 fetch, hydration-blind renderer, brittle-XPath selector. 22 self-test scenarios. Complements `core/a11y` (accessibility tree) without overlapping it.
+
+**Key components:** `Node`, `Dom`, `Selector`, `MockResponse`, `EventLoop`, `UnmockedRequestError`, `PrematureAssertionError`, `apply_mutation`, `resolve`, `hydration_diff`, `audit`, `E2EReport`
+
+---
+
+## 67. Model / Embedding Drift Detection Test Harness
+
+**File:** `harnesses/ai/drift_detection_test_harness.py`
+**Tests:** `tests/ai/test_drift_detection_test_harness.py` — 17 tests
+**Port:** none (in-process)
+
+Computes drift metrics by hand over fixed float fixtures (no numpy): PSI with an epsilon floor, KL and Jensen-Shannon divergence, Hellinger distance, embedding-centroid Euclidean displacement, query-document cosine-similarity drop, Spearman rank correlation of top-k neighbors, neighborhood churn, and query/index model-version mismatch. The oracle trips every alert on a planted-drift case and stays silent on a stable case. Seven buggy detectors each miss real drift or false-alarm on stable data: PSI with no epsilon floor (drops empty-bin terms), KL with swapped arguments, an averaged (washed-out) centroid distance, an unnormalized cosine, set overlap in place of a rank correlation, version-blind, and a stable-data false alarmer. Thresholds: PSI > 0.25, KL/JS > 0.20, Hellinger > 0.30, centroid > 0.50, cosine drop > 0.10, Spearman < 0.70, churn > 0.20. 24 self-test scenarios. Distinct from `ai/rag_eval` (retrieval/citation quality) and `ai/llm_eval` (answer graders).
+
+**Key components:** `DriftCase`, `DriftReport`, `psi`, `kl_div`, `js_div`, `hellinger`, `centroid_distance`, `cosine_mean_drop`, `spearman`, `neighborhood_churn`, `compute_drift`
+
+---
+
 ## Separate Lab: Dice Duel Reliability Lab
 
 **Folder:** `dice_duel_lab/`
@@ -779,7 +839,7 @@ production packaging, or CLI expansion.
 | 19330 | Circuit Breaker                            |
 | 19400 | JWT (HS256) Verification                   |
 | 19410 | PII / PHI Redaction                        |
-| —     | Database, CLI, SRS, Backup-Restore, Expiry-Window, Tracing, Queue, RAG Eval, and the #44–53 research-pass harnesses — no networked mock server (SQLite / subprocess / in-process oracle) |
+| —     | Database, CLI, SRS, Backup-Restore, Expiry-Window, Tracing, Queue, RAG Eval, the #44–53 research-pass harnesses, and all of batch 6 (Agent Eval, IoT Telemetry, gRPC Contract, Browser/E2E, Drift Detection) — no networked mock server (SQLite / subprocess / in-process oracle) |
 
 ## Running Everything
 
@@ -788,10 +848,11 @@ make test          # python -m unittest discover -s tests -t . -p "test_*.py"
 make report        # regenerate STATUS.md (per-harness self-test status)
 ```
 
-**59 harnesses.** Live per-harness self-test status is in `STATUS.md`
-(auto-generated by `make report`). Most harnesses are green; known pre-existing
-issues (`pharmacy/srs`, `core/hermeticity`, and Windows-only portability gaps in
-`prompt_injection`/`partial_fill`/`memory`) are tracked in `HARNESS_ROADMAP.md`.
+**67 harnesses.** Live per-harness self-test status is in `STATUS.md`
+(auto-generated by `make report`). The earlier `pharmacy/srs`, `core/hermeticity`,
+and Windows portability (`prompt_injection`/`partial_fill`/`memory`) issues were
+resolved in the 2026-05-29 fix-status pass (see `HARNESS_ROADMAP.md` →
+"Resolved 2026-05-29"); any remaining per-harness gaps are tracked there.
 Dice Duel is isolated under `dice_duel_lab/` and runs via its own lab sweep
 instead of root discovery.
 

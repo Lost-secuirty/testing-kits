@@ -382,8 +382,16 @@ class PrecisionTester:
 
     @staticmethod
     def float_inexact_sum() -> dict:
-        """Sum of 0.1 ten times using float is not exactly 1.0."""
-        total = sum(0.1 for _ in range(10))
+        """Accumulating 0.1 ten times with plain float addition is not exactly 1.0.
+
+        Uses an explicit ``+=`` loop rather than the built-in ``sum()``: CPython
+        3.12+ special-cases ``sum()`` of floats with Neumaier compensated
+        summation, which would yield exactly 1.0 and mask the imprecision this
+        harness demonstrates. Plain accumulation is inexact on every CPython.
+        """
+        total = 0.0
+        for _ in range(10):
+            total += 0.1
         return {
             "result": total,
             "equals_one": total == 1.0,
