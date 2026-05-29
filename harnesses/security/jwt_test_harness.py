@@ -1,0 +1,413 @@
+#!/usr/bin/env python3
+"""jwt_test_harness.py â€” JWT (HS256) Verification Harness (2026)
+================================================================================
+Pure-Python (ZERO dependencies) harness for testing JSON Web Token signing and,
+more importantly, *verification* â€” including the classic auth-bypass attacks.
+
+Implements HS256 only (HMAC-SHA256) using hmac/hashlib/base64 from stdlib.
+
+Hotspots / attacks exercised:
+  - alg="none": an attacker strips the signature and sets alg=none. MUST reject.
+  - alg confusion: token header advertises an algorithm the verifier did not
+    ask for. MUST reject (we only accept the algorithm passed to verify()).
+  - Tampered payload: any change to header/payload invalidates the signature.
+  - exp / nbf / iat with leeway and an INJECTED `now` for deterministic tests.
+  - Constant-time signature comparison (hmac.compare_digest).
+  - Required-claim enforcement (e.g. must contain "sub").
+
+A failed verify() never raises on attacker-controlled input; it returns a
+VerifyResult(ok=False, reason=...) so callers branch on a value, not a stack
+trace.
+
+Port: 19400
+
+Usage:
+  python jwt_test_harness.py --self-test
+  python jwt_test_harness.py --mock-server --port 19400
+  python jwt_test_harness.py --self-test --verbose
+"""
+
+import argparse
+import base64
+import hashlib
+import hmac
+import json
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse, parse_qs
+
+
+# ============================================================
+# BASE64URL
+# ============================================================
+
+def b64url_encode(data):
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def b64url_decode(s):
+    if isinstance(s, str):
+        s = s.encode("ascii")
+    pad = (-len(s)) % 4
+    return base64.urlsafe_b64decode(s + b"=" * pad)
+
+
+# ============================================================
+# SIGN / ENCODE
+# ============================================================
+
+def _sign_hs256(signing_input, key):
+    if isinstance(key, str):
+        key = key.encode("utf-8")
+    return hmac.new(key, signing_input, hashlib.sha256).digest()
+
+
+def encode(payload, key, alg="HS256", header_extra=None):
+    """Produce a signed JWT string. alg='none' produces an unsigned token
+    (for negative testing only)."""
+    header = {"alg": alg, "typ": "JWT"}
+    if header_extra:
+        header.update(header_extra)
+    h = b64url_encode(json.dumps(header, separators=(",", ":"), sort_keys=True))
+    p = b64url_encode(json.dumps(payload, separators=(",", ":"), sort_keys=True))
+    signing_input = f"{h}.{p}".encode("ascii")
+    if alg == "none":
+        return f"{h}.{p}."
+    if alg != "HS256":
+        raise ValueError(f"unsupported alg for encode: {alg}")
+    sig = _sign_hs256(signing_input, key)
+    return f"{h}.{p}.{b64url_encode(sig)}"
+
+
+# ============================================================
+# VERIFY
+# ============================================================
+
+class VerifyResult:
+    def __init__(self, ok, reason="", payload=None):
+        self.ok = ok
+        self.reason = reason
+        self.payload = payload
+
+    def __repr__(self):
+        return f"VerifyResult(ok={self.ok}, reason={self.reason!r})"
+
+
+def verify(token, key, now, algorithms=("HS256",), leeway=0,
+           required_claims=()):
+    """Verify a JWT. Returns VerifyResult; never raises on bad input.
+
+    `now` is an integer epoch time (injected for determinism).
+    `algorithms` is the allow-list the *server* trusts â€” the token header
+    cannot widen it.
+    """
+    if not isinstance(token, str):
+        return VerifyResult(False, "token-not-string")
+    parts = token.split(".")
+    if len(parts) != 3:
+        return VerifyResult(False, "malformed-token")
+    h_b64, p_b64, sig_b64 = parts
+
+    # Parse header
+    try:
+        header = json.loads(b64url_decode(h_b64))
+    except Exception:
+        return VerifyResult(False, "bad-header")
+    alg = header.get("alg")
+
+    # --- attack guards ---
+    if alg == "none":
+        return VerifyResult(False, "alg-none-rejected")
+    if alg not in algorithms:
+        return VerifyResult(False, f"alg-not-allowed:{alg}")
+    if alg != "HS256":
+        return VerifyResult(False, f"unsupported-alg:{alg}")
+    if sig_b64 == "":
+        return VerifyResult(False, "empty-signature")
+
+    # --- signature check (constant time) ---
+    signing_input = f"{h_b64}.{p_b64}".encode("ascii")
+    expected = _sign_hs256(signing_input, key)
+    try:
+        provided = b64url_decode(sig_b64)
+    except Exception:
+        return VerifyResult(False, "bad-signature-encoding")
+    if not hmac.compare_digest(expected, provided):
+        return VerifyResult(False, "signature-mismatch")
+
+    # --- payload + claims ---
+    try:
+        payload = json.loads(b64url_decode(p_b64))
+    except Exception:
+        return VerifyResult(False, "bad-payload")
+    if not isinstance(payload, dict):
+        return VerifyResult(False, "payload-not-object")
+
+    if "exp" in payload and now > _as_int(payload["exp"]) + leeway:
+        return VerifyResult(False, "token-expired")
+    if "nbf" in payload and now + leeway < _as_int(payload["nbf"]):
+        return VerifyResult(False, "token-not-yet-valid")
+    if "iat" in payload and now + leeway < _as_int(payload["iat"]):
+        return VerifyResult(False, "iat-in-future")
+
+    for claim in required_claims:
+        if claim not in payload:
+            return VerifyResult(False, f"missing-claim:{claim}")
+
+    return VerifyResult(True, "ok", payload)
+
+
+def _as_int(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
+
+
+# ============================================================
+# ATTACK HELPERS (build malicious tokens for negative tests)
+# ============================================================
+
+def forge_alg_none(token):
+    """Take a valid token, rewrite its header to alg=none, drop the signature."""
+    h_b64, p_b64, _ = token.split(".")
+    header = json.loads(b64url_decode(h_b64))
+    header["alg"] = "none"
+    new_h = b64url_encode(json.dumps(header, separators=(",", ":"), sort_keys=True))
+    return f"{new_h}.{p_b64}."
+
+
+def forge_alg_swap(token, fake_alg="HS384"):
+    """Advertise a different algorithm in the header, keep the old signature."""
+    h_b64, p_b64, sig = token.split(".")
+    header = json.loads(b64url_decode(h_b64))
+    header["alg"] = fake_alg
+    new_h = b64url_encode(json.dumps(header, separators=(",", ":"), sort_keys=True))
+    return f"{new_h}.{p_b64}.{sig}"
+
+
+def tamper_payload(token, mutate):
+    """Apply mutate(payload_dict) and re-encode WITHOUT re-signing."""
+    h_b64, p_b64, sig = token.split(".")
+    payload = json.loads(b64url_decode(p_b64))
+    mutate(payload)
+    new_p = b64url_encode(json.dumps(payload, separators=(",", ":"), sort_keys=True))
+    return f"{h_b64}.{new_p}.{sig}"
+
+
+# ============================================================
+# MOCK HTTP SERVER
+# ============================================================
+
+class JwtHandler(BaseHTTPRequestHandler):
+    key = "test-secret-key"
+    now = 1_700_000_000
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        if parsed.path == "/issue":
+            sub = params.get("sub", ["alice"])[0]
+            ttl = int(params.get("ttl", ["3600"])[0])
+            tok = encode({"sub": sub, "iat": JwtHandler.now,
+                          "exp": JwtHandler.now + ttl}, JwtHandler.key)
+            self._json({"token": tok})
+            return
+        if parsed.path == "/verify":
+            tok = params.get("token", [""])[0]
+            res = verify(tok, JwtHandler.key, now=JwtHandler.now,
+                         required_claims=("sub",))
+            self._json({"ok": res.ok, "reason": res.reason},
+                       code=200 if res.ok else 401)
+            return
+        self.send_response(404)
+        self.end_headers()
+
+    def _json(self, obj, code=200):
+        resp = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(resp)))
+        self.end_headers()
+        self.wfile.write(resp)
+
+    def log_message(self, fmt, *args):
+        pass
+
+
+def start_mock_server(port=19400):
+    server = ThreadingHTTPServer(("127.0.0.1", port), JwtHandler)
+    server.daemon_threads = True
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    return server
+
+
+# ============================================================
+# TEST SCENARIOS
+# ============================================================
+
+NOW = 1_700_000_000
+KEY = "correct-horse-battery-staple"
+
+
+class JwtTestResult:
+    def __init__(self, name, passed, detail=""):
+        self.name = name
+        self.passed = passed
+        self.detail = detail
+
+    def __str__(self):
+        status = "PASS" if self.passed else "FAIL"
+        msg = f"  [{status}] {self.name}"
+        if not self.passed and self.detail:
+            msg += f"\n        {self.detail}"
+        return msg
+
+
+def run_all_scenarios(verbose=False):
+    results = []
+
+    def check(name, cond, detail=""):
+        r = JwtTestResult(name, bool(cond), detail)
+        results.append(r)
+        if verbose:
+            print(r)
+        return cond
+
+    def fresh(**over):
+        payload = {"sub": "alice", "iat": NOW, "exp": NOW + 3600}
+        payload.update(over)
+        return encode(payload, KEY)
+
+    # 1. Valid token verifies
+    res = verify(fresh(), KEY, now=NOW, required_claims=("sub",))
+    check("1. Valid token verifies", res.ok and res.payload["sub"] == "alice", res.reason)
+
+    # 2. Wrong key rejected
+    res = verify(fresh(), "wrong-key", now=NOW)
+    check("2. Wrong signing key rejected",
+          not res.ok and res.reason == "signature-mismatch", res.reason)
+
+    # 3. alg=none attack rejected
+    res = verify(forge_alg_none(fresh()), KEY, now=NOW)
+    check("3. alg=none attack rejected",
+          not res.ok and res.reason == "alg-none-rejected", res.reason)
+
+    # 4. alg-swap (not in allow-list) rejected
+    res = verify(forge_alg_swap(fresh(), "HS384"), KEY, now=NOW)
+    check("4. alg swap to HS384 rejected",
+          not res.ok and res.reason.startswith("alg-not-allowed"), res.reason)
+
+    # 5. Tampered payload (privilege escalation) rejected
+    forged = tamper_payload(fresh(), lambda p: p.update({"sub": "admin"}))
+    res = verify(forged, KEY, now=NOW)
+    check("5. Tampered sub->admin rejected",
+          not res.ok and res.reason == "signature-mismatch", res.reason)
+
+    # 6. Expired token rejected
+    res = verify(fresh(exp=NOW - 1), KEY, now=NOW)
+    check("6. Expired token rejected",
+          not res.ok and res.reason == "token-expired", res.reason)
+
+    # 7. Expiry honors leeway
+    res = verify(fresh(exp=NOW - 5), KEY, now=NOW, leeway=10)
+    check("7. Expiry within leeway accepted", res.ok, res.reason)
+
+    # 8. nbf in the future rejected
+    res = verify(fresh(nbf=NOW + 100), KEY, now=NOW)
+    check("8. not-before in future rejected",
+          not res.ok and res.reason == "token-not-yet-valid", res.reason)
+
+    # 9. iat in the future rejected
+    res = verify(fresh(iat=NOW + 100), KEY, now=NOW)
+    check("9. issued-at in future rejected",
+          not res.ok and res.reason == "iat-in-future", res.reason)
+
+    # 10. Missing required claim rejected
+    tok = encode({"iat": NOW, "exp": NOW + 60}, KEY)  # no sub
+    res = verify(tok, KEY, now=NOW, required_claims=("sub",))
+    check("10. Missing required claim 'sub' rejected",
+          not res.ok and res.reason == "missing-claim:sub", res.reason)
+
+    # 11. Malformed token (2 segments) rejected
+    res = verify("aaa.bbb", KEY, now=NOW)
+    check("11. Malformed 2-part token rejected",
+          not res.ok and res.reason == "malformed-token", res.reason)
+
+    # 12. Empty signature segment rejected
+    h_b64, p_b64, _ = fresh().split(".")
+    res = verify(f"{h_b64}.{p_b64}.", KEY, now=NOW)
+    check("12. Empty signature rejected",
+          not res.ok and res.reason == "empty-signature", res.reason)
+
+    # 13. Roundtrip base64url of binary-ish payload
+    tok = encode({"sub": "u", "data": "a/b+c=", "exp": NOW + 10, "iat": NOW}, KEY)
+    res = verify(tok, KEY, now=NOW)
+    check("13. base64url roundtrip ok",
+          res.ok and res.payload["data"] == "a/b+c=", res.reason)
+
+    # 14. Non-string token handled gracefully
+    res = verify(None, KEY, now=NOW)
+    check("14. None token handled (no crash)",
+          not res.ok and res.reason == "token-not-string", res.reason)
+
+    return results
+
+
+# ============================================================
+# CLI
+# ============================================================
+
+def build_parser():
+    p = argparse.ArgumentParser(
+        prog="jwt_test_harness",
+        description="JWT (HS256) verification harness (pure stdlib)",
+    )
+    p.add_argument("--self-test", action="store_true",
+                   help="Run all scenarios and exit 0 if all pass")
+    p.add_argument("--mock-server", action="store_true",
+                   help="Start mock HTTP server only (/issue, /verify)")
+    p.add_argument("--port", type=int, default=19400,
+                   help="Mock server port (default: 19400)")
+    p.add_argument("--verbose", "-v", action="store_true")
+    return p
+
+
+def main():
+    import time as _time
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if args.mock_server:
+        server = start_mock_server(args.port)
+        print(f"  JWT mock server on http://127.0.0.1:{args.port} â€” Ctrl+C to stop")
+        try:
+            while True:
+                _time.sleep(1)
+        except KeyboardInterrupt:
+            server.shutdown()
+        return
+
+    if args.self_test:
+        print("\n  JWT TEST HARNESS â€” self-test mode")
+        print("  " + "=" * 52)
+        results = run_all_scenarios(verbose=args.verbose)
+        passed = sum(1 for r in results if r.passed)
+        failed = sum(1 for r in results if not r.passed)
+        if not args.verbose:
+            for r in results:
+                print(r)
+        print()
+        print(f"  Results: {passed} passed, {failed} failed out of {len(results)}")
+        print()
+        sys.exit(0 if failed == 0 else 1)
+
+    parser.print_help()
+
+
+if __name__ == "__main__":
+    main()
