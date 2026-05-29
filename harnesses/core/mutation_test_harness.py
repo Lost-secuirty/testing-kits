@@ -942,6 +942,27 @@ def sandbox_exec(source: str) -> Dict[str, Any]:
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+def _run_self_test(verbose: bool = False) -> int:
+    """Mutate a tiny function and confirm a thorough test kills its mutants."""
+    src = "def classify(n):\n    if n > 0:\n        return n + 1\n    return n - 1\n"
+    test = make_exec_test(
+        "assert classify(5) == 6\n"
+        "assert classify(-3) == -4\n"
+        "assert classify(0) == -1"
+    )
+    d = MutationRunner(test).run(src).to_dict()
+    checks = [
+        ("generated multiple mutants", d["total"] >= 2, f"total={d['total']}"),
+        ("killed at least one mutant", d["killed"] >= 1, f"killed={d['killed']}"),
+        ("mutation score in (0, 1]", 0 < d["mutation_score"] <= 1, f"score={d['mutation_score']}"),
+    ]
+    failures = [n for n, ok, _ in checks if not ok]
+    for n, ok, dt in checks:
+        print(f"  [{'PASS' if ok else 'FAIL'}] {n}  ({dt})")
+    print(f"\n  {len(checks) - len(failures)}/{len(checks)} checks passed")
+    return 0 if not failures else 1
+
+
 def _cli():
     import argparse
 
@@ -964,7 +985,13 @@ def _cli():
         help='Mutation operators to apply (default: all)'
     )
 
+    parser.add_argument('--self-test', action='store_true',
+                        help='Run built-in scenarios and exit')
+    parser.add_argument('--verbose', action='store_true')
     args = parser.parse_args()
+
+    if args.self_test:
+        raise SystemExit(_run_self_test(verbose=args.verbose))
 
     if args.command == 'server':
         server = MutationHTTPServer(host=args.host, port=args.port)
