@@ -6,7 +6,7 @@ existing harnesses.
 
 ---
 
-## This pass (in progress)
+## Batch 4 — shipped 2026-05-27
 
 10 new harnesses, research-grounded against 2026 sources (CWE Top 25 2025,
 OWASP LLM Top 10 2025, ChaosAPI/PACMPL 2025, AI-coded-bug surveys, the
@@ -29,39 +29,44 @@ See the plan file for sketches and acceptance criteria.
 
 ---
 
+## Batch 5 — shipped 2026-05-29
+
+6 harnesses (max-6 batch), from the Next-batch candidates below.
+
+| # | Path | Direction | Self-test |
+|---|---|---|---|
+| 54 | `harnesses/core/tracing_test_harness.py` | Gap-fill (observability) | 22 scenarios |
+| 55 | `harnesses/core/queue_test_harness.py` | Gap-fill (messaging) | 20 scenarios |
+| 56 | `harnesses/core/search_relevance_test_harness.py` | New vertical (IR) | 22 scenarios |
+| 57 | `harnesses/ai/rag_eval_test_harness.py` | AI/LLM deeper | 19 scenarios |
+| 58 | `harnesses/core/graphql_test_harness.py` | Gap-fill (contract) | 21 scenarios |
+| 59 | `harnesses/core/payments_test_harness.py` | New vertical (commerce) | 27 scenarios |
+
+All six pass `--self-test` (exit 0) and their paired suites (135 unit tests
+total). Five in `core`, one in `ai`; ports 19300/19310/19320 reserved (oracles
+run in-process). Self-contained per repo convention (no cross-harness imports;
+`Money`/FSM re-derived locally).
+
+---
+
 ## Next-batch candidates
 
-Deferred from this pass; pick from these when next adding harnesses.
+Deferred; pick from these when next adding harnesses.
 
 ### Gap-fill / general-purpose
 
-- **queue/messaging** — at-least-once vs exactly-once, DLQ routing,
-  ordering, consumer-group rebalance, redelivery-after-ack-timeout,
-  backpressure.
-- **tracing/observability** — span hierarchy validity, trace/span-ID
-  propagation, sampling consistency, attribute schema, orphan-span
-  detection, clock-skew tolerance.
 - **gRPC contract** — proto round-trip, deadline propagation, stream
   half-close semantics, status-code coverage.
-- **GraphQL contract** — schema-vs-resolver coverage, N+1 detection,
-  fragment cycles, max-depth + max-cost enforcement.
 - **browser/E2E surrogate** — headless-browser-free DOM-event scripting
   against a mock server, focus management, form-state regressions.
 
 ### New verticals
 
-- **payments / checkout** — authorize → capture → refund state machine,
-  idempotency-key replay, partial capture + multi-refund accounting, 3DS
-  challenge, decline-code taxonomy, currency precision.
 - **IoT / telemetry** — out-of-order MQTT-like ingest, duplicate dedupe,
   device-identity rotation, store-and-forward replay.
-- **search relevance** — recall@k, precision@k, MRR, NDCG against fixed
-  query/judgment sets; tokenizer + analyzer corner cases.
 
 ### AI/LLM deeper
 
-- **RAG eval** — retrieval recall, citation faithfulness, answer
-  grounding, context-window-overflow degradation.
 - **drift detection** — embedding-space drift between model versions,
   prompt-template drift, output-distribution drift.
 - **multi-turn agent eval** — task-completion across N turns, tool-use
@@ -105,6 +110,13 @@ is a known thinness that could be filled without a whole new harness.
   `interval` (e.g. 10-year cap). Separate from this pass.
 - `pharmacy/srs` — also: SM-2 correctness only; no multi-user-leak /
   privacy surface.
+- **Windows portability (observed in the batch-5 local sweep; these pass on the
+  Linux CI):** `ai/prompt_injection` and `pharmacy/partial_fill` raise
+  `UnicodeEncodeError` printing `≥`/`→` to a cp1252 console — wrap stdout or use
+  ASCII in `print`. `core/memory` does `import resource` (Unix-only) →
+  `ModuleNotFoundError` on Windows; guard the import. `core/hermeticity`
+  `depends_on_home` asserts `hermetic=False` but gets `True` (real, not
+  platform). `core/numeric` server-only CLI times out the self-test runner.
 - (Add entries here as `make selftest` reports surface them.)
 
 ---

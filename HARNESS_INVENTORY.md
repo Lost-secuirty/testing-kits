@@ -1,6 +1,11 @@
 # Test Harness Inventory
 
-**Total: 43 harnesses | 3,079 harness tests | All green**
+**Total: 59 harnesses.** Per-harness self-test status is auto-generated in
+`STATUS.md` (run `make report`). Entries #1–43 are documented in full below;
+#44–53 (the 2026-05 research pass) are bridged in a compact table; #54–59
+(batch 5) follow in full. A few pre-existing harnesses have known issues
+(`pharmacy/srs` overflow, `core/hermeticity`, plus Windows-only portability
+gaps) tracked in `HARNESS_ROADMAP.md` — they predate batch 5.
 
 > Harnesses 20–24 were added after a 2020–2026 gap audit of failure modes most
 > commonly missed by AI-assisted / “vibe” coding: time/timezone correctness,
@@ -554,6 +559,99 @@ Tests pharmacy partial dispensing — a domain-specific open→resolve two-phase
 
 ---
 
+## 44–53. Research pass (2026-05, batch 4)
+
+Ten harnesses added against 2026 bug-research sources. Full prose entries are
+pending; one-line summaries below (see `HARNESS_ROADMAP.md` → "Batch 4" for the
+source signal behind each, and `STATUS.md` for live self-test status).
+
+| # | File | Summary |
+|---|---|---|
+| 44 | `harnesses/core/null_propagation_test_harness.py` | None propagating through a call chain (the #1 AI-coded bug class); flags never-guarded None paths. |
+| 45 | `harnesses/core/error_path_leak_test_harness.py` | Resource acquire/release leaks on error/exception paths; double-release and unbalanced-cleanup detection. |
+| 46 | `harnesses/core/feature_flag_test_harness.py` | Flag flips mid-call, rollout/kill-switch consistency (the Google June-2025 outage class). |
+| 47 | `harnesses/core/clock_skew_test_harness.py` | Distributed-time bugs: NTP jumps, monotonic regression, cross-node skew vs TTL/LWW merges. |
+| 48 | `harnesses/core/schema_evolution_test_harness.py` | Reader/writer schema drift; backward/forward compatibility (silent pipeline schema drift). |
+| 49 | `harnesses/core/dormant_code_test_harness.py` | Untriggered branches that crash on first hit; surfaces dormant-path crashes via synthetic inputs. |
+| 50 | `harnesses/core/cardinality_test_harness.py` | Metric/label/cache-key cardinality explosion (bounded vs unbounded). |
+| 51 | `harnesses/core/hermeticity_test_harness.py` | Hidden test dependencies on HOME/env/network/time (top flaky-test class). |
+| 52 | `harnesses/pharmacy/drug_interaction_test_harness.py` | Drug–drug interaction checks and contraindication overridability. |
+| 53 | `harnesses/ai/prompt_injection_test_harness.py` | OWASP LLM01 injection corpus + system-prompt-leak guard, scored by precision/recall floors. |
+
+---
+
+## 54. Distributed Tracing Test Harness
+
+**File:** `harnesses/core/tracing_test_harness.py`
+**Tests:** `tests/core/test_tracing_test_harness.py` — 19 tests
+**Port:** none (in-process)
+
+Validates a span set against an oracle and proves it catches a battery of broken traces — the failure modes LLM-written OpenTelemetry glue produces. Strict W3C `traceparent` parse/format (2-32-16-2 lower hex; all-zero trace/span IDs and version `ff` rejected). `validate_trace` checks single-root, no orphan (unresolved parent) or cross-trace parents, no parent-chain cycles, non-negative span durations, head-sampling consistency (a sampled child under an unsampled parent is flagged), required-attribute schema, and clock-skew tolerance (child start before parent beyond a bound). Seven `BUGGY_TRACES` fixtures each flip exactly their target counter; a `Propagator` round-trips context while a `BuggyPropagator` drops it. 22 self-test scenarios.
+
+**Key components:** `TraceParent`, `Span`, `TraceConfig`, `TraceReport`, `validate_trace`, `Propagator`, `BuggyPropagator`, `BUGGY_TRACES`, `valid_trace`
+
+---
+
+## 55. Message-Queue Delivery Test Harness
+
+**File:** `harnesses/core/queue_test_harness.py`
+**Tests:** `tests/core/test_queue_test_harness.py` — 17 tests
+**Port:** none (in-process)
+
+Tests broker delivery semantics with an injectable clock. `InMemoryBroker` (oracle) covers at-least-once redelivery (nack and ack-timeout), exactly-once dedup that survives redelivery, DLQ routing after max deliveries, per-key FIFO via head-of-key delivery, consumer-group rebalance (no loss / no double-delivery of acked / order preserved), ack-timeout heartbeat extension, and backpressure (in-flight cap + publish-depth reject). Four buggy brokers are each proven caught: `NaiveBroker` (acks on poll → crash loses the message), `LossyExactlyOnce` (no dedup → double-process), `OrderBreakingRebalance` (delivers non-head-of-key), `NoDlqBroker` (never routes poison → loops forever). 20 self-test scenarios. Distinct from `idempotency` (the dedup primitive) and `concurrency` (race detection).
+
+**Key components:** `Message`, `QueueConfig`, `Delivery`, `Clock`, `InMemoryBroker`, `NaiveBroker`, `LossyExactlyOnce`, `OrderBreakingRebalance`, `NoDlqBroker`, `DeliveryReport`, `consume_all`, `build_report`
+
+---
+
+## 56. Search-Relevance Test Harness
+
+**File:** `harnesses/core/search_relevance_test_harness.py`
+**Tests:** `tests/core/test_search_relevance_test_harness.py` — 25 tests
+**Port:** 19320 (reserved; oracle runs in-process)
+
+Classic IR ranking metrics over fixed graded judgment sets plus an analyzer corner-case oracle. Computes recall@k, precision@k, MRR, and NDCG (graded gain `2^grade-1`). A stdlib analyzer applies NFKC, casefold, accent-fold, naive plural-stem, stop-word drop, and CJK no-space segmentation, checked against an 8-case oracle. A lexical retriever (distinct-overlap, stable tie-break) over an engineered 20-doc / 6-query corpus lets the oracle meet recall ≥ 0.80 / MRR ≥ 0.70 / NDCG ≥ 0.80; a `reversed_search` ranker falls below the NDCG floor and a `no_fold_analyze` analyzer fails the fold cases. 22 self-test scenarios. Distinct from `llm_eval`/`rag_eval` (LLM answer quality) and `pagination` (cursor consistency).
+
+**Key components:** `Doc`, `Judgment`, `QuerySet`, `SearchConfig`, `analyze`, `no_fold_analyze`, `search`, `reversed_search`, `recall_at_k`, `precision_at_k`, `mrr`, `ndcg_at_k`, `evaluate`, `RelevanceReport`
+
+---
+
+## 57. RAG Eval Test Harness
+
+**File:** `harnesses/ai/rag_eval_test_harness.py`
+**Tests:** `tests/ai/test_rag_eval_test_harness.py` — 21 tests
+**Port:** none (in-process)
+
+Scores retrieval-augmented answers on four axes RAG fails silently on: retrieval recall@k, citation faithfulness (a citation counts only if it was retrieved AND its passage supports a claim), answer grounding (claims present in the post-overflow context), and context-window overflow (greedy-pack drop of tail passages). A deterministic lexical retriever over an engineered 20-passage / 6-case corpus lets the oracle meet recall ≥ 0.80 / faithfulness ≥ 0.90 / grounding ≥ 0.80. A keyword-only (AND) retriever drops below the recall floor, a truncating retriever degrades grounding, and a citation fabricator drops below the faithfulness floor. 19 self-test scenarios. Distinct from `ai/llm_eval` (answer graders, no retrieval) and `ai/prompt_injection` (safety corpus).
+
+**Key components:** `Passage`, `RagCase`, `RagConfig`, `retrieve`, `keyword_only_retrieve`, `truncating_retrieve`, `recall_at_k`, `citation_audit`, `grounding_audit`, `context_overflow`, `evaluate`, `RagReport`
+
+---
+
+## 58. GraphQL Contract Test Harness
+
+**File:** `harnesses/core/graphql_test_harness.py`
+**Tests:** `tests/core/test_graphql_test_harness.py` — 28 tests
+**Port:** 19310 (reserved; oracle runs in-process)
+
+Parses queries into an AST (selection sets, aliases, fragment spreads, arg-skipping) and runs analyzers: schema-vs-resolver coverage (missing/orphan), query depth, query cost (list fields multiply, nesting compounds, aliases counted), N+1 list-resolver detection (with a dataloader-batched exclusion), fragment-cycle detection (direct and indirect), and unknown field/fragment validation. `enforce_limits` rejects every abusive query (deeply nested, cost-bomb, wide-alias amplification) while a `LeakyResolverSet` (missing + orphan) and a naive no-limit executor are caught. 21 self-test scenarios. Distinct from `core/contract` (arbitrary-callable pre/post/invariants) and `core/api` (REST CRUD).
+
+**Key components:** `Schema`, `FieldDef`, `FragmentDef`, `Selection`, `parse_query`, `schema_resolver_coverage`, `query_depth`, `query_cost`, `detect_n_plus_one`, `fragment_cycles`, `enforce_limits`, `GraphQLReport`, `audit`
+
+---
+
+## 59. Payments / Checkout Test Harness
+
+**File:** `harnesses/core/payments_test_harness.py`
+**Tests:** `tests/core/test_payments_test_harness.py` — 25 tests
+**Port:** 19300 (reserved; oracle runs in-process)
+
+Composes a Decimal `Money` (banker's rounding + exact largest-remainder `allocate`), a payment state machine with money guards, and an idempotency-key replay contract. The oracle enforces Σcaptures ≤ authorized, Σrefunds ≤ captured, currency match, and minor-unit precision (USD 2 / JPY 0 / BHD 3); a decline taxonomy classifies soft/hard/fraud + retryable; a 3DS challenge blocks capture until resolved. Five buggy processors each break a money invariant and are caught: overcapture, double-refund, float-drift reconciliation, idempotency-ignoring replay (double charge), and challenge-is-success (captures an unverified 3DS charge). 27 self-test scenarios. Reuses the *patterns* of `numeric`/`statemachine`/`idempotency` but is self-contained (no imports), with the composition as the novel surface.
+
+**Key components:** `Money`, `Currency`, `DeclineCode`, `PaymentState`, `PaymentProcessor`, `OvercaptureProcessor`, `DoubleRefundProcessor`, `FloatProcessor`, `ReplayChargesTwiceProcessor`, `ChallengeIsSuccessProcessor`, `LedgerReport`, `classify_decline`
+
+---
+
 ## Separate Lab: Dice Duel Reliability Lab
 
 **Folder:** `dice_duel_lab/`
@@ -623,17 +721,24 @@ production packaging, or CLI expansion.
 | 19270 | Rotating Audit Log             |
 | 19280 | Date-Window Expiry             |
 | 19290 | Partial-Fill Ledger            |
-| —     | Database, CLI, SRS, Backup-Restore, Expiry-Window — no networked mock server (SQLite / subprocess) |
+| 19300 | Payments / Checkout (reserved; in-process) |
+| 19310 | GraphQL Contract (reserved; in-process)    |
+| 19320 | Search Relevance (reserved; in-process)    |
+| —     | Database, CLI, SRS, Backup-Restore, Expiry-Window, Tracing, Queue, RAG Eval, and the #44–53 research-pass harnesses — no networked mock server (SQLite / subprocess / in-process oracle) |
 
 ## Running Everything
 
 ```bash
-python -m unittest discover -s . -p "test_*.py"
+make test          # python -m unittest discover -s tests -t . -p "test_*.py"
+make report        # regenerate STATUS.md (per-harness self-test status)
 ```
 
-**Result: 43 harnesses, 3,079 harness tests, all passing.** Dice Duel is isolated
-under `dice_duel_lab/` and should be run with its own lab sweep instead of root
-discovery.
+**59 harnesses.** Live per-harness self-test status is in `STATUS.md`
+(auto-generated by `make report`). Most harnesses are green; known pre-existing
+issues (`pharmacy/srs`, `core/hermeticity`, and Windows-only portability gaps in
+`prompt_injection`/`partial_fill`/`memory`) are tracked in `HARNESS_ROADMAP.md`.
+Dice Duel is isolated under `dice_duel_lab/` and runs via its own lab sweep
+instead of root discovery.
 
 > Note: a full `discover` run is slow because the soak/stress/memory harnesses
 > use real-time waits. Each batch is verified green on its own:
