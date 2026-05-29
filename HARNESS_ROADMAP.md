@@ -66,28 +66,33 @@ the last stranded-work loose end.
 
 ---
 
+## Batch 6 — shipped 2026-05-29
+
+5 harnesses, grounding the entire "Next-batch candidates" deferred list (gRPC,
+browser/E2E, IoT, drift detection, multi-turn agent eval). Research-grounded
+against 2024–2026 sources (gRPC deadline postmortems, MQTT 5.0 QoS semantics,
+Playwright/Cypress flakiness studies, Evidently/Arize/WhyLabs drift guides,
+τ-bench / "LLMs Get Lost in Multi-Turn"). All in-process (no ports).
+
+| # | Path | Direction | Self-test | Unit tests |
+|---|---|---|---|---|
+| 63 | `harnesses/ai/agent_eval_test_harness.py` | AI/LLM (multi-turn agent eval) | 23 | 20 |
+| 64 | `harnesses/core/iot_telemetry_test_harness.py` | New vertical (IoT/telemetry) | 24 | 22 |
+| 65 | `harnesses/core/grpc_contract_test_harness.py` | Gap-fill (RPC contract) | 23 | 26 |
+| 66 | `harnesses/core/browser_e2e_test_harness.py` | Gap-fill (E2E surrogate) | 22 | 23 |
+| 67 | `harnesses/ai/drift_detection_test_harness.py` | AI/LLM (model/embedding drift) | 24 | 17 |
+
+116 self-test scenarios + 108 unit tests. Three in `core`, two in `ai`.
+Self-contained per repo convention (no cross-harness imports; local
+`FakeClock`/`MsClock`/`EventLoop` and hand-rolled drift math).
+
+---
+
 ## Next-batch candidates
 
-Deferred; pick from these when next adding harnesses.
-
-### Gap-fill / general-purpose
-
-- **gRPC contract** — proto round-trip, deadline propagation, stream
-  half-close semantics, status-code coverage.
-- **browser/E2E surrogate** — headless-browser-free DOM-event scripting
-  against a mock server, focus management, form-state regressions.
-
-### New verticals
-
-- **IoT / telemetry** — out-of-order MQTT-like ingest, duplicate dedupe,
-  device-identity rotation, store-and-forward replay.
-
-### AI/LLM deeper
-
-- **drift detection** — embedding-space drift between model versions,
-  prompt-template drift, output-distribution drift.
-- **multi-turn agent eval** — task-completion across N turns, tool-use
-  recovery from intermediate errors, state-leak between turns.
+The previous deferred list (gRPC, browser/E2E, IoT, drift detection, multi-turn
+agent eval) was fully landed in batch 6 — the list is now empty. Add new
+candidates here as they surface.
 
 ---
 
