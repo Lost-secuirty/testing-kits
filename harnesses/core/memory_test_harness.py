@@ -52,6 +52,39 @@ def _rss_bytes() -> int:
                     return int(parts[1]) * 1024
     except (OSError, IndexError, ValueError):
         pass
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class _PMC(ctypes.Structure):
+                _fields_ = [
+                    ("cb", wintypes.DWORD),
+                    ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t),
+                ]
+
+            k32 = ctypes.windll.kernel32
+            psapi = ctypes.windll.psapi
+            k32.GetCurrentProcess.restype = wintypes.HANDLE
+            psapi.GetProcessMemoryInfo.argtypes = [
+                wintypes.HANDLE, ctypes.POINTER(_PMC), wintypes.DWORD]
+            psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+            counters = _PMC()
+            counters.cb = ctypes.sizeof(_PMC)
+            if psapi.GetProcessMemoryInfo(
+                k32.GetCurrentProcess(), ctypes.byref(counters), counters.cb
+            ):
+                return int(counters.WorkingSetSize)
+        except Exception:
+            pass
     # Fallback: resource module (returns KB on Linux, bytes on macOS)
     try:
         usage = resource.getrusage(resource.RUSAGE_SELF)
@@ -69,6 +102,20 @@ def _fd_count() -> int:
         return len(os.listdir("/proc/self/fd"))
     except OSError:
         pass
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            k32 = ctypes.windll.kernel32
+            k32.GetCurrentProcess.restype = wintypes.HANDLE
+            k32.GetProcessHandleCount.argtypes = [
+                wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+            k32.GetProcessHandleCount.restype = wintypes.BOOL
+            count = wintypes.DWORD(0)
+            if k32.GetProcessHandleCount(k32.GetCurrentProcess(), ctypes.byref(count)):
+                return int(count.value)
+        except Exception:
+            pass
     # Fallback: iterate up to soft limit
     try:
         soft, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
