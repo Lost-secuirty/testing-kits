@@ -13,6 +13,7 @@ Pure Python stdlib only. No import of pharmacy_app.
 import argparse
 import json
 import sqlite3
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -342,6 +343,10 @@ def build_parser():
 
 
 def main():
+    try:  # Windows cp1252 console chokes on → in scenario output
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     args = build_parser().parse_args()
     if args.self_test:
         print("Harness 43 — Partial-Fill Two-Phase Ledger")

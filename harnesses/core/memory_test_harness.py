@@ -18,7 +18,10 @@ from __future__ import annotations
 import gc
 import math
 import os
-import resource
+try:
+    import resource  # Unix-only; absent on Windows
+except ImportError:
+    resource = None
 import socket
 import sys
 import threading

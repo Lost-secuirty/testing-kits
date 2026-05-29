@@ -319,6 +319,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    try:  # Windows consoles default to cp1252; harness output uses ≥, →, etc.
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     args = build_parser().parse_args()
     if args.list_scenarios:
         for s in list_scenarios():
