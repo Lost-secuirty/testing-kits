@@ -1,11 +1,12 @@
 # Test Harness Inventory
 
-**Total: 59 harnesses.** Per-harness self-test status is auto-generated in
+**Total: 62 harnesses.** Per-harness self-test status is auto-generated in
 `STATUS.md` (run `make report`). Entries #1–43 are documented in full below;
 #44–53 (the 2026-05 research pass) are bridged in a compact table; #54–59
-(batch 5) follow in full. A few pre-existing harnesses have known issues
-(`pharmacy/srs` overflow, `core/hermeticity`, plus Windows-only portability
-gaps) tracked in `HARNESS_ROADMAP.md` — they predate batch 5.
+(batch 5) and #60–62 (the resilience/auth-privacy harnesses, ported from a
+flat-layout branch into the reorg) follow in full. As of the `fix-status-green` work every harness passes `--self-test`
+(see `STATUS.md`); the formerly-failing `srs`/`hermeticity` bugs and the
+Windows portability gaps are resolved.
 
 > Harnesses 20–24 were added after a 2020–2026 gap audit of failure modes most
 > commonly missed by AI-assisted / “vibe” coding: time/timezone correctness,
@@ -652,6 +653,57 @@ Composes a Decimal `Money` (banker's rounding + exact largest-remainder `allocat
 
 ---
 
+## 60. Circuit Breaker Resilience Test Harness
+
+**File:** `harnesses/core/circuitbreaker_test_harness.py`
+**Tests:** `tests/core/test_circuitbreaker_test_harness.py` — 17 tests
+**Port:** 19330
+
+Tests the circuit-breaker pattern under an injectable `FakeClock`: CLOSED → OPEN
+on a failure threshold, OPEN rejects calls fast (`CircuitOpenError`), OPEN →
+HALF_OPEN after a reset timeout, HALF_OPEN → CLOSED on a probe success / → OPEN
+on probe failure. `CircuitBreakerOracle` is the reference state model the live
+`CircuitBreaker` is checked against. 13 self-test scenarios. Ported from the
+batch-4 resilience branch into the reorg (port reassigned from 19300 to avoid
+colliding with `core/payments`).
+
+**Key components:** `CircuitBreaker`, `CircuitBreakerOracle`, `FakeClock`, `CircuitOpenError`, `CircuitHandler`, `CBTestResult`, `start_mock_server`
+
+---
+
+## 61. JWT (HS256) Verification Test Harness
+
+**File:** `harnesses/security/jwt_test_harness.py`
+**Tests:** `tests/security/test_jwt_test_harness.py` — 18 tests
+**Port:** 19400
+
+Tests JWT encode and — more importantly — *verification* against the classic
+auth-bypass attacks: `alg=none` acceptance, HS/RS algorithm confusion,
+signature stripping/forgery, and expiry handling, using stdlib `hmac`/`hashlib`.
+`VerifyResult` reports pass/fail with a reason string. 14 self-test scenarios.
+Ported from the batch-4 branch (port reassigned 19320 → 19400). Complements the
+injection-focused `security/security` and `security/appsec` harnesses.
+
+**Key components:** `encode`, `verify`, `VerifyResult`, `JwtHandler`, `JwtTestResult`, `start_mock_server`
+
+---
+
+## 62. PII / PHI Redaction Test Harness
+
+**File:** `harnesses/security/pii_redaction_test_harness.py`
+**Tests:** `tests/security/test_pii_redaction_test_harness.py` — 20 tests
+**Port:** 19410
+
+Tests detection + redaction of PII/PHI (emails, phone numbers, SSNs, card
+numbers, etc.) via stdlib `re` detectors, scored against a `RedactionOracle`
+with precision/recall over a labelled corpus (catches both under-redaction
+leaks and over-redaction false positives). 14 self-test scenarios. Ported from
+the batch-4 branch (port reassigned 19310 → 19410).
+
+**Key components:** `Redactor`, `RedactionOracle`, `RedactionHandler`, `RedactTestResult`, `start_mock_server`
+
+---
+
 ## Separate Lab: Dice Duel Reliability Lab
 
 **Folder:** `dice_duel_lab/`
@@ -724,6 +776,9 @@ production packaging, or CLI expansion.
 | 19300 | Payments / Checkout (reserved; in-process) |
 | 19310 | GraphQL Contract (reserved; in-process)    |
 | 19320 | Search Relevance (reserved; in-process)    |
+| 19330 | Circuit Breaker                            |
+| 19400 | JWT (HS256) Verification                   |
+| 19410 | PII / PHI Redaction                        |
 | —     | Database, CLI, SRS, Backup-Restore, Expiry-Window, Tracing, Queue, RAG Eval, and the #44–53 research-pass harnesses — no networked mock server (SQLite / subprocess / in-process oracle) |
 
 ## Running Everything

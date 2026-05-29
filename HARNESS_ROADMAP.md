@@ -49,6 +49,23 @@ run in-process). Self-contained per repo convention (no cross-harness imports;
 
 ---
 
+## Ported: resilience / auth-privacy harnesses (#60–62, 2026-05-29)
+
+Three harnesses that had been stranded on a flat-layout local branch
+(`claude/harness-batch4-resilience-authprivacy`) were ported into the reorg:
+
+| # | Path | Port | Self-test | Unit tests |
+|---|---|---|---|---|
+| 60 | `harnesses/core/circuitbreaker_test_harness.py` | 19330 | 13 | 17 |
+| 61 | `harnesses/security/jwt_test_harness.py` | 19400 | 14 | 18 |
+| 62 | `harnesses/security/pii_redaction_test_harness.py` | 19410 | 14 | 20 |
+
+Ports were reassigned on the way in (19300/19320/19310 → 19330/19400/19410) to
+avoid colliding with batch 5's payments/search/graphql reservations. This clears
+the last stranded-work loose end.
+
+---
+
 ## Next-batch candidates
 
 Deferred; pick from these when next adding harnesses.
