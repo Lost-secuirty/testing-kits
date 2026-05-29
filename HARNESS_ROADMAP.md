@@ -92,32 +92,27 @@ is a known thinness that could be filled without a whole new harness.
   `ai/prompt_injection` in this pass).
 - `ai/agentic` — tool-call safety; no system-prompt-leakage probes
   (subsumed by `ai/prompt_injection`).
-- `core/a11y`, `core/concurrency`, `core/mutation`, `core/numeric`,
-  `security/security` — **CLI contract violation:** these five do not
-  accept the documented `--self-test` flag. `a11y` and `concurrency` take
-  a positional argument (file path / port int) and crash if given
-  `--self-test`. `mutation` uses subparsers (`mutate` / `server`).
-  `numeric` and `security` only support starting a server.
-  Normalizing these to the standard CLI pattern is a hygiene cleanup
-  (each ~10-line change, no logic touched).
-- `pharmacy/srs` — **known bug:** `sm2_update` overflows to infinity after
-  ~1000 consecutive correct grades because `int(round(interval * ease))`
-  multiplies two unbounded growing floats with no cap. Surfaces as
-  `OverflowError: cannot convert float infinity to integer`. Failing
-  tests today: `test_ease_finite_after_1000_correct`,
-  `test_all_self_test_scenarios_pass`, `test_scenario_count_at_least_14`.
-  Fix: clamp `ease` (SM-2 convention: cap at ~2.5–4.0) **and** clamp
-  `interval` (e.g. 10-year cap). Separate from this pass.
-- `pharmacy/srs` — also: SM-2 correctness only; no multi-user-leak /
-  privacy surface.
-- **Windows portability (observed in the batch-5 local sweep; these pass on the
-  Linux CI):** `ai/prompt_injection` and `pharmacy/partial_fill` raise
-  `UnicodeEncodeError` printing `≥`/`→` to a cp1252 console — wrap stdout or use
-  ASCII in `print`. `core/memory` does `import resource` (Unix-only) →
-  `ModuleNotFoundError` on Windows; guard the import. `core/hermeticity`
-  `depends_on_home` asserts `hermetic=False` but gets `True` (real, not
-  platform). `core/numeric` server-only CLI times out the self-test runner.
+- `pharmacy/srs` — SM-2 correctness only; no multi-user-leak / privacy surface.
+- `core/numeric` — `PrecisionTester.float_inexact_sum()` sums to *exactly* 1.0 on
+  CPython, so `test_float_inexact_sum_not_exactly_one` and the precision-endpoint
+  test assert inexactness and fail (2 unit tests). Pre-existing; fix by choosing
+  genuinely-inexact operands (e.g. `0.1 + 0.2`) or relaxing the assertion. No
+  `--self-test` impact.
 - (Add entries here as `make selftest` reports surface them.)
+
+### Resolved 2026-05-29 — STATUS.md now 59/59 green (self-test 138s → 50s)
+- **CLI contract** for `a11y`, `concurrency`, `mutation`, `numeric`, `security` —
+  all now accept `--self-test` with real in-process scenarios (commit f62901a);
+  server/file behaviors preserved behind `--serve` / positional args.
+- **`pharmacy/srs` overflow** — `sm2_update` interval clamped at `INTERVAL_CAP`
+  (36500 d) so repeated-correct growth can't reach a float `OverflowError` (a23db40).
+- **`core/hermeticity` `depends_on_home`** — probe now mocks (and restores) both
+  `USERPROFILE` and `HOME`, so `Path.home()` dependence is detected on Windows (a23db40).
+- **Windows portability** — `core/memory` guards `import resource` and adds ctypes
+  `GetProcessMemoryInfo`/`GetProcessHandleCount` (RSS/fd > 0 on Windows);
+  `ai/prompt_injection` + `pharmacy/partial_fill` reconfigure stdout to UTF-8 at
+  import; `core/numeric` `--self-test` returns immediately instead of timing out
+  (6a55f16, 13543d8).
 
 ---
 
