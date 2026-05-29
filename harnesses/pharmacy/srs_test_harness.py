@@ -31,6 +31,10 @@ from datetime import datetime, timedelta
 
 EASE_FLOOR = 1.3
 EASE_INIT = 2.5
+# Cap the interval so repeated-correct growth (interval *= ease each cycle)
+# cannot run away to a float OverflowError after ~700+ reviews. 36500 days =
+# 100 years, far beyond any real scheduling horizon and > the >100 convergence oracle.
+INTERVAL_CAP = 36500
 
 # ============================================================
 # SM-2 INLINE IMPLEMENTATION
@@ -74,6 +78,7 @@ def sm2_update(ease_factor, interval_days, repetitions, correct):
         new_ease = ease - 0.2
 
     new_ease = max(EASE_FLOOR, new_ease)
+    new_interval = min(new_interval, INTERVAL_CAP)
     return new_ease, new_interval, new_reps
 
 

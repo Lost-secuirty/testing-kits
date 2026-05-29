@@ -90,7 +90,11 @@ class _MockEnv:
                 os.environ[f"VAR_{self.seed}"] = "x"
         if self.mock_home:
             self._saved["home"] = os.environ.get("HOME")
+            self._saved["userprofile"] = os.environ.get("USERPROFILE")
             os.environ["HOME"] = f"/tmp/hermetic-{self.seed}"
+            # Path.home() reads USERPROFILE on Windows, HOME on POSIX — mock both
+            # so $HOME-dependence is detected cross-platform.
+            os.environ["USERPROFILE"] = f"/tmp/hermetic-{self.seed}"
         return self
 
     def __exit__(self, *exc):
@@ -102,10 +106,12 @@ class _MockEnv:
             os.environ.clear()
             os.environ.update(self._saved["env"])
         if self.mock_home:
-            if self._saved["home"] is None:
-                os.environ.pop("HOME", None)
-            else:
-                os.environ["HOME"] = self._saved["home"]
+            for saved_key, env_key in (("home", "HOME"), ("userprofile", "USERPROFILE")):
+                saved = self._saved[saved_key]
+                if saved is None:
+                    os.environ.pop(env_key, None)
+                else:
+                    os.environ[env_key] = saved
 
 
 def _capture(fn: Callable[[], Any]) -> tuple[bool, Any]:
