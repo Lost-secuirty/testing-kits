@@ -115,11 +115,6 @@ is a known thinness that could be filled without a whole new harness.
 - `ai/agentic` — tool-call safety; no system-prompt-leakage probes
   (subsumed by `ai/prompt_injection`).
 - `pharmacy/srs` — SM-2 correctness only; no multi-user-leak / privacy surface.
-- `core/numeric` — `PrecisionTester.float_inexact_sum()` sums to *exactly* 1.0 on
-  CPython, so `test_float_inexact_sum_not_exactly_one` and the precision-endpoint
-  test assert inexactness and fail (2 unit tests). Pre-existing; fix by choosing
-  genuinely-inexact operands (e.g. `0.1 + 0.2`) or relaxing the assertion. No
-  `--self-test` impact.
 - (Add entries here as `make selftest` reports surface them.)
 
 ### Resolved 2026-05-29 — STATUS.md now 59/59 green (self-test 138s → 50s)
@@ -135,6 +130,12 @@ is a known thinness that could be filled without a whole new harness.
   `ai/prompt_injection` + `pharmacy/partial_fill` reconfigure stdout to UTF-8 at
   import; `core/numeric` `--self-test` returns immediately instead of timing out
   (6a55f16, 13543d8).
+- **`core/numeric` float inexactness on Python 3.12** — `float_inexact_sum()` used
+  the built-in `sum()`, which CPython 3.12 special-cases with Neumaier compensated
+  summation, yielding exactly 1.0 and failing `test_float_inexact_sum_not_exactly_one`
+  + the precision endpoint on the 3.12 CI leg (3.10/3.11 were unaffected). Switched
+  to a plain `+=` accumulation loop, which is inexact on every CPython. Landed with
+  the batch-6 PR.
 
 ---
 
