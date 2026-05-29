@@ -96,14 +96,23 @@ when adding a new networked harness.
 | 19270 | pharmacy/auditlog_cap |
 | 19280 | pharmacy/expiry_window |
 | 19290 | pharmacy/partial_fill |
+| 19300 | core/payments (reserved; oracle runs in-process) |
+| 19310 | core/graphql (reserved; oracle runs in-process) |
+| 19320 | core/search_relevance (reserved; oracle runs in-process) |
+| 19330 | core/circuitbreaker |
+| 19400 | security/jwt |
+| 19410 | security/pii_redaction |
+
+Note: `core/tracing`, `core/queue`, and `ai/rag_eval` are pure in-process
+oracles and bind no port.
 
 **Reserved ranges for future harnesses:**
 
 - `19040-19049` — open
 - `19100, 19120-19150` — open
 - `19220-19230` — open
-- `19300-19399` — reserved for core
-- `19400-19499` — reserved for security
+- `19300-19399` — reserved for core (19300/19310/19320/19330 now claimed)
+- `19400-19499` — reserved for security (19400/19410 now claimed)
 - `19500-19599` — reserved for ai
 - `19600-19699` — reserved for pharmacy
 

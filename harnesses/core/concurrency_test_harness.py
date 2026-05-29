@@ -1334,17 +1334,49 @@ class ConcurrencyTestHarness:
 # CLI entry point
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
-    import sys
+def _run_self_test(verbose: bool = False) -> int:
+    """Run the full in-process suite; the locked counter must show no race and
+    the unlocked counter must expose one."""
+    harness = ConcurrencyTestHarness()  # in-process tests need no server
+    harness.run_all()
+    s = harness.summary()
+    rl = harness._results["race_locked"]
+    ru = harness._results["race_unlocked"]
+    checks = [
+        ("primitive suite all-pass", s["failed"] == 0 and s["passed"] >= 15,
+         f"passed={s['passed']} failed={s['failed']}"),
+        ("locked counter: no lost updates",
+         rl["actual"] == rl["expected"] and not rl["race_detected"], str(rl)),
+        ("unlocked counter: race exposed", ru["race_detected"], str(ru)),
+    ]
+    failures = [n for n, ok, _ in checks if not ok]
+    for n, ok, d in checks:
+        print(f"  [{'PASS' if ok else 'FAIL'}] {n}  ({d})")
+    print(f"\n  {len(checks) - len(failures)}/{len(checks)} checks passed")
+    return 0 if not failures else 1
 
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_PORT
-    harness = ConcurrencyTestHarness(server_port=port)
-    actual_port = harness.start_server()
-    logger.info("Mock server started on port %d", actual_port)
 
+def main() -> int:
+    import argparse
+    p = argparse.ArgumentParser(description="Concurrency test harness")
+    p.add_argument("--self-test", action="store_true", help="Run built-in scenarios and exit")
+    p.add_argument("--serve", action="store_true", help="Start the mock HTTP server too")
+    p.add_argument("--port", type=int, default=DEFAULT_PORT)
+    p.add_argument("--verbose", action="store_true")
+    args = p.parse_args()
+    if args.self_test:
+        return _run_self_test(verbose=args.verbose)
+    harness = ConcurrencyTestHarness(server_port=args.port if args.serve else 0)
+    if args.serve:
+        logger.info("Mock server started on port %d", harness.start_server())
     try:
-        results = harness.run_all()
-        summary = harness.summary()
-        print(json.dumps(summary, indent=2))
+        harness.run_all()
+        print(json.dumps(harness.summary(), indent=2))
     finally:
         harness.stop_server()
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())

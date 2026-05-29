@@ -593,21 +593,57 @@ def create_server(port: int = 0) -> NumericTestServer:
     return server
 
 
-if __name__ == "__main__":
-    server = NumericTestServer(port=DEFAULT_PORT)
-    actual_port = server.start()
-    print(f"Numeric Test Harness server running on port {actual_port}")
-    print(f"  GET  {server.base_url}/health")
-    print(f"  GET  {server.base_url}/float-pitfalls")
-    print(f"  GET  {server.base_url}/rounding")
-    print(f"  GET  {server.base_url}/precision")
-    print(f"  GET  {server.base_url}/overflow")
-    print(f"  POST {server.base_url}/money/add")
-    print(f"  POST {server.base_url}/money/allocate")
+def _run_self_test(verbose: bool = False) -> int:
+    """Exercise the Money invariants that motivate this harness: Decimal-backed
+    arithmetic (no float drift), banker's rounding, and currency safety."""
+    checks = [
+        ("0.1 + 0.2 == 0.30 (no float drift)",
+         Money(0.1).add(Money(0.2)).rounded().amount == Decimal("0.30"), None),
+        ("2.5 -> 2 (banker's half-even)",
+         Money(Decimal("2.5"), decimal_places=0).rounded().amount == Decimal("2"), None),
+        ("3.5 -> 4 (banker's half-even)",
+         Money(Decimal("3.5"), decimal_places=0).rounded().amount == Decimal("4"), None),
+    ]
+    raised = False
     try:
-        import time
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        server.stop()
-        print("Server stopped.")
+        Money(1, "USD").add(Money(1, "EUR"))
+    except CurrencyMismatchError:
+        raised = True
+    checks.append(("cross-currency add raises", raised, None))
+
+    failures = [n for n, ok, _ in checks if not ok]
+    for n, ok, _ in checks:
+        print(f"  [{'PASS' if ok else 'FAIL'}] {n}")
+    print(f"\n  {len(checks) - len(failures)}/{len(checks)} checks passed")
+    return 0 if not failures else 1
+
+
+def main() -> int:
+    import argparse
+    p = argparse.ArgumentParser(description="Numeric / money correctness harness")
+    p.add_argument("--self-test", action="store_true", help="Run built-in scenarios and exit")
+    p.add_argument("--serve", action="store_true", help="Run the mock HTTP server")
+    p.add_argument("--port", type=int, default=DEFAULT_PORT)
+    p.add_argument("--verbose", action="store_true")
+    args = p.parse_args()
+    if args.self_test:
+        return _run_self_test(verbose=args.verbose)
+    if args.serve:
+        server = NumericTestServer(port=args.port)
+        actual_port = server.start()
+        print(f"Numeric Test Harness server running on port {actual_port}")
+        try:
+            import time
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            server.stop()
+            print("Server stopped.")
+        return 0
+    p.print_help()
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())

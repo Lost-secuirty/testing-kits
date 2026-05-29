@@ -13,9 +13,17 @@ Pure Python stdlib only. No import of pharmacy_app.
 import argparse
 import json
 import sqlite3
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# Windows consoles default to cp1252; scenario output uses non-ASCII (->, em dash).
+# Force UTF-8 at import so both --self-test and direct test calls work.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 from urllib.parse import urlparse
 
 # ---------------------------------------------------------------------------

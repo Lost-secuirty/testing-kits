@@ -6,7 +6,7 @@ existing harnesses.
 
 ---
 
-## This pass (in progress)
+## Batch 4 — shipped 2026-05-27
 
 10 new harnesses, research-grounded against 2026 sources (CWE Top 25 2025,
 OWASP LLM Top 10 2025, ChaosAPI/PACMPL 2025, AI-coded-bug surveys, the
@@ -29,39 +29,61 @@ See the plan file for sketches and acceptance criteria.
 
 ---
 
+## Batch 5 — shipped 2026-05-29
+
+6 harnesses (max-6 batch), from the Next-batch candidates below.
+
+| # | Path | Direction | Self-test |
+|---|---|---|---|
+| 54 | `harnesses/core/tracing_test_harness.py` | Gap-fill (observability) | 22 scenarios |
+| 55 | `harnesses/core/queue_test_harness.py` | Gap-fill (messaging) | 20 scenarios |
+| 56 | `harnesses/core/search_relevance_test_harness.py` | New vertical (IR) | 22 scenarios |
+| 57 | `harnesses/ai/rag_eval_test_harness.py` | AI/LLM deeper | 19 scenarios |
+| 58 | `harnesses/core/graphql_test_harness.py` | Gap-fill (contract) | 21 scenarios |
+| 59 | `harnesses/core/payments_test_harness.py` | New vertical (commerce) | 27 scenarios |
+
+All six pass `--self-test` (exit 0) and their paired suites (135 unit tests
+total). Five in `core`, one in `ai`; ports 19300/19310/19320 reserved (oracles
+run in-process). Self-contained per repo convention (no cross-harness imports;
+`Money`/FSM re-derived locally).
+
+---
+
+## Ported: resilience / auth-privacy harnesses (#60–62, 2026-05-29)
+
+Three harnesses that had been stranded on a flat-layout local branch
+(`claude/harness-batch4-resilience-authprivacy`) were ported into the reorg:
+
+| # | Path | Port | Self-test | Unit tests |
+|---|---|---|---|---|
+| 60 | `harnesses/core/circuitbreaker_test_harness.py` | 19330 | 13 | 17 |
+| 61 | `harnesses/security/jwt_test_harness.py` | 19400 | 14 | 18 |
+| 62 | `harnesses/security/pii_redaction_test_harness.py` | 19410 | 14 | 20 |
+
+Ports were reassigned on the way in (19300/19320/19310 → 19330/19400/19410) to
+avoid colliding with batch 5's payments/search/graphql reservations. This clears
+the last stranded-work loose end.
+
+---
+
 ## Next-batch candidates
 
-Deferred from this pass; pick from these when next adding harnesses.
+Deferred; pick from these when next adding harnesses.
 
 ### Gap-fill / general-purpose
 
-- **queue/messaging** — at-least-once vs exactly-once, DLQ routing,
-  ordering, consumer-group rebalance, redelivery-after-ack-timeout,
-  backpressure.
-- **tracing/observability** — span hierarchy validity, trace/span-ID
-  propagation, sampling consistency, attribute schema, orphan-span
-  detection, clock-skew tolerance.
 - **gRPC contract** — proto round-trip, deadline propagation, stream
   half-close semantics, status-code coverage.
-- **GraphQL contract** — schema-vs-resolver coverage, N+1 detection,
-  fragment cycles, max-depth + max-cost enforcement.
 - **browser/E2E surrogate** — headless-browser-free DOM-event scripting
   against a mock server, focus management, form-state regressions.
 
 ### New verticals
 
-- **payments / checkout** — authorize → capture → refund state machine,
-  idempotency-key replay, partial capture + multi-refund accounting, 3DS
-  challenge, decline-code taxonomy, currency precision.
 - **IoT / telemetry** — out-of-order MQTT-like ingest, duplicate dedupe,
   device-identity rotation, store-and-forward replay.
-- **search relevance** — recall@k, precision@k, MRR, NDCG against fixed
-  query/judgment sets; tokenizer + analyzer corner cases.
 
 ### AI/LLM deeper
 
-- **RAG eval** — retrieval recall, citation faithfulness, answer
-  grounding, context-window-overflow degradation.
 - **drift detection** — embedding-space drift between model versions,
   prompt-template drift, output-distribution drift.
 - **multi-turn agent eval** — task-completion across N turns, tool-use
@@ -87,25 +109,27 @@ is a known thinness that could be filled without a whole new harness.
   `ai/prompt_injection` in this pass).
 - `ai/agentic` — tool-call safety; no system-prompt-leakage probes
   (subsumed by `ai/prompt_injection`).
-- `core/a11y`, `core/concurrency`, `core/mutation`, `core/numeric`,
-  `security/security` — **CLI contract violation:** these five do not
-  accept the documented `--self-test` flag. `a11y` and `concurrency` take
-  a positional argument (file path / port int) and crash if given
-  `--self-test`. `mutation` uses subparsers (`mutate` / `server`).
-  `numeric` and `security` only support starting a server.
-  Normalizing these to the standard CLI pattern is a hygiene cleanup
-  (each ~10-line change, no logic touched).
-- `pharmacy/srs` — **known bug:** `sm2_update` overflows to infinity after
-  ~1000 consecutive correct grades because `int(round(interval * ease))`
-  multiplies two unbounded growing floats with no cap. Surfaces as
-  `OverflowError: cannot convert float infinity to integer`. Failing
-  tests today: `test_ease_finite_after_1000_correct`,
-  `test_all_self_test_scenarios_pass`, `test_scenario_count_at_least_14`.
-  Fix: clamp `ease` (SM-2 convention: cap at ~2.5–4.0) **and** clamp
-  `interval` (e.g. 10-year cap). Separate from this pass.
-- `pharmacy/srs` — also: SM-2 correctness only; no multi-user-leak /
-  privacy surface.
+- `pharmacy/srs` — SM-2 correctness only; no multi-user-leak / privacy surface.
+- `core/numeric` — `PrecisionTester.float_inexact_sum()` sums to *exactly* 1.0 on
+  CPython, so `test_float_inexact_sum_not_exactly_one` and the precision-endpoint
+  test assert inexactness and fail (2 unit tests). Pre-existing; fix by choosing
+  genuinely-inexact operands (e.g. `0.1 + 0.2`) or relaxing the assertion. No
+  `--self-test` impact.
 - (Add entries here as `make selftest` reports surface them.)
+
+### Resolved 2026-05-29 — STATUS.md now 59/59 green (self-test 138s → 50s)
+- **CLI contract** for `a11y`, `concurrency`, `mutation`, `numeric`, `security` —
+  all now accept `--self-test` with real in-process scenarios (commit f62901a);
+  server/file behaviors preserved behind `--serve` / positional args.
+- **`pharmacy/srs` overflow** — `sm2_update` interval clamped at `INTERVAL_CAP`
+  (36500 d) so repeated-correct growth can't reach a float `OverflowError` (a23db40).
+- **`core/hermeticity` `depends_on_home`** — probe now mocks (and restores) both
+  `USERPROFILE` and `HOME`, so `Path.home()` dependence is detected on Windows (a23db40).
+- **Windows portability** — `core/memory` guards `import resource` and adds ctypes
+  `GetProcessMemoryInfo`/`GetProcessHandleCount` (RSS/fd > 0 on Windows);
+  `ai/prompt_injection` + `pharmacy/partial_fill` reconfigure stdout to UTF-8 at
+  import; `core/numeric` `--self-test` returns immediately instead of timing out
+  (6a55f16, 13543d8).
 
 ---
 
