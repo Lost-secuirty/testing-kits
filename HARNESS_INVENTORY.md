@@ -1,13 +1,15 @@
 # Test Harness Inventory
 
-**Total: 62 harnesses.** Per-harness self-test status is auto-generated in
-`STATUS.md` (run `make report`). Entries #1–43 are documented in full below;
-#44–53 (the 2026-05 research pass) are bridged in a compact table; #54–59
-(batch 5) and #60–62 (the resilience/auth-privacy harnesses, ported from a
-flat-layout branch into the reorg) follow in full. As of the `fix-status-green` work every harness passes `--self-test`
-(see `STATUS.md`); the formerly-failing `srs`/`hermeticity` bugs and the
-Windows portability gaps are resolved.
+**Total: 67 harnesses.** Per-harness self-test status is generated locally by
+`make report` and uploaded by CI as a workflow artifact. Entries #1–43 are
+documented in full below; #44–53 are bridged in a compact table; #54–59,
+#60–62, and #63–67 follow in full. As of the `fix-status-green` work every
+harness passes `--self-test`; the formerly-failing `srs`/`hermeticity` bugs
+and the Windows portability gaps are resolved.
 
+`STATUS.md` is generated output, not the canonical source of truth. The source
+of truth is the harness code, paired unittest suites, and current CI/test
+output.
 > Harnesses 20–24 were added after a 2020–2026 gap audit of failure modes most
 > commonly missed by AI-assisted / “vibe” coding: time/timezone correctness,
 > idempotency & retry-safety, state-machine validity, numeric/money precision,
