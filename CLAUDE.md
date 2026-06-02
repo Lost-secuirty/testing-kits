@@ -103,8 +103,8 @@ when adding a new networked harness.
 | 19400 | security/jwt |
 | 19410 | security/pii_redaction |
 
-Note: `core/tracing`, `core/queue`, `ai/rag_eval`, and all of batch 6
-(`ai/agent_eval`, `core/iot_telemetry`, `core/grpc_contract`,
+Note: `core/tracing`, `core/queue`, `ai/rag_eval`, `core/complexity`, and all
+of batch 6 (`ai/agent_eval`, `core/iot_telemetry`, `core/grpc_contract`,
 `core/browser_e2e`, `ai/drift_detection`) are pure in-process oracles and
 bind no port.
 
