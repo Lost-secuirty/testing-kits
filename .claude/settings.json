@@ -9,6 +9,46 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/guard.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/log.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Skill",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git config core.hooksPath:*)",
+      "Bash(python3 tools/scan_staged.py:*)",
+      "Bash(make test:*)",
+      "Bash(make test-fast:*)",
+      "Bash(make selftest:*)",
+      "Bash(make lint:*)",
+      "Bash(make report:*)"
     ]
   }
 }

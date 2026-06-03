@@ -1,0 +1,26 @@
+name: secret-pii-scan
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    # Same-repo PRs only; fork PRs run with a read-only token and are skipped.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Self-test the scanner
+        run: python3 tools/scan_staged.py --self-test
+      - name: Scan PR diff for secrets / personal-tier paths
+        run: python3 tools/scan_staged.py --ci --base "origin/${{ github.base_ref }}"
