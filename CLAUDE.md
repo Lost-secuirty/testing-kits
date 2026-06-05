@@ -135,3 +135,12 @@ bind no port.
 Tests import their harness via `from harnesses.<cat>.<name>_test_harness
 import ...`. The repo-root `-t .` flag lets the `harnesses` package resolve
 during discovery.
+
+## Security & privacy (cross-repo standard)
+
+Read `AGENTS.md` (boundaries + agent-safety directive) and `SECURITY.md` (GitHub vs
+Drive data wall, sacred personal tier, incident runbook). A secret/PII gate
+(`tools/scan_staged.py` + `.githooks/pre-commit`) hard-blocks secrets and personal-tier
+paths and warns on PII; activate per clone with `git config core.hooksPath .githooks`.
+The scanner's PII detectors are vendored from
+`harnesses/security/pii_redaction_test_harness.py` (single source of truth).

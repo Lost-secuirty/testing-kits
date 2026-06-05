@@ -8,3 +8,21 @@ STATUS.md
 
 # per-user Claude Code overrides; .claude/settings.json is shared
 .claude/settings.local.json
+
+# Secrets / credential carriers — never commit
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.keystore
+id_rsa*
+credentials*
+*.tfvars
+
+# Personal / Drive tier — must never reach GitHub
+PERSONAL_JOURNAL*
+private/
+
+# Agent audit log (local only)
+.claude/logs/
