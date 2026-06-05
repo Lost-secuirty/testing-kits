@@ -53,13 +53,22 @@ make test-security
 make test-ai
 make test-pharmacy
 make selftest      # every harness --self-test
-make report        # writes STATUS.md
+make report        # generates STATUS.md locally
 make lint          # py_compile sanity + ruff if installed
 make clean
 
 python harnesses/<cat>/<name>_test_harness.py --self-test
 python harnesses/<cat>/<name>_test_harness.py --list-scenarios
 ```
+
+## STATUS.md policy
+
+`STATUS.md` is generated output, not the canonical source of truth. Prefer CI artifact plus local regeneration over committing a stale report.
+
+- Run `make report` to generate or refresh `STATUS.md` locally.
+- CI uploads generated `STATUS.md` as an artifact.
+- The canonical proof is the harness code, paired unittest suites, and current CI/test output.
+- Do not update docs to imply a committed `STATUS.md` exists unless the project intentionally changes this policy.
 
 ## Port table
 
@@ -126,7 +135,7 @@ bind no port.
 4. Write the paired test in `tests/<cat>/test_<name>_test_harness.py`.
 5. `python harnesses/<cat>/<name>_test_harness.py --self-test`
 6. `make test`
-7. `make report` to regenerate `STATUS.md`.
+7. `make report` and inspect generated `STATUS.md`; do not commit it unless the repo policy changes.
 8. Commit. One harness per commit keeps history bisectable.
 
 ## Test discovery
