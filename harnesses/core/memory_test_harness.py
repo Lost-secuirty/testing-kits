@@ -18,7 +18,10 @@ from __future__ import annotations
 import gc
 import math
 import os
-import resource
+try:
+    import resource
+except Exception:
+    resource = None
 import socket
 import sys
 import threading

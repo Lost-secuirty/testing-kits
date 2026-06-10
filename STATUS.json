@@ -1,0 +1,414 @@
+{
+  "generated_at": "2026-06-10 03:52 UTC",
+  "summary": {
+    "total_harnesses": 53,
+    "ok": 43,
+    "fail": 6,
+    "skip": 4,
+    "header": "6 failing, 4 no --self-test",
+    "total_duration_s": 141.99
+  },
+  "by_category": {
+    "ai": {
+      "count": 3,
+      "ok": 2,
+      "fail": 1,
+      "skip": 0,
+      "duration_s": 0.52
+    },
+    "core": {
+      "count": 37,
+      "ok": 31,
+      "fail": 3,
+      "skip": 3,
+      "duration_s": 138.36
+    },
+    "pharmacy": {
+      "count": 8,
+      "ok": 6,
+      "fail": 2,
+      "skip": 0,
+      "duration_s": 1.41
+    },
+    "security": {
+      "count": 5,
+      "ok": 4,
+      "fail": 0,
+      "skip": 1,
+      "duration_s": 1.66
+    }
+  },
+  "per_harness": [
+    {
+      "category": "ai",
+      "name": "agentic",
+      "status": "OK",
+      "duration": 0.2,
+      "tail": ""
+    },
+    {
+      "category": "ai",
+      "name": "llm_eval",
+      "status": "OK",
+      "duration": 0.2,
+      "tail": ""
+    },
+    {
+      "category": "ai",
+      "name": "prompt_injection",
+      "status": "FAIL",
+      "duration": 0.12,
+      "tail": "           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ | UnicodeEncodeError: 'charmap' codec can't encode character '\\u2265' in position 24: character maps to <undefined>"
+    },
+    {
+      "category": "core",
+      "name": "a11y",
+      "status": "SKIP",
+      "duration": 0.19,
+      "tail": "FileNotFoundError: [Errno 2] No such file or directory: '--self-test'"
+    },
+    {
+      "category": "core",
+      "name": "api",
+      "status": "OK",
+      "duration": 0.37,
+      "tail": "  . auth_valid_token |   . content_json"
+    },
+    {
+      "category": "core",
+      "name": "cache",
+      "status": "OK",
+      "duration": 0.27,
+      "tail": "  [PASS] single_flight_all_get_result |   [PASS] single_flight_loader_called_once"
+    },
+    {
+      "category": "core",
+      "name": "cardinality",
+      "status": "OK",
+      "duration": 0.15,
+      "tail": "  OK    db_index_order_status            distinct=    4/ 1000  ratio=0.004  bounded=True | OK: 6 scenarios matched their cardinality expectations."
+    },
+    {
+      "category": "core",
+      "name": "chaos",
+      "status": "OK",
+      "duration": 0.76,
+      "tail": " | Metrics: {'success': 3, 'failure': 0, 'open': 0, 'total': 3, 'success_rate': 1.0, 'avg_latency_ms': 15.67}"
+    },
+    {
+      "category": "core",
+      "name": "cli",
+      "status": "OK",
+      "duration": 1.41,
+      "tail": "  [PASS] stderr_message |   [PASS] json_no_name"
+    },
+    {
+      "category": "core",
+      "name": "clock_skew",
+      "status": "OK",
+      "duration": 0.12,
+      "tail": "  OK    future_dated_expiry       value='v' | OK: 6 scenarios passed."
+    },
+    {
+      "category": "core",
+      "name": "concurrency",
+      "status": "SKIP",
+      "duration": 0.21,
+      "tail": "ValueError: invalid literal for int() with base 10: '--self-test'"
+    },
+    {
+      "category": "core",
+      "name": "config",
+      "status": "OK",
+      "duration": 0.21,
+      "tail": ""
+    },
+    {
+      "category": "core",
+      "name": "contract",
+      "status": "OK",
+      "duration": 0.76,
+      "tail": "Server running at http://127.0.0.1:61636 | Done."
+    },
+    {
+      "category": "core",
+      "name": "datetime",
+      "status": "OK",
+      "duration": 0.25,
+      "tail": ""
+    },
+    {
+      "category": "core",
+      "name": "db",
+      "status": "OK",
+      "duration": 0.65,
+      "tail": "2026-06-09 22:50:01,480 [INFO] db_test_harness: [PASS] QueryPerformance \u2014 7 passed, 0 failed, 0 errors | 2026-06-09 22:50:01,488 [INFO] db_test_harness: [PASS] ConcurrentWrites \u2014 3 passed, 0 failed, 0"
+    },
+    {
+      "category": "core",
+      "name": "dormant_code",
+      "status": "OK",
+      "duration": 0.13,
+      "tail": "crashes surfaced:       1 | OK: dormant-path crash surfaced; coverage extended by synthetic inputs."
+    },
+    {
+      "category": "core",
+      "name": "error_path_leak",
+      "status": "OK",
+      "duration": 0.16,
+      "tail": "  LEAK  double_release                 final_live=-1000 errors=295/1000 | OK: every scenario matched its expectation."
+    },
+    {
+      "category": "core",
+      "name": "errorpath",
+      "status": "OK",
+      "duration": 0.21,
+      "tail": ""
+    },
+    {
+      "category": "core",
+      "name": "feature_flag",
+      "status": "OK",
+      "duration": 0.13,
+      "tail": "flip_mid_call (good):     4 flips, 0 crashes | OK: every scenario met its expectation."
+    },
+    {
+      "category": "core",
+      "name": "fuzz",
+      "status": "OK",
+      "duration": 0.23,
+      "tail": " | Demo complete."
+    },
+    {
+      "category": "core",
+      "name": "hermeticity",
+      "status": "FAIL",
+      "duration": 0.16,
+      "tail": "FAILED: |   - depends_on_home: expected hermetic=False, got True"
+    },
+    {
+      "category": "core",
+      "name": "i18n",
+      "status": "OK",
+      "duration": 0.22,
+      "tail": "All self-tests passed."
+    },
+    {
+      "category": "core",
+      "name": "idempotency",
+      "status": "OK",
+      "duration": 0.2,
+      "tail": ""
+    },
+    {
+      "category": "core",
+      "name": "logging",
+      "status": "OK",
+      "duration": 0.19,
+      "tail": ""
+    },
+    {
+      "category": "core",
+      "name": "memory",
+      "status": "FAIL",
+      "duration": 0.06,
+      "tail": "    import resource | ModuleNotFoundError: No module named 'resource'"
+    },
+    {
+      "category": "core",
+      "name": "mutation",
+      "status": "SKIP",
+      "duration": 0.21,
+      "tail": "mutation_test_harness.py: error: unrecognized arguments: --self-test"
+    },
+    {
+      "category": "core",
+      "name": "network",
+      "status": "OK",
+      "duration": 6.19,
+      "tail": "NetworkReport: 29 checks recorded, 14 boolean-pass checks"
+    },
+    {
+      "category": "core",
+      "name": "null_propagation",
+      "status": "OK",
+      "duration": 0.13,
+      "tail": "  crash:          13 | OK: all acceptance criteria met."
+    },
+    {
+      "category": "core",
+      "name": "numeric",
+      "status": "TIME",
+      "duration": 90.02,
+      "tail": "TIMEOUT after 90.0s"
+    },
+    {
+      "category": "core",
+      "name": "pagination",
+      "status": "OK",
+      "duration": 0.21,
+      "tail": ""
+    },
+    {
+      "category": "core",
+      "name": "pipeline",
+      "status": "OK",
+      "duration": 0.17,
+      "tail": ""
+    },
+    {
+      "category": "core",
+      "name": "property",
+      "status": "OK",
+      "duration": 0.27,
+      "tail": "Server running on port 61703 | Status: {'status': 'ok', 'results_count': 0}"
+    },
+    {
+      "category": "core",
+      "name": "ratelimit",
+      "status": "OK",
+      "duration": 0.21,
+      "tail": ""
+    },
+    {
+      "category": "core",
+      "name": "regression_snapshot",
+      "status": "OK",
+      "duration": 0.8,
+      "tail": "List  : 200 ['demo'] | Done."
+    },
+    {
+      "category": "core",
+      "name": "schema_evolution",
+      "status": "OK",
+      "duration": 0.15,
+      "tail": "  OK    old_writer_after_expand_doesnt_break_reader        got='alice@ex.com' | OK: 5 scenarios passed."
+    },
+    {
+      "category": "core",
+      "name": "scraper",
+      "status": "OK",
+      "duration": 1.25,
+      "tail": " | Results: 49/49 passed"
+    },
+    {
+      "category": "core",
+      "name": "serialization",
+      "status": "OK",
+      "duration": 0.21,
+      "tail": ""
+    },
+    {
+      "category": "core",
+      "name": "statemachine",
+      "status": "OK",
+      "duration": 0.18,
+      "tail": ""
+    },
+    {
+      "category": "core",
+      "name": "stress",
+      "status": "OK",
+      "duration": 31.12,
+      "tail": " |   Peak concurrent VUs: 10"
+    },
+    {
+      "category": "core",
+      "name": "webhook",
+      "status": "OK",
+      "duration": 0.2,
+      "tail": ""
+    },
+    {
+      "category": "pharmacy",
+      "name": "auditlog_cap",
+      "status": "OK",
+      "duration": 0.18,
+      "tail": " |   Results: 16 passed, 0 failed out of 16"
+    },
+    {
+      "category": "pharmacy",
+      "name": "backup_restore",
+      "status": "OK",
+      "duration": 0.28,
+      "tail": " |   Results: 13 passed, 0 failed out of 13"
+    },
+    {
+      "category": "pharmacy",
+      "name": "clinical_calc",
+      "status": "OK",
+      "duration": 0.18,
+      "tail": " |   Results: 18 passed, 0 failed out of 18"
+    },
+    {
+      "category": "pharmacy",
+      "name": "drug_interaction",
+      "status": "OK",
+      "duration": 0.15,
+      "tail": "  OK    non_overridable_contraindication    override_allowed=False | OK: 8 scenarios passed."
+    },
+    {
+      "category": "pharmacy",
+      "name": "expiry_window",
+      "status": "OK",
+      "duration": 0.17,
+      "tail": " |   Results: 13 passed, 0 failed out of 13"
+    },
+    {
+      "category": "pharmacy",
+      "name": "lockout",
+      "status": "OK",
+      "duration": 0.17,
+      "tail": " |   Results: 13 passed, 0 failed out of 13"
+    },
+    {
+      "category": "pharmacy",
+      "name": "partial_fill",
+      "status": "FAIL",
+      "duration": 0.18,
+      "tail": "           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ | UnicodeEncodeError: 'charmap' codec can't encode character '\\u2192' in position 30: character maps to <undefined>"
+    },
+    {
+      "category": "pharmacy",
+      "name": "srs",
+      "status": "FAIL",
+      "duration": 0.11,
+      "tail": "                       ^^^^^^^^^^^^^^^^^^^^^^ | OverflowError: cannot convert float infinity to integer"
+    },
+    {
+      "category": "security",
+      "name": "appsec",
+      "status": "OK",
+      "duration": 0.77,
+      "tail": "MockServer OK (port 61740) | All self-tests passed!"
+    },
+    {
+      "category": "security",
+      "name": "authz",
+      "status": "OK",
+      "duration": 0.22,
+      "tail": ""
+    },
+    {
+      "category": "security",
+      "name": "security",
+      "status": "SKIP",
+      "duration": 0.24,
+      "tail": "security_test_harness.py: error: unrecognized arguments: --self-test"
+    },
+    {
+      "category": "security",
+      "name": "supplychain",
+      "status": "OK",
+      "duration": 0.25,
+      "tail": ""
+    },
+    {
+      "category": "security",
+      "name": "upload",
+      "status": "OK",
+      "duration": 0.18,
+      "tail": ""
+    }
+  ]
+}

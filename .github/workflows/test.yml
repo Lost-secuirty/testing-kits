@@ -29,3 +29,9 @@ jobs:
         with:
           name: status-py${{ matrix.python }}
           path: STATUS.md
+      - name: Upload STATUS.json
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: status-json-py${{ matrix.python }}
+          path: STATUS.json

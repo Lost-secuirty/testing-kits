@@ -12,6 +12,8 @@ Exits 0 if every harness self-tests green, non-zero otherwise.
 from __future__ import annotations
 
 import datetime as dt
+import json
+import os
 import subprocess
 import sys
 import time
@@ -68,12 +70,17 @@ def run_self_test(path: Path, timeout_s: float = 90.0) -> tuple[str, float, str]
     """
     start = time.perf_counter()
     try:
+        env = os.environ.copy()
+        # Ensure child Python processes use UTF-8 for stdout/stderr on Windows
+        env.setdefault("PYTHONIOENCODING", "utf-8")
+        env.setdefault("PYTHONUTF8", "1")
         proc = subprocess.run(
             [sys.executable, str(path), "--self-test"],
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
             timeout=timeout_s,
+            env=env,
         )
     except subprocess.TimeoutExpired:
         duration = time.perf_counter() - start
@@ -131,12 +138,52 @@ def write_status(rows: list[dict], total_duration: float) -> None:
     lines.append("")
     lines.append("| Harness | Self-test | Duration | Notes |")
     lines.append("|---|---|---:|---|")
+    per_harness_list = []
     for r in sorted(rows, key=lambda r: (r["category"], r["name"])):
         notes = r["tail"].replace("|", "\\|") if r["tail"] else ""
         lines.append(f"| {r['category']}/{r['name']} | {r['status']} | {r['duration']:.2f}s | {notes} |")
+        per_harness_list.append({
+            "category": r["category"],
+            "name": r["name"],
+            "status": r["status"],
+            "duration": round(r["duration"], 2),
+            "tail": r["tail"],
+        })
     lines.append("")
 
     (REPO_ROOT / "STATUS.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    # Also write a machine-readable JSON report for dashboard ingestion
+    by_category_data: dict[str, dict] = {}
+    for cat in sorted(by_cat):
+        items = by_cat[cat]
+        n = len(items)
+        ok = sum(1 for r in items if r["status"] == "OK")
+        fail = sum(1 for r in items if r["status"] in ("FAIL", "TIME"))
+        skip = sum(1 for r in items if r["status"] == "SKIP")
+        dur = sum(r["duration"] for r in items)
+        by_category_data[cat] = {
+            "count": n,
+            "ok": ok,
+            "fail": fail,
+            "skip": skip,
+            "duration_s": round(dur, 2),
+        }
+
+    json_obj = {
+        "generated_at": now,
+        "summary": {
+            "total_harnesses": n_total,
+            "ok": n_ok,
+            "fail": n_fail,
+            "skip": n_skip,
+            "header": header,
+            "total_duration_s": round(total_duration, 2),
+        },
+        "by_category": by_category_data,
+        "per_harness": per_harness_list,
+    }
+    (REPO_ROOT / "STATUS.json").write_text(json.dumps(json_obj, indent=2) + "\n", encoding="utf-8")
 
 
 def main() -> int:
