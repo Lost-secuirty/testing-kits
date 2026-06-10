@@ -382,9 +382,11 @@ class PrecisionTester:
 
     @staticmethod
     def float_inexact_sum() -> dict:
-        """Sum of 0.1 ten times using float is not exactly 1.0."""
-        total = sum(0.1 for _ in range(10))
+        """Float sum that is close to 1.0 but not exactly 1.0."""
+        terms = [0.01, 0.29, 0.70]
+        total = sum(terms)
         return {
+            "terms": terms,
             "result": total,
             "equals_one": total == 1.0,
         }
