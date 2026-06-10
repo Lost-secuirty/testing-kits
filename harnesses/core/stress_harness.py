@@ -692,6 +692,7 @@ async def async_main():
             pass
         finally:
             server.shutdown()
+            server.server_close()
         return
 
     config = HarnessConfig(
@@ -730,6 +731,7 @@ async def async_main():
     finally:
         if mock_server:
             mock_server.shutdown()
+            mock_server.server_close()
 
 
 def main():

@@ -188,6 +188,7 @@ class ProtocolTester:
 
     def stop(self):
         self._server.shutdown()
+        self._server.server_close()
 
     # ------------------------------------------------------------------
     def test_status_line(self) -> bool:
@@ -247,6 +248,7 @@ class ProtocolTester:
             return False
         finally:
             server2.shutdown()
+            server2.server_close()
 
     def test_head_has_no_body(self) -> bool:
         try:
@@ -279,6 +281,8 @@ class TimeoutTester:
     def stop(self):
         for s in self._servers:
             s.shutdown()
+            s.server_close()
+        self._servers.clear()
 
     def _make_server(self, cfg: Dict) -> Tuple[str, int]:
         s, port = _start_mock_server(cfg)
@@ -408,6 +412,7 @@ class RetryTester:
             return result
         finally:
             server.shutdown()
+            server.server_close()
 
     def test_retry_succeeds_after_failures(self) -> ConnectionResult:
         """First N-1 requests fail, last one succeeds."""
@@ -423,6 +428,7 @@ class RetryTester:
             return result
         finally:
             server.shutdown()
+            server.server_close()
 
     def test_backoff_schedule(self) -> List[float]:
         """Return the expected delay sequence for policy.max_attempts."""
@@ -455,6 +461,8 @@ class PayloadTester:
     def stop(self):
         for s in self._servers:
             s.shutdown()
+            s.server_close()
+        self._servers.clear()
 
     def _server_for_size(self, size: int) -> str:
         s, port = _start_mock_server({"payload_size": size})
@@ -707,6 +715,8 @@ class ShutdownTester:
             server.shutdown()
         except Exception:
             shutdown_ok = False
+        finally:
+            server.server_close()
 
         for t in threads:
             t.join(timeout=3.0)

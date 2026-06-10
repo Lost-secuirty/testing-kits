@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-core test-security test-ai test-pharmacy selftest report lint clean help
+.PHONY: test test-fast test-core test-security test-ai test-pharmacy selftest proof report lint clean help
 
 PY ?= python3
 
@@ -11,6 +11,7 @@ help:
 	@echo "  test-ai        Run ai/ tests only"
 	@echo "  test-pharmacy  Same as test-fast"
 	@echo "  selftest       Run --self-test for every harness"
+	@echo "  proof          Run proof audit plus harness self-tests"
 	@echo "  report         Regenerate STATUS.md"
 	@echo "  lint           py_compile + ruff if installed"
 	@echo "  clean          Remove __pycache__ and *.pyc"
@@ -24,19 +25,10 @@ test-core test-security test-ai test-pharmacy:
 	$(PY) -m unittest discover -s tests/$(@:test-%=%) -t . -p "test_*.py"
 
 selftest:
-	@set -e; \
-	failed=0; \
-	for f in harnesses/*/*_test_harness.py harnesses/core/stress_harness.py; do \
-	  [ -f "$$f" ] || continue; \
-	  out=$$(timeout 90 $(PY) "$$f" --self-test 2>&1); rc=$$?; \
-	  case "$$out" in \
-	    *"unrecognized arguments: --self-test"*) echo "SKIP  $$f (no --self-test)"; continue;; \
-	    *"No such file or directory: '--self-test'"*) echo "SKIP  $$f (no --self-test)"; continue;; \
-	    *"invalid literal for int()"*"'--self-test'"*) echo "SKIP  $$f (no --self-test)"; continue;; \
-	  esac; \
-	  if [ $$rc -eq 0 ]; then echo "OK    $$f"; else echo "FAIL  $$f (rc=$$rc)"; failed=$$((failed+1)); fi; \
-	done; \
-	if [ $$failed -gt 0 ]; then echo "$$failed failing"; exit 1; fi
+	$(PY) tools/generate_report.py --check
+
+proof:
+	$(PY) tools/proof_audit.py --run-selftests
 
 report:
 	$(PY) tools/generate_report.py

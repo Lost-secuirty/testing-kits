@@ -649,8 +649,10 @@ class MockLoggingHandler:
 
     def stop(self) -> None:
         self._server.shutdown()
+        self._server.server_close()
         if self._thread:
             self._thread.join(timeout=5)
+            self._thread = None
 
     def get_entries(self) -> List[LogEntry]:
         with self._lock:

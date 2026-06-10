@@ -1,413 +1,1955 @@
 {
-  "generated_at": "2026-06-10 03:52 UTC",
+  "generated_at": "2026-06-10 05:44 UTC",
   "summary": {
-    "total_harnesses": 53,
-    "ok": 43,
-    "fail": 6,
-    "skip": 4,
-    "header": "6 failing, 4 no --self-test",
-    "total_duration_s": 141.99
+    "total_harnesses": 73,
+    "ok": 73,
+    "fail": 0,
+    "skip": 0,
+    "header": "all green",
+    "total_duration_s": 67.17
+  },
+  "proof": {
+    "summary": {
+      "total_harnesses": 73,
+      "ok": 73,
+      "fail": 0,
+      "header": "all proven"
+    },
+    "per_harness": [
+      {
+        "category": "ai",
+        "name": "agent_eval",
+        "key": "ai/agent_eval",
+        "path": "harnesses/ai/agent_eval_test_harness.py",
+        "paired_test": "tests/ai/test_agent_eval_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/ai/test_agent_eval_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "ai",
+        "name": "agent_memory_context",
+        "key": "ai/agent_memory_context",
+        "path": "harnesses/ai/agent_memory_context_test_harness.py",
+        "paired_test": "tests/ai/test_agent_memory_context_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/ai/test_agent_memory_context_proof.py",
+        "proof_test_exists": true,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "proof_file",
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "ai",
+        "name": "agentic",
+        "key": "ai/agentic",
+        "path": "harnesses/ai/agentic_test_harness.py",
+        "paired_test": "tests/ai/test_agentic_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/ai/test_agentic_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "ai",
+        "name": "drift_detection",
+        "key": "ai/drift_detection",
+        "path": "harnesses/ai/drift_detection_test_harness.py",
+        "paired_test": "tests/ai/test_drift_detection_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/ai/test_drift_detection_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "ai",
+        "name": "llm_eval",
+        "key": "ai/llm_eval",
+        "path": "harnesses/ai/llm_eval_test_harness.py",
+        "paired_test": "tests/ai/test_llm_eval_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/ai/test_llm_eval_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "ai",
+        "name": "prompt_injection",
+        "key": "ai/prompt_injection",
+        "path": "harnesses/ai/prompt_injection_test_harness.py",
+        "paired_test": "tests/ai/test_prompt_injection_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/ai/test_prompt_injection_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "ai",
+        "name": "rag_eval",
+        "key": "ai/rag_eval",
+        "path": "harnesses/ai/rag_eval_test_harness.py",
+        "paired_test": "tests/ai/test_rag_eval_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/ai/test_rag_eval_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "a11y",
+        "key": "core/a11y",
+        "path": "harnesses/core/a11y_test_harness.py",
+        "paired_test": "tests/core/test_a11y_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_a11y_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "api",
+        "key": "core/api",
+        "path": "harnesses/core/api_test_harness.py",
+        "paired_test": "tests/core/test_api_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_api_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "browser_e2e",
+        "key": "core/browser_e2e",
+        "path": "harnesses/core/browser_e2e_test_harness.py",
+        "paired_test": "tests/core/test_browser_e2e_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_browser_e2e_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "cache",
+        "key": "core/cache",
+        "path": "harnesses/core/cache_test_harness.py",
+        "paired_test": "tests/core/test_cache_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_cache_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "canvas_scene_state",
+        "key": "core/canvas_scene_state",
+        "path": "harnesses/core/canvas_scene_state_test_harness.py",
+        "paired_test": "tests/core/test_canvas_scene_state_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_canvas_scene_state_proof.py",
+        "proof_test_exists": true,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "proof_file",
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "cardinality",
+        "key": "core/cardinality",
+        "path": "harnesses/core/cardinality_test_harness.py",
+        "paired_test": "tests/core/test_cardinality_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_cardinality_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "chaos",
+        "key": "core/chaos",
+        "path": "harnesses/core/chaos_test_harness.py",
+        "paired_test": "tests/core/test_chaos_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_chaos_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "circuitbreaker",
+        "key": "core/circuitbreaker",
+        "path": "harnesses/core/circuitbreaker_test_harness.py",
+        "paired_test": "tests/core/test_circuitbreaker_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_circuitbreaker_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "cli",
+        "key": "core/cli",
+        "path": "harnesses/core/cli_test_harness.py",
+        "paired_test": "tests/core/test_cli_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_cli_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "clock_skew",
+        "key": "core/clock_skew",
+        "path": "harnesses/core/clock_skew_test_harness.py",
+        "paired_test": "tests/core/test_clock_skew_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_clock_skew_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "complexity",
+        "key": "core/complexity",
+        "path": "harnesses/core/complexity_test_harness.py",
+        "paired_test": "tests/core/test_complexity_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_complexity_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "concurrency",
+        "key": "core/concurrency",
+        "path": "harnesses/core/concurrency_test_harness.py",
+        "paired_test": "tests/core/test_concurrency_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_concurrency_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "config",
+        "key": "core/config",
+        "path": "harnesses/core/config_test_harness.py",
+        "paired_test": "tests/core/test_config_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_config_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "contract",
+        "key": "core/contract",
+        "path": "harnesses/core/contract_test_harness.py",
+        "paired_test": "tests/core/test_contract_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_contract_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "datetime",
+        "key": "core/datetime",
+        "path": "harnesses/core/datetime_test_harness.py",
+        "paired_test": "tests/core/test_datetime_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_datetime_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "db",
+        "key": "core/db",
+        "path": "harnesses/core/db_test_harness.py",
+        "paired_test": "tests/core/test_db_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_db_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "dormant_code",
+        "key": "core/dormant_code",
+        "path": "harnesses/core/dormant_code_test_harness.py",
+        "paired_test": "tests/core/test_dormant_code_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_dormant_code_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "error_path_leak",
+        "key": "core/error_path_leak",
+        "path": "harnesses/core/error_path_leak_test_harness.py",
+        "paired_test": "tests/core/test_error_path_leak_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_error_path_leak_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "errorpath",
+        "key": "core/errorpath",
+        "path": "harnesses/core/errorpath_test_harness.py",
+        "paired_test": "tests/core/test_errorpath_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_errorpath_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "feature_flag",
+        "key": "core/feature_flag",
+        "path": "harnesses/core/feature_flag_test_harness.py",
+        "paired_test": "tests/core/test_feature_flag_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_feature_flag_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "fuzz",
+        "key": "core/fuzz",
+        "path": "harnesses/core/fuzz_test_harness.py",
+        "paired_test": "tests/core/test_fuzz_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_fuzz_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "game_loop_simulation",
+        "key": "core/game_loop_simulation",
+        "path": "harnesses/core/game_loop_simulation_test_harness.py",
+        "paired_test": "tests/core/test_game_loop_simulation_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_game_loop_simulation_proof.py",
+        "proof_test_exists": true,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "proof_file",
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "graphql",
+        "key": "core/graphql",
+        "path": "harnesses/core/graphql_test_harness.py",
+        "paired_test": "tests/core/test_graphql_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_graphql_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "grpc_contract",
+        "key": "core/grpc_contract",
+        "path": "harnesses/core/grpc_contract_test_harness.py",
+        "paired_test": "tests/core/test_grpc_contract_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_grpc_contract_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "hermeticity",
+        "key": "core/hermeticity",
+        "path": "harnesses/core/hermeticity_test_harness.py",
+        "paired_test": "tests/core/test_hermeticity_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_hermeticity_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "i18n",
+        "key": "core/i18n",
+        "path": "harnesses/core/i18n_test_harness.py",
+        "paired_test": "tests/core/test_i18n_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_i18n_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "idempotency",
+        "key": "core/idempotency",
+        "path": "harnesses/core/idempotency_test_harness.py",
+        "paired_test": "tests/core/test_idempotency_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_idempotency_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "iot_telemetry",
+        "key": "core/iot_telemetry",
+        "path": "harnesses/core/iot_telemetry_test_harness.py",
+        "paired_test": "tests/core/test_iot_telemetry_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_iot_telemetry_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "logging",
+        "key": "core/logging",
+        "path": "harnesses/core/logging_test_harness.py",
+        "paired_test": "tests/core/test_logging_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_logging_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "memory",
+        "key": "core/memory",
+        "path": "harnesses/core/memory_test_harness.py",
+        "paired_test": "tests/core/test_memory_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_memory_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "mutation",
+        "key": "core/mutation",
+        "path": "harnesses/core/mutation_test_harness.py",
+        "paired_test": "tests/core/test_mutation_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_mutation_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "network",
+        "key": "core/network",
+        "path": "harnesses/core/network_test_harness.py",
+        "paired_test": "tests/core/test_network_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_network_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "null_propagation",
+        "key": "core/null_propagation",
+        "path": "harnesses/core/null_propagation_test_harness.py",
+        "paired_test": "tests/core/test_null_propagation_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_null_propagation_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "numeric",
+        "key": "core/numeric",
+        "path": "harnesses/core/numeric_test_harness.py",
+        "paired_test": "tests/core/test_numeric_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_numeric_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "pagination",
+        "key": "core/pagination",
+        "path": "harnesses/core/pagination_test_harness.py",
+        "paired_test": "tests/core/test_pagination_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_pagination_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "payments",
+        "key": "core/payments",
+        "path": "harnesses/core/payments_test_harness.py",
+        "paired_test": "tests/core/test_payments_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_payments_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "pipeline",
+        "key": "core/pipeline",
+        "path": "harnesses/core/pipeline_test_harness.py",
+        "paired_test": "tests/core/test_pipeline_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_pipeline_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "property",
+        "key": "core/property",
+        "path": "harnesses/core/property_test_harness.py",
+        "paired_test": "tests/core/test_property_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_property_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "queue",
+        "key": "core/queue",
+        "path": "harnesses/core/queue_test_harness.py",
+        "paired_test": "tests/core/test_queue_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_queue_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "ratelimit",
+        "key": "core/ratelimit",
+        "path": "harnesses/core/ratelimit_test_harness.py",
+        "paired_test": "tests/core/test_ratelimit_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_ratelimit_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "regression_snapshot",
+        "key": "core/regression_snapshot",
+        "path": "harnesses/core/regression_snapshot_test_harness.py",
+        "paired_test": "tests/core/test_regression_snapshot_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_regression_snapshot_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "schema_evolution",
+        "key": "core/schema_evolution",
+        "path": "harnesses/core/schema_evolution_test_harness.py",
+        "paired_test": "tests/core/test_schema_evolution_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_schema_evolution_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "scraper",
+        "key": "core/scraper",
+        "path": "harnesses/core/scraper_test_harness.py",
+        "paired_test": "tests/core/test_scraper_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_scraper_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "search_relevance",
+        "key": "core/search_relevance",
+        "path": "harnesses/core/search_relevance_test_harness.py",
+        "paired_test": "tests/core/test_search_relevance_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_search_relevance_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "serialization",
+        "key": "core/serialization",
+        "path": "harnesses/core/serialization_test_harness.py",
+        "paired_test": "tests/core/test_serialization_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_serialization_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "statemachine",
+        "key": "core/statemachine",
+        "path": "harnesses/core/statemachine_test_harness.py",
+        "paired_test": "tests/core/test_statemachine_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_statemachine_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "statistical_rng_oracle",
+        "key": "core/statistical_rng_oracle",
+        "path": "harnesses/core/statistical_rng_oracle_test_harness.py",
+        "paired_test": "tests/core/test_statistical_rng_oracle_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_statistical_rng_oracle_proof.py",
+        "proof_test_exists": true,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "proof_file",
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "stress",
+        "key": "core/stress",
+        "path": "harnesses/core/stress_harness.py",
+        "paired_test": "tests/core/test_stress_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_stress_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "tracing",
+        "key": "core/tracing",
+        "path": "harnesses/core/tracing_test_harness.py",
+        "paired_test": "tests/core/test_tracing_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_tracing_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "core",
+        "name": "webhook",
+        "key": "core/webhook",
+        "path": "harnesses/core/webhook_test_harness.py",
+        "paired_test": "tests/core/test_webhook_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/core/test_webhook_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "pharmacy",
+        "name": "auditlog_cap",
+        "key": "pharmacy/auditlog_cap",
+        "path": "harnesses/pharmacy/auditlog_cap_test_harness.py",
+        "paired_test": "tests/pharmacy/test_auditlog_cap_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/pharmacy/test_auditlog_cap_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "pharmacy",
+        "name": "backup_restore",
+        "key": "pharmacy/backup_restore",
+        "path": "harnesses/pharmacy/backup_restore_test_harness.py",
+        "paired_test": "tests/pharmacy/test_backup_restore_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/pharmacy/test_backup_restore_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "pharmacy",
+        "name": "clinical_calc",
+        "key": "pharmacy/clinical_calc",
+        "path": "harnesses/pharmacy/clinical_calc_test_harness.py",
+        "paired_test": "tests/pharmacy/test_clinical_calc_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/pharmacy/test_clinical_calc_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "pharmacy",
+        "name": "drug_interaction",
+        "key": "pharmacy/drug_interaction",
+        "path": "harnesses/pharmacy/drug_interaction_test_harness.py",
+        "paired_test": "tests/pharmacy/test_drug_interaction_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/pharmacy/test_drug_interaction_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "pharmacy",
+        "name": "expiry_window",
+        "key": "pharmacy/expiry_window",
+        "path": "harnesses/pharmacy/expiry_window_test_harness.py",
+        "paired_test": "tests/pharmacy/test_expiry_window_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/pharmacy/test_expiry_window_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "pharmacy",
+        "name": "lockout",
+        "key": "pharmacy/lockout",
+        "path": "harnesses/pharmacy/lockout_test_harness.py",
+        "paired_test": "tests/pharmacy/test_lockout_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/pharmacy/test_lockout_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "pharmacy",
+        "name": "partial_fill",
+        "key": "pharmacy/partial_fill",
+        "path": "harnesses/pharmacy/partial_fill_test_harness.py",
+        "paired_test": "tests/pharmacy/test_partial_fill_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/pharmacy/test_partial_fill_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "pharmacy",
+        "name": "srs",
+        "key": "pharmacy/srs",
+        "path": "harnesses/pharmacy/srs_test_harness.py",
+        "paired_test": "tests/pharmacy/test_srs_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/pharmacy/test_srs_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "security",
+        "name": "appsec",
+        "key": "security/appsec",
+        "path": "harnesses/security/appsec_test_harness.py",
+        "paired_test": "tests/security/test_appsec_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/security/test_appsec_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "security",
+        "name": "authz",
+        "key": "security/authz",
+        "path": "harnesses/security/authz_test_harness.py",
+        "paired_test": "tests/security/test_authz_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/security/test_authz_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "security",
+        "name": "cwe_kev_regression",
+        "key": "security/cwe_kev_regression",
+        "path": "harnesses/security/cwe_kev_regression_test_harness.py",
+        "paired_test": "tests/security/test_cwe_kev_regression_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/security/test_cwe_kev_regression_proof.py",
+        "proof_test_exists": true,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "proof_file",
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "security",
+        "name": "jwt",
+        "key": "security/jwt",
+        "path": "harnesses/security/jwt_test_harness.py",
+        "paired_test": "tests/security/test_jwt_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/security/test_jwt_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "security",
+        "name": "pii_redaction",
+        "key": "security/pii_redaction",
+        "path": "harnesses/security/pii_redaction_test_harness.py",
+        "paired_test": "tests/security/test_pii_redaction_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/security/test_pii_redaction_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "security",
+        "name": "security",
+        "key": "security/security",
+        "path": "harnesses/security/security_test_harness.py",
+        "paired_test": "tests/security/test_security_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/security/test_security_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "security",
+        "name": "supplychain",
+        "key": "security/supplychain",
+        "path": "harnesses/security/supplychain_test_harness.py",
+        "paired_test": "tests/security/test_supplychain_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/security/test_supplychain_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      },
+      {
+        "category": "security",
+        "name": "upload",
+        "key": "security/upload",
+        "path": "harnesses/security/upload_test_harness.py",
+        "paired_test": "tests/security/test_upload_test_harness.py",
+        "paired_test_exists": true,
+        "proof_test": "tests/security/test_upload_proof.py",
+        "proof_test_exists": false,
+        "selftest_status": "OK",
+        "has_safe_control": true,
+        "has_bad_control": true,
+        "proof_sources": [
+          "embedded_controls",
+          "self_test_green"
+        ],
+        "ok": true,
+        "failures": []
+      }
+    ]
   },
   "by_category": {
     "ai": {
-      "count": 3,
-      "ok": 2,
-      "fail": 1,
+      "count": 7,
+      "ok": 7,
+      "fail": 0,
       "skip": 0,
-      "duration_s": 0.52
+      "duration_s": 1.58
     },
     "core": {
-      "count": 37,
-      "ok": 31,
-      "fail": 3,
-      "skip": 3,
-      "duration_s": 138.36
+      "count": 50,
+      "ok": 50,
+      "fail": 0,
+      "skip": 0,
+      "duration_s": 59.27
     },
     "pharmacy": {
       "count": 8,
-      "ok": 6,
-      "fail": 2,
+      "ok": 8,
+      "fail": 0,
       "skip": 0,
-      "duration_s": 1.41
+      "duration_s": 2.26
     },
     "security": {
-      "count": 5,
-      "ok": 4,
+      "count": 8,
+      "ok": 8,
       "fail": 0,
-      "skip": 1,
-      "duration_s": 1.66
+      "skip": 0,
+      "duration_s": 4.05
     }
   },
   "per_harness": [
     {
       "category": "ai",
+      "name": "agent_eval",
+      "status": "OK",
+      "duration": 0.22,
+      "tail": "OK: 23 scenarios passed."
+    },
+    {
+      "category": "ai",
+      "name": "agent_memory_context",
+      "status": "OK",
+      "duration": 0.19,
+      "tail": "OK: 6 agent memory/context controls passed."
+    },
+    {
+      "category": "ai",
       "name": "agentic",
       "status": "OK",
-      "duration": 0.2,
+      "duration": 0.31,
       "tail": ""
+    },
+    {
+      "category": "ai",
+      "name": "drift_detection",
+      "status": "OK",
+      "duration": 0.17,
+      "tail": "OK: 24 scenarios passed."
     },
     {
       "category": "ai",
       "name": "llm_eval",
       "status": "OK",
-      "duration": 0.2,
+      "duration": 0.31,
       "tail": ""
     },
     {
       "category": "ai",
       "name": "prompt_injection",
-      "status": "FAIL",
-      "duration": 0.12,
-      "tail": "           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ | UnicodeEncodeError: 'charmap' codec can't encode character '\\u2265' in position 24: character maps to <undefined>"
+      "status": "OK",
+      "duration": 0.16,
+      "tail": "Benign pass rate:                1.000 | OK: scorer meets recall \u22650.80 and benign-pass \u22650.90."
+    },
+    {
+      "category": "ai",
+      "name": "rag_eval",
+      "status": "OK",
+      "duration": 0.21,
+      "tail": "OK: 19 scenarios passed."
     },
     {
       "category": "core",
       "name": "a11y",
-      "status": "SKIP",
-      "duration": 0.19,
-      "tail": "FileNotFoundError: [Errno 2] No such file or directory: '--self-test'"
+      "status": "OK",
+      "duration": 0.31,
+      "tail": " |   2/2 checks passed"
     },
     {
       "category": "core",
       "name": "api",
       "status": "OK",
-      "duration": 0.37,
+      "duration": 0.93,
       "tail": "  . auth_valid_token |   . content_json"
+    },
+    {
+      "category": "core",
+      "name": "browser_e2e",
+      "status": "OK",
+      "duration": 0.22,
+      "tail": "OK: 22 scenarios passed."
     },
     {
       "category": "core",
       "name": "cache",
       "status": "OK",
-      "duration": 0.27,
+      "duration": 0.37,
       "tail": "  [PASS] single_flight_all_get_result |   [PASS] single_flight_loader_called_once"
+    },
+    {
+      "category": "core",
+      "name": "canvas_scene_state",
+      "status": "OK",
+      "duration": 0.17,
+      "tail": "OK: scene-state controls passed and proof scene was rejected."
     },
     {
       "category": "core",
       "name": "cardinality",
       "status": "OK",
-      "duration": 0.15,
+      "duration": 0.19,
       "tail": "  OK    db_index_order_status            distinct=    4/ 1000  ratio=0.004  bounded=True | OK: 6 scenarios matched their cardinality expectations."
     },
     {
       "category": "core",
       "name": "chaos",
       "status": "OK",
-      "duration": 0.76,
-      "tail": " | Metrics: {'success': 3, 'failure': 0, 'open': 0, 'total': 3, 'success_rate': 1.0, 'avg_latency_ms': 15.67}"
+      "duration": 0.4,
+      "tail": " | Metrics: {'success': 3, 'failure': 0, 'open': 0, 'total': 3, 'success_rate': 1.0, 'avg_latency_ms': 20.67}"
+    },
+    {
+      "category": "core",
+      "name": "circuitbreaker",
+      "status": "OK",
+      "duration": 0.29,
+      "tail": " |   Results: 13 passed, 0 failed out of 13"
     },
     {
       "category": "core",
       "name": "cli",
       "status": "OK",
-      "duration": 1.41,
+      "duration": 2.06,
       "tail": "  [PASS] stderr_message |   [PASS] json_no_name"
     },
     {
       "category": "core",
       "name": "clock_skew",
       "status": "OK",
-      "duration": 0.12,
+      "duration": 0.19,
       "tail": "  OK    future_dated_expiry       value='v' | OK: 6 scenarios passed."
     },
     {
       "category": "core",
+      "name": "complexity",
+      "status": "OK",
+      "duration": 0.2,
+      "tail": "OK: 5 metric cases match; gate flags bloat and passes clean code."
+    },
+    {
+      "category": "core",
       "name": "concurrency",
-      "status": "SKIP",
-      "duration": 0.21,
-      "tail": "ValueError: invalid literal for int() with base 10: '--self-test'"
+      "status": "OK",
+      "duration": 1.89,
+      "tail": " |   3/3 checks passed"
     },
     {
       "category": "core",
       "name": "config",
       "status": "OK",
-      "duration": 0.21,
+      "duration": 0.31,
       "tail": ""
     },
     {
       "category": "core",
       "name": "contract",
       "status": "OK",
-      "duration": 0.76,
-      "tail": "Server running at http://127.0.0.1:61636 | Done."
+      "duration": 0.81,
+      "tail": "Server running at http://127.0.0.1:49892 | Done."
     },
     {
       "category": "core",
       "name": "datetime",
       "status": "OK",
-      "duration": 0.25,
+      "duration": 0.27,
       "tail": ""
     },
     {
       "category": "core",
       "name": "db",
       "status": "OK",
-      "duration": 0.65,
-      "tail": "2026-06-09 22:50:01,480 [INFO] db_test_harness: [PASS] QueryPerformance \u2014 7 passed, 0 failed, 0 errors | 2026-06-09 22:50:01,488 [INFO] db_test_harness: [PASS] ConcurrentWrites \u2014 3 passed, 0 failed, 0"
+      "duration": 0.71,
+      "tail": "2026-06-10 00:43:26,803 [INFO] db_test_harness: [PASS] QueryPerformance \u2014 7 passed, 0 failed, 0 errors | 2026-06-10 00:43:26,812 [INFO] db_test_harness: [PASS] ConcurrentWrites \u2014 3 passed, 0 failed, 0"
     },
     {
       "category": "core",
       "name": "dormant_code",
       "status": "OK",
-      "duration": 0.13,
+      "duration": 0.21,
       "tail": "crashes surfaced:       1 | OK: dormant-path crash surfaced; coverage extended by synthetic inputs."
     },
     {
       "category": "core",
       "name": "error_path_leak",
       "status": "OK",
-      "duration": 0.16,
+      "duration": 0.22,
       "tail": "  LEAK  double_release                 final_live=-1000 errors=295/1000 | OK: every scenario matched its expectation."
     },
     {
       "category": "core",
       "name": "errorpath",
       "status": "OK",
-      "duration": 0.21,
+      "duration": 0.34,
       "tail": ""
     },
     {
       "category": "core",
       "name": "feature_flag",
       "status": "OK",
-      "duration": 0.13,
+      "duration": 0.19,
       "tail": "flip_mid_call (good):     4 flips, 0 crashes | OK: every scenario met its expectation."
     },
     {
       "category": "core",
       "name": "fuzz",
       "status": "OK",
-      "duration": 0.23,
+      "duration": 0.37,
       "tail": " | Demo complete."
     },
     {
       "category": "core",
+      "name": "game_loop_simulation",
+      "status": "OK",
+      "duration": 0.18,
+      "tail": "OK: game-loop invariants passed and planted bugs were caught."
+    },
+    {
+      "category": "core",
+      "name": "graphql",
+      "status": "OK",
+      "duration": 0.2,
+      "tail": "OK: 21 scenarios passed."
+    },
+    {
+      "category": "core",
+      "name": "grpc_contract",
+      "status": "OK",
+      "duration": 0.21,
+      "tail": "OK: 23 scenarios passed."
+    },
+    {
+      "category": "core",
       "name": "hermeticity",
-      "status": "FAIL",
-      "duration": 0.16,
-      "tail": "FAILED: |   - depends_on_home: expected hermetic=False, got True"
+      "status": "OK",
+      "duration": 0.26,
+      "tail": "  OK    depends_on_home                     hermetic=False  (home) | OK: 6 audits matched expected hermeticity."
     },
     {
       "category": "core",
       "name": "i18n",
       "status": "OK",
-      "duration": 0.22,
+      "duration": 0.33,
       "tail": "All self-tests passed."
     },
     {
       "category": "core",
       "name": "idempotency",
       "status": "OK",
-      "duration": 0.2,
+      "duration": 0.34,
       "tail": ""
+    },
+    {
+      "category": "core",
+      "name": "iot_telemetry",
+      "status": "OK",
+      "duration": 0.24,
+      "tail": "OK: 24 scenarios passed."
     },
     {
       "category": "core",
       "name": "logging",
       "status": "OK",
-      "duration": 0.19,
+      "duration": 0.27,
       "tail": ""
     },
     {
       "category": "core",
       "name": "memory",
-      "status": "FAIL",
-      "duration": 0.06,
-      "tail": "    import resource | ModuleNotFoundError: No module named 'resource'"
+      "status": "OK",
+      "duration": 0.63,
+      "tail": " | === self-test complete ==="
     },
     {
       "category": "core",
       "name": "mutation",
-      "status": "SKIP",
-      "duration": 0.21,
-      "tail": "mutation_test_harness.py: error: unrecognized arguments: --self-test"
+      "status": "OK",
+      "duration": 0.39,
+      "tail": " |   3/3 checks passed"
     },
     {
       "category": "core",
       "name": "network",
       "status": "OK",
-      "duration": 6.19,
+      "duration": 7.05,
       "tail": "NetworkReport: 29 checks recorded, 14 boolean-pass checks"
     },
     {
       "category": "core",
       "name": "null_propagation",
       "status": "OK",
-      "duration": 0.13,
+      "duration": 0.24,
       "tail": "  crash:          13 | OK: all acceptance criteria met."
     },
     {
       "category": "core",
       "name": "numeric",
-      "status": "TIME",
-      "duration": 90.02,
-      "tail": "TIMEOUT after 90.0s"
+      "status": "OK",
+      "duration": 0.31,
+      "tail": " |   4/4 checks passed"
     },
     {
       "category": "core",
       "name": "pagination",
       "status": "OK",
-      "duration": 0.21,
+      "duration": 0.36,
       "tail": ""
+    },
+    {
+      "category": "core",
+      "name": "payments",
+      "status": "OK",
+      "duration": 0.23,
+      "tail": "OK: 27 scenarios passed."
     },
     {
       "category": "core",
       "name": "pipeline",
       "status": "OK",
-      "duration": 0.17,
+      "duration": 0.33,
       "tail": ""
     },
     {
       "category": "core",
       "name": "property",
       "status": "OK",
-      "duration": 0.27,
-      "tail": "Server running on port 61703 | Status: {'status': 'ok', 'results_count': 0}"
+      "duration": 1.01,
+      "tail": "Server running on port 50469 | Status: {'status': 'ok', 'results_count': 0}"
+    },
+    {
+      "category": "core",
+      "name": "queue",
+      "status": "OK",
+      "duration": 0.2,
+      "tail": "OK: 20 scenarios passed."
     },
     {
       "category": "core",
       "name": "ratelimit",
       "status": "OK",
-      "duration": 0.21,
+      "duration": 0.39,
       "tail": ""
     },
     {
       "category": "core",
       "name": "regression_snapshot",
       "status": "OK",
-      "duration": 0.8,
+      "duration": 0.99,
       "tail": "List  : 200 ['demo'] | Done."
     },
     {
       "category": "core",
       "name": "schema_evolution",
       "status": "OK",
-      "duration": 0.15,
+      "duration": 0.22,
       "tail": "  OK    old_writer_after_expand_doesnt_break_reader        got='alice@ex.com' | OK: 5 scenarios passed."
     },
     {
       "category": "core",
       "name": "scraper",
       "status": "OK",
-      "duration": 1.25,
+      "duration": 0.96,
       "tail": " | Results: 49/49 passed"
+    },
+    {
+      "category": "core",
+      "name": "search_relevance",
+      "status": "OK",
+      "duration": 0.27,
+      "tail": "OK: 22 scenarios passed."
     },
     {
       "category": "core",
       "name": "serialization",
       "status": "OK",
-      "duration": 0.21,
+      "duration": 0.43,
       "tail": ""
     },
     {
       "category": "core",
       "name": "statemachine",
       "status": "OK",
-      "duration": 0.18,
+      "duration": 0.37,
       "tail": ""
+    },
+    {
+      "category": "core",
+      "name": "statistical_rng_oracle",
+      "status": "OK",
+      "duration": 0.24,
+      "tail": "OK: RNG distribution, replay, and biased proof controls passed."
     },
     {
       "category": "core",
       "name": "stress",
       "status": "OK",
-      "duration": 31.12,
-      "tail": " |   Peak concurrent VUs: 10"
+      "duration": 31.42,
+      "tail": " |   Peak concurrent VUs: 8"
+    },
+    {
+      "category": "core",
+      "name": "tracing",
+      "status": "OK",
+      "duration": 0.2,
+      "tail": "OK: 22 scenarios passed."
     },
     {
       "category": "core",
       "name": "webhook",
       "status": "OK",
-      "duration": 0.2,
+      "duration": 0.31,
       "tail": ""
     },
     {
       "category": "pharmacy",
       "name": "auditlog_cap",
       "status": "OK",
-      "duration": 0.18,
+      "duration": 0.36,
       "tail": " |   Results: 16 passed, 0 failed out of 16"
     },
     {
       "category": "pharmacy",
       "name": "backup_restore",
       "status": "OK",
-      "duration": 0.28,
+      "duration": 0.29,
       "tail": " |   Results: 13 passed, 0 failed out of 13"
     },
     {
       "category": "pharmacy",
       "name": "clinical_calc",
       "status": "OK",
-      "duration": 0.18,
+      "duration": 0.32,
       "tail": " |   Results: 18 passed, 0 failed out of 18"
     },
     {
       "category": "pharmacy",
       "name": "drug_interaction",
       "status": "OK",
-      "duration": 0.15,
+      "duration": 0.23,
       "tail": "  OK    non_overridable_contraindication    override_allowed=False | OK: 8 scenarios passed."
     },
     {
       "category": "pharmacy",
       "name": "expiry_window",
       "status": "OK",
-      "duration": 0.17,
+      "duration": 0.25,
       "tail": " |   Results: 13 passed, 0 failed out of 13"
     },
     {
       "category": "pharmacy",
       "name": "lockout",
       "status": "OK",
-      "duration": 0.17,
+      "duration": 0.28,
       "tail": " |   Results: 13 passed, 0 failed out of 13"
     },
     {
       "category": "pharmacy",
       "name": "partial_fill",
-      "status": "FAIL",
-      "duration": 0.18,
-      "tail": "           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ | UnicodeEncodeError: 'charmap' codec can't encode character '\\u2192' in position 30: character maps to <undefined>"
+      "status": "OK",
+      "duration": 0.34,
+      "tail": " |   14/14 scenarios passed"
     },
     {
       "category": "pharmacy",
       "name": "srs",
-      "status": "FAIL",
-      "duration": 0.11,
-      "tail": "                       ^^^^^^^^^^^^^^^^^^^^^^ | OverflowError: cannot convert float infinity to integer"
+      "status": "OK",
+      "duration": 0.2,
+      "tail": " |   Results: 22 passed, 0 failed out of 22"
     },
     {
       "category": "security",
       "name": "appsec",
       "status": "OK",
-      "duration": 0.77,
-      "tail": "MockServer OK (port 61740) | All self-tests passed!"
+      "duration": 0.96,
+      "tail": "MockServer OK (port 53398) | All self-tests passed!"
     },
     {
       "category": "security",
       "name": "authz",
       "status": "OK",
-      "duration": 0.22,
+      "duration": 0.32,
       "tail": ""
     },
     {
       "category": "security",
+      "name": "cwe_kev_regression",
+      "status": "OK",
+      "duration": 0.21,
+      "tail": "OK: 22 CWE/KEV regression controls passed."
+    },
+    {
+      "category": "security",
+      "name": "jwt",
+      "status": "OK",
+      "duration": 0.25,
+      "tail": " |   Results: 14 passed, 0 failed out of 14"
+    },
+    {
+      "category": "security",
+      "name": "pii_redaction",
+      "status": "OK",
+      "duration": 0.28,
+      "tail": " |   Results: 14 passed, 0 failed out of 14"
+    },
+    {
+      "category": "security",
       "name": "security",
-      "status": "SKIP",
-      "duration": 0.24,
-      "tail": "security_test_harness.py: error: unrecognized arguments: --self-test"
+      "status": "OK",
+      "duration": 1.38,
+      "tail": " |   2/2 checks passed"
     },
     {
       "category": "security",
       "name": "supplychain",
       "status": "OK",
-      "duration": 0.25,
+      "duration": 0.31,
       "tail": ""
     },
     {
       "category": "security",
       "name": "upload",
       "status": "OK",
-      "duration": 0.18,
+      "duration": 0.35,
       "tail": ""
     }
   ]

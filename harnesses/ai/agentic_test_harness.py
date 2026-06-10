@@ -721,9 +721,14 @@ class MockAgenticServer:
         self._thread.start()
 
     def stop(self) -> None:
-        if self._server:
-            self._server.shutdown()
+        server = self._server
+        if server:
+            server.shutdown()
+            server.server_close()
             self._server = None
+        if self._thread:
+            self._thread.join(timeout=2)
+            self._thread = None
 
     @property
     def url(self) -> str:

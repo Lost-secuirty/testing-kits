@@ -164,6 +164,14 @@ class MockAuthzHandler(BaseHTTPRequestHandler):
     def _get_resource(self, resource_id: str) -> Optional[Resource]:
         return self.server.resources.get(resource_id)
 
+    def _drain_body(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            length = 0
+        if length > 0:
+            self.rfile.read(length)
+
     def do_GET(self):
         if self.path.startswith("/resource/"):
             rid = self.path[len("/resource/"):]
@@ -172,6 +180,7 @@ class MockAuthzHandler(BaseHTTPRequestHandler):
             self._send(404, json.dumps({"error": "not found"}))
 
     def do_POST(self):
+        self._drain_body()
         if self.path.startswith("/admin/"):
             self._handle_admin()
         elif self.path.startswith("/resource/"):
@@ -257,7 +266,11 @@ class AuthzServer:
         self._thread.start()
 
     def stop(self) -> None:
-        self._server.shutdown()
+        if self._thread and self._thread.is_alive():
+            self._server.shutdown()
+            self._thread.join(timeout=2)
+        self._server.server_close()
+        self._thread = None
 
     def add_resource(self, resource: Resource) -> None:
         self.resources[resource.resource_id] = resource

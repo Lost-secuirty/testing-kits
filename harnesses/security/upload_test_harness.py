@@ -672,8 +672,10 @@ class MockUploadServer:
 
     def stop(self) -> None:
         self.server.shutdown()
+        self.server.server_close()
         if self._thread:
             self._thread.join(timeout=5)
+            self._thread = None
 
     @property
     def url(self) -> str:

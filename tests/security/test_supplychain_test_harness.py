@@ -6,7 +6,6 @@ Pure stdlib, zero external dependencies.
 import dataclasses
 import hashlib
 import json
-import time
 import unittest
 import urllib.request
 from typing import Dict, List, Set
@@ -557,15 +556,20 @@ class TestReproducibleBuildChecker(unittest.TestCase):
 
     def setUp(self):
         self.checker = ReproducibleBuildChecker()
+        self._build_counter = 0
 
     def _deterministic_build(self, inputs):
         return hashlib.sha256(str(sorted(inputs.items())).encode()).hexdigest()
 
+    def _next_build_id(self):
+        self._build_counter += 1
+        return self._build_counter
+
     def _nondeterministic_build(self, inputs):
-        return str(time.time_ns())
+        return f"build-output-{self._next_build_id()}"
 
     def _timestamp_build(self, inputs):
-        return f"build-output-at-{time.time_ns()}-hash-{'x' * 20}"
+        return f"build-output-at-step-{self._next_build_id()}-hash-{'x' * 20}"
 
     def test_deterministic_is_reproducible(self):
         ok, findings = self.checker.check(self._deterministic_build, {'a': '1', 'b': '2'})
@@ -1244,7 +1248,13 @@ class TestIntegration(unittest.TestCase):
     def test_nondeterministic_build_in_report(self):
         rc = ReproducibleBuildChecker()
         report = SupplyChainReport()
-        ok, findings = rc.check(lambda inputs: str(time.time_ns()), {})
+        counter = {"n": 0}
+
+        def planted_bad_build(inputs):
+            counter["n"] += 1
+            return f"build-output-{counter['n']}"
+
+        ok, findings = rc.check(planted_bad_build, {})
         report.add(findings)
         self.assertTrue(report.has_errors())
 

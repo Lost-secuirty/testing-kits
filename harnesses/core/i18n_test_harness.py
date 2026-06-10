@@ -828,6 +828,7 @@ def start_server(port: int = DEFAULT_PORT) -> HTTPServer:
 def stop_server(server: HTTPServer) -> None:
     """Shut down the mock server."""
     server.shutdown()
+    server.server_close()
 
 
 # ---------------------------------------------------------------------------
