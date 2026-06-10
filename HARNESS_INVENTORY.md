@@ -1,7 +1,15 @@
 # Test Harness Inventory
 
-**Total: 43 harnesses | 3,079 harness tests | All green**
+**Total: 72 harnesses.** Per-harness self-test status is generated locally by
+`make report` and uploaded by CI as a workflow artifact. Entries #1–43 are
+documented in full below; #44–53 are bridged in a compact table; #54–59,
+#60–62, #63–67, and #68–72 follow in full. As of the `fix-status-green` work every
+harness passes `--self-test`; the formerly-failing `srs`/`hermeticity` bugs
+and the Windows portability gaps are resolved.
 
+`STATUS.md` is generated output, not the canonical source of truth. The source
+of truth is the harness code, paired unittest suites, and current CI/test
+output.
 > Harnesses 20–24 were added after a 2020–2026 gap audit of failure modes most
 > commonly missed by AI-assisted / “vibe” coding: time/timezone correctness,
 > idempotency & retry-safety, state-machine validity, numeric/money precision,
@@ -35,6 +43,8 @@
 > partial-fill two-phase ledger (open→resolve exactly-once contract).
 
 All harnesses are pure Python stdlib — zero external dependencies. Almost all include a mock HTTP server (the Database, CLI, SRS, Backup-Restore, and Expiry-Window harnesses are the exceptions — SQLite- and subprocess-driven respectively, with no networked server), a CLI with `--self-test` mode, and a matching root-level `test_*.py` unittest suite. The Dice Duel reliability lab is isolated under `dice_duel_lab/` and is not part of generic harness discovery.
+
+Batch 7 adds a proof-test convention: new harnesses keep the paired unittest file and add `test_<name>_proof.py` when a planted bad fixture is needed to prove the harness catches the failure mode.
 
 ---
 
@@ -554,6 +564,224 @@ Tests pharmacy partial dispensing — a domain-specific open→resolve two-phase
 
 ---
 
+## 44–53. Research pass (2026-05, batch 4)
+
+Ten harnesses added against 2026 bug-research sources. Full prose entries are
+pending; one-line summaries below (see `HARNESS_ROADMAP.md` → "Batch 4" for the
+source signal behind each, and `STATUS.md` for live self-test status).
+
+| # | File | Summary |
+|---|---|---|
+| 44 | `harnesses/core/null_propagation_test_harness.py` | None propagating through a call chain (the #1 AI-coded bug class); flags never-guarded None paths. |
+| 45 | `harnesses/core/error_path_leak_test_harness.py` | Resource acquire/release leaks on error/exception paths; double-release and unbalanced-cleanup detection. |
+| 46 | `harnesses/core/feature_flag_test_harness.py` | Flag flips mid-call, rollout/kill-switch consistency (the Google June-2025 outage class). |
+| 47 | `harnesses/core/clock_skew_test_harness.py` | Distributed-time bugs: NTP jumps, monotonic regression, cross-node skew vs TTL/LWW merges. |
+| 48 | `harnesses/core/schema_evolution_test_harness.py` | Reader/writer schema drift; backward/forward compatibility (silent pipeline schema drift). |
+| 49 | `harnesses/core/dormant_code_test_harness.py` | Untriggered branches that crash on first hit; surfaces dormant-path crashes via synthetic inputs. |
+| 50 | `harnesses/core/cardinality_test_harness.py` | Metric/label/cache-key cardinality explosion (bounded vs unbounded). |
+| 51 | `harnesses/core/hermeticity_test_harness.py` | Hidden test dependencies on HOME/env/network/time (top flaky-test class). |
+| 52 | `harnesses/pharmacy/drug_interaction_test_harness.py` | Drug–drug interaction checks and contraindication overridability. |
+| 53 | `harnesses/ai/prompt_injection_test_harness.py` | OWASP LLM01 injection corpus + system-prompt-leak guard, scored by precision/recall floors. |
+
+---
+
+## 54. Distributed Tracing Test Harness
+
+**File:** `harnesses/core/tracing_test_harness.py`
+**Tests:** `tests/core/test_tracing_test_harness.py` — 19 tests
+**Port:** none (in-process)
+
+Validates a span set against an oracle and proves it catches a battery of broken traces — the failure modes LLM-written OpenTelemetry glue produces. Strict W3C `traceparent` parse/format (2-32-16-2 lower hex; all-zero trace/span IDs and version `ff` rejected). `validate_trace` checks single-root, no orphan (unresolved parent) or cross-trace parents, no parent-chain cycles, non-negative span durations, head-sampling consistency (a sampled child under an unsampled parent is flagged), required-attribute schema, and clock-skew tolerance (child start before parent beyond a bound). Seven `BUGGY_TRACES` fixtures each flip exactly their target counter; a `Propagator` round-trips context while a `BuggyPropagator` drops it. 22 self-test scenarios.
+
+**Key components:** `TraceParent`, `Span`, `TraceConfig`, `TraceReport`, `validate_trace`, `Propagator`, `BuggyPropagator`, `BUGGY_TRACES`, `valid_trace`
+
+---
+
+## 55. Message-Queue Delivery Test Harness
+
+**File:** `harnesses/core/queue_test_harness.py`
+**Tests:** `tests/core/test_queue_test_harness.py` — 17 tests
+**Port:** none (in-process)
+
+Tests broker delivery semantics with an injectable clock. `InMemoryBroker` (oracle) covers at-least-once redelivery (nack and ack-timeout), exactly-once dedup that survives redelivery, DLQ routing after max deliveries, per-key FIFO via head-of-key delivery, consumer-group rebalance (no loss / no double-delivery of acked / order preserved), ack-timeout heartbeat extension, and backpressure (in-flight cap + publish-depth reject). Four buggy brokers are each proven caught: `NaiveBroker` (acks on poll → crash loses the message), `LossyExactlyOnce` (no dedup → double-process), `OrderBreakingRebalance` (delivers non-head-of-key), `NoDlqBroker` (never routes poison → loops forever). 20 self-test scenarios. Distinct from `idempotency` (the dedup primitive) and `concurrency` (race detection).
+
+**Key components:** `Message`, `QueueConfig`, `Delivery`, `Clock`, `InMemoryBroker`, `NaiveBroker`, `LossyExactlyOnce`, `OrderBreakingRebalance`, `NoDlqBroker`, `DeliveryReport`, `consume_all`, `build_report`
+
+---
+
+## 56. Search-Relevance Test Harness
+
+**File:** `harnesses/core/search_relevance_test_harness.py`
+**Tests:** `tests/core/test_search_relevance_test_harness.py` — 25 tests
+**Port:** 19320 (reserved; oracle runs in-process)
+
+Classic IR ranking metrics over fixed graded judgment sets plus an analyzer corner-case oracle. Computes recall@k, precision@k, MRR, and NDCG (graded gain `2^grade-1`). A stdlib analyzer applies NFKC, casefold, accent-fold, naive plural-stem, stop-word drop, and CJK no-space segmentation, checked against an 8-case oracle. A lexical retriever (distinct-overlap, stable tie-break) over an engineered 20-doc / 6-query corpus lets the oracle meet recall ≥ 0.80 / MRR ≥ 0.70 / NDCG ≥ 0.80; a `reversed_search` ranker falls below the NDCG floor and a `no_fold_analyze` analyzer fails the fold cases. 22 self-test scenarios. Distinct from `llm_eval`/`rag_eval` (LLM answer quality) and `pagination` (cursor consistency).
+
+**Key components:** `Doc`, `Judgment`, `QuerySet`, `SearchConfig`, `analyze`, `no_fold_analyze`, `search`, `reversed_search`, `recall_at_k`, `precision_at_k`, `mrr`, `ndcg_at_k`, `evaluate`, `RelevanceReport`
+
+---
+
+## 57. RAG Eval Test Harness
+
+**File:** `harnesses/ai/rag_eval_test_harness.py`
+**Tests:** `tests/ai/test_rag_eval_test_harness.py` — 21 tests
+**Port:** none (in-process)
+
+Scores retrieval-augmented answers on four axes RAG fails silently on: retrieval recall@k, citation faithfulness (a citation counts only if it was retrieved AND its passage supports a claim), answer grounding (claims present in the post-overflow context), and context-window overflow (greedy-pack drop of tail passages). A deterministic lexical retriever over an engineered 20-passage / 6-case corpus lets the oracle meet recall ≥ 0.80 / faithfulness ≥ 0.90 / grounding ≥ 0.80. A keyword-only (AND) retriever drops below the recall floor, a truncating retriever degrades grounding, and a citation fabricator drops below the faithfulness floor. 19 self-test scenarios. Distinct from `ai/llm_eval` (answer graders, no retrieval) and `ai/prompt_injection` (safety corpus).
+
+**Key components:** `Passage`, `RagCase`, `RagConfig`, `retrieve`, `keyword_only_retrieve`, `truncating_retrieve`, `recall_at_k`, `citation_audit`, `grounding_audit`, `context_overflow`, `evaluate`, `RagReport`
+
+---
+
+## 58. GraphQL Contract Test Harness
+
+**File:** `harnesses/core/graphql_test_harness.py`
+**Tests:** `tests/core/test_graphql_test_harness.py` — 28 tests
+**Port:** 19310 (reserved; oracle runs in-process)
+
+Parses queries into an AST (selection sets, aliases, fragment spreads, arg-skipping) and runs analyzers: schema-vs-resolver coverage (missing/orphan), query depth, query cost (list fields multiply, nesting compounds, aliases counted), N+1 list-resolver detection (with a dataloader-batched exclusion), fragment-cycle detection (direct and indirect), and unknown field/fragment validation. `enforce_limits` rejects every abusive query (deeply nested, cost-bomb, wide-alias amplification) while a `LeakyResolverSet` (missing + orphan) and a naive no-limit executor are caught. 21 self-test scenarios. Distinct from `core/contract` (arbitrary-callable pre/post/invariants) and `core/api` (REST CRUD).
+
+**Key components:** `Schema`, `FieldDef`, `FragmentDef`, `Selection`, `parse_query`, `schema_resolver_coverage`, `query_depth`, `query_cost`, `detect_n_plus_one`, `fragment_cycles`, `enforce_limits`, `GraphQLReport`, `audit`
+
+---
+
+## 59. Payments / Checkout Test Harness
+
+**File:** `harnesses/core/payments_test_harness.py`
+**Tests:** `tests/core/test_payments_test_harness.py` — 25 tests
+**Port:** 19300 (reserved; oracle runs in-process)
+
+Composes a Decimal `Money` (banker's rounding + exact largest-remainder `allocate`), a payment state machine with money guards, and an idempotency-key replay contract. The oracle enforces Σcaptures ≤ authorized, Σrefunds ≤ captured, currency match, and minor-unit precision (USD 2 / JPY 0 / BHD 3); a decline taxonomy classifies soft/hard/fraud + retryable; a 3DS challenge blocks capture until resolved. Five buggy processors each break a money invariant and are caught: overcapture, double-refund, float-drift reconciliation, idempotency-ignoring replay (double charge), and challenge-is-success (captures an unverified 3DS charge). 27 self-test scenarios. Reuses the *patterns* of `numeric`/`statemachine`/`idempotency` but is self-contained (no imports), with the composition as the novel surface.
+
+**Key components:** `Money`, `Currency`, `DeclineCode`, `PaymentState`, `PaymentProcessor`, `OvercaptureProcessor`, `DoubleRefundProcessor`, `FloatProcessor`, `ReplayChargesTwiceProcessor`, `ChallengeIsSuccessProcessor`, `LedgerReport`, `classify_decline`
+
+---
+
+## 60. Circuit Breaker Resilience Test Harness
+
+**File:** `harnesses/core/circuitbreaker_test_harness.py`
+**Tests:** `tests/core/test_circuitbreaker_test_harness.py` — 17 tests
+**Port:** 19330
+
+Tests the circuit-breaker pattern under an injectable `FakeClock`: CLOSED → OPEN
+on a failure threshold, OPEN rejects calls fast (`CircuitOpenError`), OPEN →
+HALF_OPEN after a reset timeout, HALF_OPEN → CLOSED on a probe success / → OPEN
+on probe failure. `CircuitBreakerOracle` is the reference state model the live
+`CircuitBreaker` is checked against. 13 self-test scenarios. Ported from the
+batch-4 resilience branch into the reorg (port reassigned from 19300 to avoid
+colliding with `core/payments`).
+
+**Key components:** `CircuitBreaker`, `CircuitBreakerOracle`, `FakeClock`, `CircuitOpenError`, `CircuitHandler`, `CBTestResult`, `start_mock_server`
+
+---
+
+## 61. JWT (HS256) Verification Test Harness
+
+**File:** `harnesses/security/jwt_test_harness.py`
+**Tests:** `tests/security/test_jwt_test_harness.py` — 18 tests
+**Port:** 19400
+
+Tests JWT encode and — more importantly — *verification* against the classic
+auth-bypass attacks: `alg=none` acceptance, HS/RS algorithm confusion,
+signature stripping/forgery, and expiry handling, using stdlib `hmac`/`hashlib`.
+`VerifyResult` reports pass/fail with a reason string. 14 self-test scenarios.
+Ported from the batch-4 branch (port reassigned 19320 → 19400). Complements the
+injection-focused `security/security` and `security/appsec` harnesses.
+
+**Key components:** `encode`, `verify`, `VerifyResult`, `JwtHandler`, `JwtTestResult`, `start_mock_server`
+
+---
+
+## 62. PII / PHI Redaction Test Harness
+
+**File:** `harnesses/security/pii_redaction_test_harness.py`
+**Tests:** `tests/security/test_pii_redaction_test_harness.py` — 20 tests
+**Port:** 19410
+
+Tests detection + redaction of PII/PHI (emails, phone numbers, SSNs, card
+numbers, etc.) via stdlib `re` detectors, scored against a `RedactionOracle`
+with precision/recall over a labelled corpus (catches both under-redaction
+leaks and over-redaction false positives). 14 self-test scenarios. Ported from
+the batch-4 branch (port reassigned 19310 → 19410).
+
+**Key components:** `Redactor`, `RedactionOracle`, `RedactionHandler`, `RedactTestResult`, `start_mock_server`
+
+---
+
+## 63. Multi-Turn Agent Eval Test Harness
+
+**File:** `harnesses/ai/agent_eval_test_harness.py`
+**Tests:** `tests/ai/test_agent_eval_test_harness.py` — 20 tests
+**Port:** none (in-process)
+
+Scores fixed scripted multi-turn agent transcripts against annotated goal states and a mock tool schema — the failure modes single-turn graders miss. The oracle checks task completion (final state == goal), tool-call validity (known name + required args + arg types), hallucinated-tool detection, error recovery (a tool error must be followed by a valid retry or escalation, not a fabricated claim), looping (no-progress repeat rate), instruction retention (an early `forbid:` constraint obeyed through later turns), premature-success claims, and unsafe actions (a dangerous tool called without confirmation). Four good transcripts meet all floors; six bad ones each trip one invariant. Seven buggy graders — claim-trusting, name-only validity, no-hallucination-check, recovery-blind, loop-ignoring, constraint-amnesiac, confirmation-blind — each miss one failure class the oracle catches, via injected scoring functions. Floors: resolved ≥ 0.90, validity ≥ 0.95, recovery ≥ 0.90, retention ≥ 0.95, loop ≤ 0.20; zero hallucinated/premature/unsafe. 23 self-test scenarios. Distinct from `ai/agentic` (single-turn server-style tool-call fidelity).
+
+**Key components:** `ToolSig`, `ToolCall`, `ToolResult`, `Turn`, `Transcript`, `AgentEvalConfig`, `AgentEvalReport`, `evaluate`, `GOOD_TRANSCRIPTS`, `BAD_TRANSCRIPTS`
+
+---
+
+## 64. IoT / Telemetry Ingest Test Harness
+
+**File:** `harnesses/core/iot_telemetry_test_harness.py`
+**Tests:** `tests/core/test_iot_telemetry_test_harness.py` — 22 tests
+**Port:** none (in-process)
+
+Models an MQTT-like telemetry ingest path as pure data with an injectable `FakeClock` for server-ingest time. The oracle `ingest()` enforces QoS semantics (QoS-2 exactly-once, QoS-1 at-least-once-deduped, QoS-0 best-effort), per-topic re-sequencing by `seq` (final order strictly increasing), idempotency-key dedupe, clock-skew handling (flag > 60s, reject > 1h, canonical timestamp = server ingest, skewed event-time excluded from windowing), watermark/allowed-lateness windowing, retained-latest-only, persistent-session replay on reconnect, and last-will on abnormal disconnect. Eight buggy ingesters each break one invariant and are caught: QoS-2 at-least-once, no-resequence, no-dedupe, device-clock-truster, non-persistent-session, retain-all, no-watermark, no-last-will. 24 self-test scenarios. Distinct from `core/queue` (broker delivery) and `core/clock_skew` (TTL/LWW).
+
+**Key components:** `Message`, `Record`, `DeviceSession`, `IotReport`, `IngestResult`, `IotConfig`, `ingest`, `reconnect`, `on_disconnect`, `STREAM`, `SESSIONS`
+
+---
+
+## 65. gRPC / Proto Contract Test Harness
+
+**File:** `harnesses/core/grpc_contract_test_harness.py`
+**Tests:** `tests/core/test_grpc_contract_test_harness.py` — 26 tests
+**Port:** none (in-process)
+
+Models protos and a mock gRPC service as pure data (no grpc/protobuf libs) and audits the contract rules LLM-written glue breaks. The oracle enforces proto-evolution safety (reserve removed field numbers, no number reuse, no wire-type change on kept fields), open-vs-closed enum unknown-value handling, deadline propagation (downstream ≤ original − elapsed, ±5 ms via a `MsClock`), streaming half-close (handler stops emitting after CloseSend), status-code correctness (RESOURCE_EXHAUSTED vs PERMISSION_DENIED across the 17 canonical codes), metadata propagation (`x-request-id` survives a hop), send/recv size-limit symmetry, and unary idempotency (exactly one side effect on retry). Nine buggy implementations each break one rule via injected components, surfaced as per-class violation counters with a `meets_contract()` predicate. 23 self-test scenarios.
+
+**Key components:** `FieldDescriptor`, `MessageDescriptor`, `EnumDescriptor`, `RpcSpec`, `WireField`, `STATUS_CODES`, `validate_evolution`, `roundtrip`, `audit`, `GrpcReport`, `MsClock`
+
+---
+
+## 66. Browser / E2E Surrogate Test Harness
+
+**File:** `harnesses/core/browser_e2e_test_harness.py`
+**Tests:** `tests/core/test_browser_e2e_test_harness.py` — 23 tests
+**Port:** none (in-process)
+
+A deterministic DOM/E2E surrogate (no real browser, no asyncio): the DOM is immutable data, re-render is a pure tree mutation (`apply_mutation`), and async work is a manually-drained FIFO `EventLoop`. The oracle re-resolves selectors against the current DOM before clicking (no stale handle), asserts only after the loop settles, enforces event order (focus < input, change < click), raises `UnmockedRequestError` on unmocked requests, detects hydration structural mismatches (server vs client preorder), and prefers role/testid selectors over brittle absolute XPath. Six buggy implementations reproduce one flake each: stale-handle clicker, eager asserter, reordered event emitter, silent-404 fetch, hydration-blind renderer, brittle-XPath selector. 22 self-test scenarios. Complements `core/a11y` (accessibility tree) without overlapping it.
+
+**Key components:** `Node`, `Dom`, `Selector`, `MockResponse`, `EventLoop`, `UnmockedRequestError`, `PrematureAssertionError`, `apply_mutation`, `resolve`, `hydration_diff`, `audit`, `E2EReport`
+
+---
+
+## 67. Model / Embedding Drift Detection Test Harness
+
+**File:** `harnesses/ai/drift_detection_test_harness.py`
+**Tests:** `tests/ai/test_drift_detection_test_harness.py` — 17 tests
+**Port:** none (in-process)
+
+Computes drift metrics by hand over fixed float fixtures (no numpy): PSI with an epsilon floor, KL and Jensen-Shannon divergence, Hellinger distance, embedding-centroid Euclidean displacement, query-document cosine-similarity drop, Spearman rank correlation of top-k neighbors, neighborhood churn, and query/index model-version mismatch. The oracle trips every alert on a planted-drift case and stays silent on a stable case. Seven buggy detectors each miss real drift or false-alarm on stable data: PSI with no epsilon floor (drops empty-bin terms), KL with swapped arguments, an averaged (washed-out) centroid distance, an unnormalized cosine, set overlap in place of a rank correlation, version-blind, and a stable-data false alarmer. Thresholds: PSI > 0.25, KL/JS > 0.20, Hellinger > 0.30, centroid > 0.50, cosine drop > 0.10, Spearman < 0.70, churn > 0.20. 24 self-test scenarios. Distinct from `ai/rag_eval` (retrieval/citation quality) and `ai/llm_eval` (answer graders).
+
+**Key components:** `DriftCase`, `DriftReport`, `psi`, `kl_div`, `js_div`, `hellinger`, `centroid_distance`, `cosine_mean_drop`, `spearman`, `neighborhood_churn`, `compute_drift`
+
+---
+
+## Batch 7. Proof-backed Security, Agent, and Game Harnesses
+
+| # | File | Tests | Proof |
+|---|---|---|---|
+| 68 | `harnesses/security/cwe_kev_regression_test_harness.py` | `tests/security/test_cwe_kev_regression_test_harness.py` | `tests/security/test_cwe_kev_regression_proof.py` |
+| 69 | `harnesses/ai/agent_memory_context_test_harness.py` | `tests/ai/test_agent_memory_context_test_harness.py` | `tests/ai/test_agent_memory_context_proof.py` |
+| 70 | `harnesses/core/game_loop_simulation_test_harness.py` | `tests/core/test_game_loop_simulation_test_harness.py` | `tests/core/test_game_loop_simulation_proof.py` |
+| 71 | `harnesses/core/statistical_rng_oracle_test_harness.py` | `tests/core/test_statistical_rng_oracle_test_harness.py` | `tests/core/test_statistical_rng_oracle_proof.py` |
+| 72 | `harnesses/core/canvas_scene_state_test_harness.py` | `tests/core/test_canvas_scene_state_test_harness.py` | `tests/core/test_canvas_scene_state_proof.py` |
+
+Batch 7 makes proof explicit: each harness keeps a deterministic safe fixture and a planted bad fixture. The paired unit test verifies the API/CLI; the proof test verifies the bad fixture is actually rejected.
+
+---
+
 ## Separate Lab: Dice Duel Reliability Lab
 
 **Folder:** `dice_duel_lab/`
@@ -623,17 +851,29 @@ production packaging, or CLI expansion.
 | 19270 | Rotating Audit Log             |
 | 19280 | Date-Window Expiry             |
 | 19290 | Partial-Fill Ledger            |
-| —     | Database, CLI, SRS, Backup-Restore, Expiry-Window — no networked mock server (SQLite / subprocess) |
+| 19300 | Payments / Checkout (reserved; in-process) |
+| 19310 | GraphQL Contract (reserved; in-process)    |
+| 19320 | Search Relevance (reserved; in-process)    |
+| 19330 | Circuit Breaker                            |
+| 19400 | JWT (HS256) Verification                   |
+| 19410 | PII / PHI Redaction                        |
+| —     | Database, CLI, SRS, Backup-Restore, Expiry-Window, Tracing, Queue, RAG Eval, the #44–53 research-pass harnesses, all of batch 6 (Agent Eval, IoT Telemetry, gRPC Contract, Browser/E2E, Drift Detection), and batch 7 — no networked mock server (SQLite / subprocess / in-process oracle) |
 
 ## Running Everything
 
 ```bash
-python -m unittest discover -s . -p "test_*.py"
+make test          # python -m unittest discover -s tests -t . -p "test_*.py"
+make selftest      # run --self-test for every harness
+make report        # regenerate STATUS.md (per-harness self-test status)
 ```
 
-**Result: 43 harnesses, 3,079 harness tests, all passing.** Dice Duel is isolated
-under `dice_duel_lab/` and should be run with its own lab sweep instead of root
-discovery.
+**72 harnesses.** Live per-harness self-test status is in `STATUS.md`
+(auto-generated by `make report`). The earlier `pharmacy/srs`, `core/hermeticity`,
+and Windows portability (`prompt_injection`/`partial_fill`/`memory`) issues were
+resolved in the 2026-05-29 fix-status pass (see `HARNESS_ROADMAP.md` →
+"Resolved 2026-05-29"); any remaining per-harness gaps are tracked there.
+Dice Duel is isolated under `dice_duel_lab/` and runs via its own lab sweep
+instead of root discovery.
 
 > Note: a full `discover` run is slow because the soak/stress/memory harnesses
 > use real-time waits. Each batch is verified green on its own:

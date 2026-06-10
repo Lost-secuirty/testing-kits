@@ -823,12 +823,39 @@ def find_free_port() -> int:
         return s.getsockname()[1]
 
 
-if __name__ == "__main__":
-    import sys
+def _run_self_test(verbose: bool = False) -> int:
+    """Smoke self-test: deliberately inaccessible HTML must surface more
+    ERROR-level issues than the bundled accessible sample. Exercises every
+    checker through run_checks()."""
+    bad = ('<html><body><img src="x.png">'
+           '<a href="#"></a><input type="text"></body></html>')
+    bad_rep = run_checks(bad)
+    good_rep = run_checks(SAMPLE_PAGES["/"])
+    bad_err, good_err = len(bad_rep.errors()), len(good_rep.errors())
+    checks = [
+        ("inaccessible HTML surfaces >=1 ERROR", bad_err >= 1, f"errors={bad_err}"),
+        ("accessible sample has fewer ERRORs", good_err < bad_err, f"good={good_err} bad={bad_err}"),
+    ]
+    failures = [name for name, ok, _ in checks if not ok]
+    for name, ok, detail in checks:
+        print(f"  [{'PASS' if ok else 'FAIL'}] {name}  ({detail})")
+    if verbose:
+        print(f"  bad issues: {[(i.severity, i.checker_name) for i in bad_rep.issues]}")
+    print(f"\n  {len(checks) - len(failures)}/{len(checks)} checks passed")
+    return 0 if not failures else 1
 
-    if len(sys.argv) > 1:
-        filename = sys.argv[1]
-        with open(filename, "r", encoding="utf-8") as f:
+
+def main() -> int:
+    import argparse
+    p = argparse.ArgumentParser(description="Accessibility (a11y) static-check harness")
+    p.add_argument("file", nargs="?", help="HTML file to check")
+    p.add_argument("--self-test", action="store_true", help="Run built-in scenarios and exit")
+    p.add_argument("--verbose", action="store_true")
+    args = p.parse_args()
+    if args.self_test:
+        return _run_self_test(verbose=args.verbose)
+    if args.file:
+        with open(args.file, "r", encoding="utf-8") as f:
             content = f.read()
         report = run_checks(content)
         print(f"Found {len(report.issues)} issues:")
@@ -836,5 +863,11 @@ if __name__ == "__main__":
             print(f"  [{issue.severity}] {issue.checker_name}: {issue.description}")
             print(f"    Element: {issue.element}")
             print(f"    WCAG: {issue.wcag_criterion}")
-    else:
-        print("Usage: python3 a11y_test_harness.py <html_file>")
+        return 0
+    p.print_help()
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())

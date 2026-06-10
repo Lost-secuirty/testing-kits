@@ -37,6 +37,13 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any
 
+# Windows consoles default to cp1252; scenario output uses non-ASCII (>=, ->,
+# em dash). Force UTF-8 at import so both --self-test and direct test calls work.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 
 # ---------------------------------------------------------------------------
 # Corpus

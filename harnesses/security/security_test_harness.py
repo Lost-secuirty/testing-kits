@@ -1161,6 +1161,26 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
+def _run_self_test(verbose: bool = False) -> int:
+    """Scan the bundled vulnerable mock server; the scanner must find planted vulns."""
+    server = MockSecurityServer(port=0)
+    base_url = server.start()
+    try:
+        s = SecurityScanner(base_url).run().summary()
+    finally:
+        server.stop()
+    checks = [
+        ("scanner ran tests", s["total_tests"] >= 1, f"tests={s['total_tests']}"),
+        ("found planted vulnerabilities", s["vulnerabilities_found"] >= 1,
+         f"vulns={s['vulnerabilities_found']}"),
+    ]
+    failures = [n for n, ok, _ in checks if not ok]
+    for n, ok, d in checks:
+        print(f"  [{'PASS' if ok else 'FAIL'}] {n}  ({d})")
+    print(f"\n  {len(checks) - len(failures)}/{len(checks)} checks passed")
+    return 0 if not failures else 1
+
+
 def main() -> None:
     import argparse
 
@@ -1176,7 +1196,15 @@ def main() -> None:
         action="store_true",
         help="Output results as JSON",
     )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Run built-in scenarios and exit",
+    )
     args = parser.parse_args()
+
+    if args.self_test:
+        raise SystemExit(_run_self_test())
 
     server = MockSecurityServer(port=args.port)
     base_url = server.start()
