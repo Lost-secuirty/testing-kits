@@ -7,19 +7,17 @@ What changed?
 - [ ] No AI-assisted code
 - [ ] AI-assisted code present
 
-Files or sections affected:
-
 ## Risk area
 
-- [ ] Documentation only
+- [ ] Docs only
 - [ ] Tests or harnesses
 - [ ] Security or auth
-- [ ] Data/provenance
+- [ ] Data or provenance
 - [ ] Dependency or CI
 
 ## Verification
 
 - [ ] Repo tests pass
-- [ ] Proof/selftest commands pass if relevant
-- [ ] New behavior has tests
-- [ ] Reviewer checked silent
+- [ ] Proof/selftest checks pass if relevant
+- [ ] Changed behavior has tests
+- [ ] Reviewer checked silent-failure risk
