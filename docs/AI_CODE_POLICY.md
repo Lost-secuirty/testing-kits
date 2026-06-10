@@ -2,16 +2,12 @@
 
 AI-assisted code is useful, but it is not trusted by default.
 
-## Rule
+Required for AI-assisted changes:
 
-Any AI-assisted change must be reviewed as untrusted code until it has:
+1. State what was AI-assisted.
+2. State the risk area.
+3. Run the repo verification commands.
+4. Add or update tests when behavior changes.
+5. Do not bypass security, CI, provenance, or review rules.
 
-1. a clear scope;
-2. tests or proof checks;
-3. reviewer notes for likely failure modes;
-4. no unexplained generated dependencies;
-5. no bypass of security, CI, or provenance rules.
-
-## Required PR disclosure
-
-PR
+Reviewer question: what could silently fail?
