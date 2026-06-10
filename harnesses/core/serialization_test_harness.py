@@ -666,9 +666,14 @@ class SerializationServer:
         self._thread.start()
 
     def stop(self):
-        if self.server:
-            self.server.shutdown()
+        server = self.server
+        if server:
+            server.shutdown()
+            server.server_close()
             self.server = None
+        if self._thread:
+            self._thread.join(timeout=2)
+            self._thread = None
 
     def base_url(self) -> str:
         return f"http://127.0.0.1:{self.port}"

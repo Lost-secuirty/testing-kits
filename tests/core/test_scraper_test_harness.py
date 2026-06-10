@@ -35,6 +35,7 @@ def tearDownModule():
     """Shut down the module-level mock server."""
     global _server
     _server.shutdown()
+    _server.server_close()
 
 
 # ---------------------------------------------------------------------------

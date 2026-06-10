@@ -1,117 +1,46 @@
 #!/usr/bin/env python3
 """
-generate_report.py — Run every harness's --self-test and write STATUS.md.
+Run every harness self-test and optionally write STATUS.md / STATUS.json.
 
-Walks ``harnesses/**/*.py`` (or the legacy flat root layout) and invokes
-each with ``--self-test``, captures pass/fail + duration, and writes a
-single ``STATUS.md`` summary.
-
-Exits 0 if every harness self-tests green, non-zero otherwise.
+Default mode writes the generated status artifacts. ``--check`` is a no-write
+verification path for local and CI use.
 """
 
 from __future__ import annotations
 
+import argparse
 import datetime as dt
 import json
-import os
-import subprocess
 import sys
 import time
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+try:
+    from tools.harness_registry import REPO_ROOT, discover_harnesses, run_self_test
+    from tools.proof_audit import audit_harnesses
+except ModuleNotFoundError:  # direct script execution from tools/
+    from harness_registry import REPO_ROOT, discover_harnesses, run_self_test
+    from proof_audit import audit_harnesses
 
 
-def discover_harnesses() -> list[Path]:
-    """Return harness file paths. Supports both categorized and flat layout."""
-    categorized = sorted(REPO_ROOT.glob("harnesses/*/*_test_harness.py"))
-    categorized += sorted(REPO_ROOT.glob("harnesses/*/stress_harness.py"))
-    if categorized:
-        return categorized
-
-    flat = sorted(REPO_ROOT.glob("*_test_harness.py"))
-    flat += sorted(REPO_ROOT.glob("stress_harness.py"))
-    return [p for p in flat if not p.name.startswith("test_")]
-
-
-def category_for(path: Path) -> str:
-    """Bucket a harness path into a category label."""
-    parts = path.relative_to(REPO_ROOT).parts
-    if len(parts) >= 3 and parts[0] == "harnesses":
-        return parts[1]
-    return "(flat)"
-
-
-def short_name(path: Path) -> str:
-    name = path.stem
-    if name.endswith("_test_harness"):
-        name = name[: -len("_test_harness")]
-    elif name == "stress_harness":
-        name = "stress"
-    return name
-
-
-NO_SELF_TEST_MARKERS = (
-    "unrecognized arguments: --self-test",
-    "invalid literal for int() with base 10: '--self-test'",
-    "No such file or directory: '--self-test'",
-    "argument: invalid choice: '--self-test'",
-)
-
-
-def run_self_test(path: Path, timeout_s: float = 90.0) -> tuple[str, float, str]:
-    """Run a harness with --self-test.
-
-    Return (status, duration_s, tail_of_output) where status is one of:
-      ``"OK"``    — exit 0
-      ``"FAIL"``  — exit non-zero with no "doesn't support --self-test" marker
-      ``"SKIP"``  — harness doesn't accept --self-test (CLI shape mismatch)
-      ``"TIME"``  — wall-clock timeout
-    """
-    start = time.perf_counter()
-    try:
-        env = os.environ.copy()
-        # Ensure child Python processes use UTF-8 for stdout/stderr on Windows
-        env.setdefault("PYTHONIOENCODING", "utf-8")
-        env.setdefault("PYTHONUTF8", "1")
-        proc = subprocess.run(
-            [sys.executable, str(path), "--self-test"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-            env=env,
-        )
-    except subprocess.TimeoutExpired:
-        duration = time.perf_counter() - start
-        return "TIME", duration, f"TIMEOUT after {timeout_s}s"
-
-    duration = time.perf_counter() - start
-    combined = (proc.stdout + proc.stderr)
-    if proc.returncode != 0 and any(m in combined for m in NO_SELF_TEST_MARKERS):
-        tail = combined.strip().splitlines()[-1] if combined.strip() else ""
-        return "SKIP", duration, tail[:200]
-
-    output = combined.strip().splitlines()
-    tail = " | ".join(output[-2:]) if output else ""
-    return ("OK" if proc.returncode == 0 else "FAIL"), duration, tail[:200]
-
-
-def write_status(rows: list[dict], total_duration: float) -> None:
+def write_status(rows: list[dict], total_duration: float, proof_result: dict) -> None:
     by_cat: dict[str, list[dict]] = {}
-    for r in rows:
-        by_cat.setdefault(r["category"], []).append(r)
+    for row in rows:
+        by_cat.setdefault(row["category"], []).append(row)
 
     n_total = len(rows)
-    n_ok = sum(1 for r in rows if r["status"] == "OK")
-    n_fail = sum(1 for r in rows if r["status"] in ("FAIL", "TIME"))
-    n_skip = sum(1 for r in rows if r["status"] == "SKIP")
+    n_ok = sum(1 for row in rows if row["status"] == "OK")
+    n_fail = sum(1 for row in rows if row["status"] in ("FAIL", "TIME"))
+    n_skip = sum(1 for row in rows if row["status"] == "SKIP")
+    proof_summary = proof_result["summary"]
+
     if n_fail == 0 and n_skip == 0:
         header = "all green"
     elif n_fail == 0:
         header = f"{n_ok} green, {n_skip} no --self-test"
     else:
         header = f"{n_fail} failing, {n_skip} no --self-test"
+
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     lines: list[str] = []
@@ -119,7 +48,10 @@ def write_status(rows: list[dict], total_duration: float) -> None:
     lines.append("")
     lines.append(f"_Generated: {now}_")
     lines.append("")
-    lines.append(f"**{n_total} harnesses | {header} | self-test {total_duration:.2f}s**")
+    lines.append(
+        f"**{n_total} harnesses | {header} | proof {proof_summary['header']} | "
+        f"self-test {total_duration:.2f}s**"
+    )
     lines.append("")
     lines.append("## By category")
     lines.append("")
@@ -127,47 +59,64 @@ def write_status(rows: list[dict], total_duration: float) -> None:
     lines.append("|---|---:|---:|---:|---:|---:|")
     for cat in sorted(by_cat):
         items = by_cat[cat]
-        n = len(items)
-        ok = sum(1 for r in items if r["status"] == "OK")
-        fail = sum(1 for r in items if r["status"] in ("FAIL", "TIME"))
-        skip = sum(1 for r in items if r["status"] == "SKIP")
-        dur = sum(r["duration"] for r in items)
-        lines.append(f"| {cat} | {n} | {ok} | {fail} | {skip} | {dur:.2f}s |")
+        count = len(items)
+        ok = sum(1 for row in items if row["status"] == "OK")
+        fail = sum(1 for row in items if row["status"] in ("FAIL", "TIME"))
+        skip = sum(1 for row in items if row["status"] == "SKIP")
+        duration = sum(row["duration"] for row in items)
+        lines.append(f"| {cat} | {count} | {ok} | {fail} | {skip} | {duration:.2f}s |")
+
+    lines.append("")
+    lines.append("## Proof audit")
+    lines.append("")
+    lines.append(
+        f"**{proof_summary['ok']}/{proof_summary['total_harnesses']} harnesses proven "
+        f"({proof_summary['header']}).**"
+    )
+    lines.append("")
+    lines.append("| Harness | Paired unittest | Proof source | Self-test |")
+    lines.append("|---|---|---|---|")
+    proof_by_key = {row["key"]: row for row in proof_result["per_harness"]}
+    for row in sorted(rows, key=lambda row: (row["category"], row["name"])):
+        key = f"{row['category']}/{row['name']}"
+        proof = proof_by_key.get(key, {})
+        paired = "yes" if proof.get("paired_test_exists") else "no"
+        sources = ", ".join(proof.get("proof_sources", [])) or "-"
+        lines.append(f"| {key} | {paired} | {sources} | {row['status']} |")
+
     lines.append("")
     lines.append("## Per harness")
     lines.append("")
     lines.append("| Harness | Self-test | Duration | Notes |")
     lines.append("|---|---|---:|---|")
+
     per_harness_list = []
-    for r in sorted(rows, key=lambda r: (r["category"], r["name"])):
-        notes = r["tail"].replace("|", "\\|") if r["tail"] else ""
-        lines.append(f"| {r['category']}/{r['name']} | {r['status']} | {r['duration']:.2f}s | {notes} |")
+    for row in sorted(rows, key=lambda row: (row["category"], row["name"])):
+        notes = row["tail"].replace("|", "\\|") if row["tail"] else ""
+        lines.append(
+            f"| {row['category']}/{row['name']} | {row['status']} | "
+            f"{row['duration']:.2f}s | {notes} |"
+        )
         per_harness_list.append({
-            "category": r["category"],
-            "name": r["name"],
-            "status": r["status"],
-            "duration": round(r["duration"], 2),
-            "tail": r["tail"],
+            "category": row["category"],
+            "name": row["name"],
+            "status": row["status"],
+            "duration": round(row["duration"], 2),
+            "tail": row["tail"],
         })
     lines.append("")
 
     (REPO_ROOT / "STATUS.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    # Also write a machine-readable JSON report for dashboard ingestion
     by_category_data: dict[str, dict] = {}
     for cat in sorted(by_cat):
         items = by_cat[cat]
-        n = len(items)
-        ok = sum(1 for r in items if r["status"] == "OK")
-        fail = sum(1 for r in items if r["status"] in ("FAIL", "TIME"))
-        skip = sum(1 for r in items if r["status"] == "SKIP")
-        dur = sum(r["duration"] for r in items)
         by_category_data[cat] = {
-            "count": n,
-            "ok": ok,
-            "fail": fail,
-            "skip": skip,
-            "duration_s": round(dur, 2),
+            "count": len(items),
+            "ok": sum(1 for row in items if row["status"] == "OK"),
+            "fail": sum(1 for row in items if row["status"] in ("FAIL", "TIME")),
+            "skip": sum(1 for row in items if row["status"] == "SKIP"),
+            "duration_s": round(sum(row["duration"] for row in items), 2),
         }
 
     json_obj = {
@@ -180,40 +129,63 @@ def write_status(rows: list[dict], total_duration: float) -> None:
             "header": header,
             "total_duration_s": round(total_duration, 2),
         },
+        "proof": proof_result,
         "by_category": by_category_data,
         "per_harness": per_harness_list,
     }
     (REPO_ROOT / "STATUS.json").write_text(json.dumps(json_obj, indent=2) + "\n", encoding="utf-8")
 
 
-def main() -> int:
-    harnesses = discover_harnesses()
-    if not harnesses:
-        print("No harnesses found.", file=sys.stderr)
-        return 2
-
+def run_all_selftests(timeout_s: float) -> tuple[list[dict], float]:
+    records = discover_harnesses()
     rows: list[dict] = []
     start = time.perf_counter()
-    for path in harnesses:
-        status, duration, tail = run_self_test(path)
+    for record in records:
+        status, duration, tail = run_self_test(record.path, record.root, timeout_s=timeout_s)
         rows.append({
-            "category": category_for(path),
-            "name": short_name(path),
+            "category": record.category,
+            "name": record.name,
             "status": status,
             "duration": duration,
             "tail": tail,
         })
-        print(f"{status:4s} {category_for(path)}/{short_name(path):30s} {duration:6.2f}s")
+        print(f"{status:4s} {record.key:36s} {duration:6.2f}s")
+    return rows, time.perf_counter() - start
 
-    total = time.perf_counter() - start
-    write_status(rows, total)
-    n_ok = sum(1 for r in rows if r["status"] == "OK")
-    n_fail = sum(1 for r in rows if r["status"] in ("FAIL", "TIME"))
-    n_skip = sum(1 for r in rows if r["status"] == "SKIP")
-    print(f"\n{n_ok}/{len(rows)} green, {n_fail} failing, {n_skip} no --self-test "
-          f"({total:.2f}s). Wrote STATUS.md.")
-    return 0 if n_fail == 0 else 1
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Generate or check testing-kits status.")
+    parser.add_argument("--check", action="store_true",
+                        help="run self-tests and proof audit without writing STATUS files")
+    parser.add_argument("--timeout", type=float, default=90.0,
+                        help="per-harness self-test timeout in seconds")
+    args = parser.parse_args()
+
+    records = discover_harnesses()
+    if not records:
+        print("No harnesses found.", file=sys.stderr)
+        return 2
+
+    rows, total = run_all_selftests(args.timeout)
+    selftest_statuses = {f"{row['category']}/{row['name']}": row["status"] for row in rows}
+    proof_result = audit_harnesses(records, selftest_statuses=selftest_statuses)
+
+    n_ok = sum(1 for row in rows if row["status"] == "OK")
+    n_fail = sum(1 for row in rows if row["status"] in ("FAIL", "TIME"))
+    n_skip = sum(1 for row in rows if row["status"] == "SKIP")
+    proof_fail = proof_result["summary"]["fail"]
+
+    if not args.check:
+        write_status(rows, total, proof_result)
+
+    write_note = "No STATUS files written." if args.check else "Wrote STATUS.md and STATUS.json."
+    print(
+        f"\n{n_ok}/{len(rows)} green, {n_fail} failing, {n_skip} no --self-test; "
+        f"proof {proof_result['summary']['ok']}/{proof_result['summary']['total_harnesses']} "
+        f"({total:.2f}s). {write_note}"
+    )
+    return 0 if n_fail == 0 and n_skip == 0 and proof_fail == 0 else 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

@@ -183,6 +183,7 @@ class TestMockServer(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.srv.shutdown()
+        cls.srv.server_close()
 
     def _post(self, path, data=None):
         url = f"http://127.0.0.1:{self.PORT}{path}"

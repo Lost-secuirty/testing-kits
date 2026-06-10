@@ -137,6 +137,7 @@ class TestMockServer(unittest.TestCase):
     def tearDown(self):
         for s in self._servers:
             s.shutdown()
+            s.server_close()
 
     def _make(self, cfg=None):
         s, port = _start_mock_server(cfg)
@@ -313,6 +314,7 @@ class TestRetryTester(unittest.TestCase):
             self.assertEqual(result.attempts, 1)
         finally:
             s.shutdown()
+            s.server_close()
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +358,7 @@ class TestPayloadTester(unittest.TestCase):
             self.assertGreater(len(body), 0)
         finally:
             s.shutdown()
+            s.server_close()
 
 
 # ---------------------------------------------------------------------------

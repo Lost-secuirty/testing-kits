@@ -48,6 +48,7 @@ def setUpModule():
 
 def tearDownModule():
     _server.shutdown()
+    _server.server_close()
 
 
 def _url(path: str) -> str:
@@ -487,6 +488,7 @@ class TestMockChaosServer(unittest.TestCase):
                 results.append(code)
         finally:
             srv.shutdown()
+            srv.server_close()
         self.assertIn(200, results)
 
 

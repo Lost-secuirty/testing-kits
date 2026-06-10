@@ -722,6 +722,7 @@ def start_mock_server(port: int = 0) -> Tuple[HTTPServer, int]:
 
 def stop_mock_server(server: HTTPServer) -> None:
     server.shutdown()
+    server.server_close()
 
 
 # ---------------------------------------------------------------------------

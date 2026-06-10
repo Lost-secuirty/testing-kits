@@ -233,6 +233,7 @@ class TestMockServerIntegration(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
+        cls.server.server_close()
 
     def setUp(self):
         reset_server_state()
@@ -413,7 +414,7 @@ class TestMockServerIntegration(unittest.TestCase):
             body={"name": "x"},
             expected_status=404,
         ))
-        self.assertTrue(r.passed)
+        self.assertTrue(r.passed, r)
 
     # CRUD: delete
     def test_delete_item(self):

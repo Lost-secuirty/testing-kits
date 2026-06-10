@@ -743,6 +743,16 @@ class MockErrorPathHandler(BaseHTTPRequestHandler):
             cls._probe_hits.clear()
 
 
+class QuietHTTPServer(HTTPServer):
+    """Suppress expected client-abort tracebacks from negative-path tests."""
+
+    def handle_error(self, request, client_address) -> None:
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)):
+            return
+        super().handle_error(request, client_address)
+
+
 def find_free_port(preferred: int = 19120) -> int:
     """Find a free port, preferring the given one."""
     try:
@@ -764,7 +774,7 @@ class ErrorPathServer:
         self._thread: Optional[threading.Thread] = None
 
     def start(self) -> "ErrorPathServer":
-        self._server = HTTPServer(("127.0.0.1", self.port), MockErrorPathHandler)
+        self._server = QuietHTTPServer(("127.0.0.1", self.port), MockErrorPathHandler)
         self.port = self._server.server_address[1]
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
@@ -774,6 +784,10 @@ class ErrorPathServer:
         if self._server:
             self._server.shutdown()
             self._server.server_close()
+            self._server = None
+        if self._thread:
+            self._thread.join(timeout=2)
+            self._thread = None
 
     @property
     def base_url(self) -> str:

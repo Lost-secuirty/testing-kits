@@ -556,6 +556,10 @@ class MockServer:
             self._server._shutdown_request = True  # type: ignore[attr-defined]
         if self._thread:
             self._thread.join(timeout=1.0)
+        if self._server:
+            self._server.server_close()
+            self._server = None
+        self._thread = None
 
     @property
     def base_url(self) -> str:

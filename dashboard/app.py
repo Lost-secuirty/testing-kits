@@ -69,8 +69,16 @@ def load_status():
 
 def run_cmd(cmd, timeout=300):
     try:
-        proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=timeout)
-        return proc.returncode, proc.stdout + proc.stderr
+        proc = subprocess.run(
+            cmd,
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+        return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
     except subprocess.TimeoutExpired:
         return 124, f"TIMEOUT after {timeout}s"
 
@@ -149,6 +157,13 @@ with tab1:
         if gen_at:
             st.caption(f"Generated: {gen_at}")
         summary = data.get("summary", {})
+        proof_summary = data.get("proof", {}).get("summary", {})
+        if summary or proof_summary:
+            cols = st.columns(4)
+            cols[0].metric("Harnesses", summary.get("total_harnesses", "-"))
+            cols[1].metric("Self-test OK", summary.get("ok", "-"))
+            cols[2].metric("Proof OK", proof_summary.get("ok", "-"))
+            cols[3].metric("Proof gaps", proof_summary.get("fail", "-"))
         per_harness = data.get("per_harness", [])
         df = pd.DataFrame(per_harness)
         if not df.empty:
@@ -200,7 +215,11 @@ with tab4:
 
     st.divider()
     st.subheader("Run single harness")
-    harness_files = sorted([str(p.relative_to(REPO_ROOT)) for p in REPO_ROOT.glob("harnesses/*/*_test_harness.py")])
+    harness_files = sorted(
+        str(p.relative_to(REPO_ROOT))
+        for p in REPO_ROOT.glob("harnesses/*/*.py")
+        if p.name != "__init__.py"
+    )
     harness_choice = st.selectbox("Select harness (relative path)", options=[""] + harness_files, index=0)
     if harness_choice:
         if st.button("Run selected harness --self-test"):

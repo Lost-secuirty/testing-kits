@@ -444,6 +444,7 @@ class TestHttpClient(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
+        cls.server.server_close()
 
     def test_get_returns_200(self):
         status, err = _do_http_request("GET", f"{self.base_url}/", None, {}, 5.0)
@@ -469,8 +470,9 @@ class TestHttpClient(unittest.TestCase):
         self.assertEqual(status, 200)
 
     def test_connection_refused(self):
-        status, err = _do_http_request("GET", "http://127.0.0.1:1/nope",
-                                       None, {}, 2.0)
+        with patch("http.client.HTTPConnection", side_effect=ConnectionRefusedError("refused")):
+            status, err = _do_http_request("GET", "http://127.0.0.1:1/nope",
+                                           None, {}, 2.0)
         self.assertEqual(status, 0)
         self.assertIsNotNone(err)
         self.assertIn("connection", err.lower())
@@ -493,6 +495,7 @@ class TestIntegrationFullRun(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
+        cls.server.server_close()
 
     def test_short_run_produces_valid_metrics(self):
         """Run at 30 req/s for 3 seconds — expect ~90 requests, 0 errors."""

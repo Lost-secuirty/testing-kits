@@ -676,3 +676,4 @@ if __name__ == "__main__":
 
     print(f"\nMetrics: {metrics.summary()}")
     server.shutdown()
+    server.server_close()
