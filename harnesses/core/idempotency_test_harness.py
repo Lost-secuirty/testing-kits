@@ -588,6 +588,7 @@ class MockIdempotencyHandler(http.server.BaseHTTPRequestHandler):
         idempotency_key = self.headers.get("X-Idempotency-Key")
 
         if not idempotency_key:
+            self._read_body()
             self._send_json(400, {
                 "error": "Missing X-Idempotency-Key header",
                 "code": "MISSING_IDEMPOTENCY_KEY"
@@ -678,8 +679,10 @@ class MockIdempotencyServer:
 
     def stop(self):
         """Shut down the server."""
-        if self._server:
-            self._server.shutdown()
+        server = self._server
+        if server:
+            server.shutdown()
+            server.server_close()
             self._server = None
         if self._thread:
             self._thread.join(timeout=2.0)

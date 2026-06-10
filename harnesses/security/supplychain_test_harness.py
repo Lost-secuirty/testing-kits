@@ -613,9 +613,15 @@ class MockRegistry:
         return self.port
 
     def stop(self) -> None:
-        if self._server:
-            self._server.shutdown()
+        server = self._server
+        thread = self._thread
+        if server:
+            server.shutdown()
+            server.server_close()
             self._server = None
+        if thread:
+            thread.join(timeout=2)
+            self._thread = None
 
     def base_url(self) -> str:
         return f"http://127.0.0.1:{self.port}"

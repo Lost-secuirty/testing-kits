@@ -214,6 +214,11 @@ class ResponseValidator:
 # API test suite runner
 # ---------------------------------------------------------------------------
 
+def _elapsed_ms(start_ns: int) -> float:
+    elapsed = (time.perf_counter_ns() - start_ns) / 1_000_000
+    return max(elapsed, 0.001)
+
+
 class ApiTestSuite:
     def __init__(self, base_url: str, default_headers: Optional[Dict[str, str]] = None):
         self.base_url = base_url
@@ -226,10 +231,10 @@ class ApiTestSuite:
 
     def run(self) -> ApiSuiteReport:
         results = []
-        suite_start = time.monotonic()
+        suite_start = time.perf_counter_ns()
         for case in self._cases:
             results.append(self._run_case(case))
-        total_ms = (time.monotonic() - suite_start) * 1000
+        total_ms = _elapsed_ms(suite_start)
         passed = sum(1 for r in results if r.passed)
         return ApiSuiteReport(
             total=len(results),
@@ -240,7 +245,7 @@ class ApiTestSuite:
         )
 
     def _run_case(self, case: ApiTestCase) -> ApiTestResult:
-        start = time.monotonic()
+        start = time.perf_counter_ns()
         try:
             req = self._builder.build(
                 method=case.method,
@@ -258,7 +263,7 @@ class ApiTestSuite:
                 resp_headers = dict(e.headers)
                 raw = e.read()
 
-            duration_ms = (time.monotonic() - start) * 1000
+            duration_ms = _elapsed_ms(start)
 
             content_type = resp_headers.get("Content-Type", resp_headers.get("content-type", ""))
             body = None
@@ -305,7 +310,7 @@ class ApiTestSuite:
             )
 
         except Exception as exc:
-            duration_ms = (time.monotonic() - start) * 1000
+            duration_ms = _elapsed_ms(start)
             return ApiTestResult(
                 name=case.name,
                 passed=False,
@@ -600,6 +605,7 @@ def _self_test(port: int = 18900) -> bool:
 
     report = suite.run()
     server.shutdown()
+    server.server_close()
 
     ok = report.passed == report.total
     status = "PASS" if ok else "FAIL"
@@ -642,3 +648,4 @@ if __name__ == "__main__":
                 time.sleep(1)
         except KeyboardInterrupt:
             server.shutdown()
+            server.server_close()

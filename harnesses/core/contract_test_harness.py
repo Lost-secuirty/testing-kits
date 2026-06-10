@@ -629,6 +629,8 @@ class MockContractHandler(BaseHTTPRequestHandler):
         self._send_json(200, {"violations": server_obj.violations})
 
     def _handle_reset(self) -> None:
+        if self._read_body() is None:
+            return
         server_obj: MockContractServer = self.server  # type: ignore[assignment]
         server_obj.results = []
         server_obj.violations = []
@@ -706,8 +708,10 @@ class MockContractServer(HTTPServer):
 
     def stop(self) -> None:
         self.shutdown()
+        self.server_close()
         if self._thread:
             self._thread.join(timeout=5)
+            self._thread = None
 
 
 # ---------------------------------------------------------------------------

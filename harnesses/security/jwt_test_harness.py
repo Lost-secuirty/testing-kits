@@ -390,6 +390,7 @@ def main():
                 _time.sleep(1)
         except KeyboardInterrupt:
             server.shutdown()
+            server.server_close()
         return
 
     if args.self_test:

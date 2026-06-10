@@ -802,7 +802,13 @@ class MockA11yServer:
 
     def stop(self) -> None:
         if self.server:
-            self.server.shutdown()
+            server = self.server
+            server.shutdown()
+            server.server_close()
+            if self._thread:
+                self._thread.join(timeout=5)
+            self.server = None
+            self._thread = None
 
     def url(self, path: str = "/") -> str:
         return f"http://127.0.0.1:{self.port}{path}"

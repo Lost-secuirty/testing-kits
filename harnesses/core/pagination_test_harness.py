@@ -372,8 +372,10 @@ class PaginationServer:
 
     def stop(self) -> None:
         self._server.shutdown()
+        self._server.server_close()
         if self._thread:
             self._thread.join(timeout=5)
+            self._thread = None
 
     def get_json(self, path: str) -> Dict[str, Any]:
         url = f"{self.base_url}{path}"

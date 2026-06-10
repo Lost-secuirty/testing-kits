@@ -1073,6 +1073,7 @@ def _self_test(port: int = 18910) -> bool:
         return runner.run_all()
     finally:
         server.shutdown()
+        server.server_close()
 
 
 def main():

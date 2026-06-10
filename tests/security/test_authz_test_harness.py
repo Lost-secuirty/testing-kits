@@ -748,7 +748,10 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_base_url_format(self):
         s = AuthzServer()
-        url = s.base_url()
+        try:
+            url = s.base_url()
+        finally:
+            s.stop()
         self.assertTrue(url.startswith("http://127.0.0.1:"))
 
     def test_encode_token_is_base64(self):

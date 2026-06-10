@@ -579,8 +579,13 @@ class NumericTestServer:
 
     def stop(self):
         if self._server:
-            self._server.shutdown()
+            server = self._server
+            server.shutdown()
+            server.server_close()
+            if self._thread:
+                self._thread.join(timeout=5)
             self._server = None
+            self._thread = None
 
     @property
     def base_url(self) -> str:
