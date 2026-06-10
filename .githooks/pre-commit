@@ -1,0 +1,15 @@
+#!/bin/sh
+# Pre-commit secret/PII gate for this repo.
+#
+# Activate once per clone:   git config core.hooksPath .githooks
+# Intentional one-off bypass: git commit --no-verify   (use sparingly)
+#
+# Blocks the commit (exit 1) if staged content looks like a secret, PII, or a
+# path from the personal/Drive tier. See tools/scan_staged.py and SECURITY.md.
+root=$(git rev-parse --show-toplevel)
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 "$root/tools/scan_staged.py" --staged
+else
+  echo "pre-commit: python3 not found — secret/PII scan SKIPPED (install python3)." >&2
+  exit 0
+fi
