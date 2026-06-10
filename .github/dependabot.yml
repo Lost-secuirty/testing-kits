@@ -7,3 +7,10 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+  - package-ecosystem: "pip"
+    directory: "/dashboard"
+    schedule:
+      interval: "monthly"
+    groups:
+      dashboard-pip:
+        patterns: ["*"]
