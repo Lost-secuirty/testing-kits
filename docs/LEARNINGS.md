@@ -13,3 +13,10 @@ Append-only log of gotchas, fixes, API surprises, tool behavior, and verificatio
 - Treat filesystem discovery plus `make proof` as the harness-count source of truth; committed generated status artifacts can be stale.
 - `harnesses/core/complexity_test_harness.py` was real and tested but missing from the numbered inventory, which made the public count read 72 instead of the discovered 73.
 - Windows self-test/report runs need explicit UTF-8 subprocess decoding; relying on the console code page can crash report generation on Unicode harness output.
+
+## 2026-06-10 - reviewer polish wording
+
+- Use "current proof baseline" or "checks passing" for the 73/73 status; do not describe the harness suite as total correctness proof.
+- AI-authored tests need visible safe fixtures and planted-bad controls before their results are trusted.
+- Pharmacy-domain harness docs must stay limited to fixture-defined software behavior, not clinical validation or production medication-safety claims.
+- Run all-harness self-test/report commands sequentially; parallel `proof_audit` and `generate_report --check` runs can collide on local mock-server ports and create a false failure.
