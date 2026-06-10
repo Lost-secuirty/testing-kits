@@ -2,6 +2,12 @@
 
 This is a public repository. Treat every commit, branch, issue, PR, and artifact as public forever.
 
+## Reporting a vulnerability
+
+- Report security issues privately via the repository **Security** tab → **"Report a vulnerability"** (GitHub private vulnerability reporting).
+- Do not open public issues, PRs, or discussions for suspected vulnerabilities.
+- Expect an initial response within about 7 days. Include reproduction steps and affected harness/tool paths where possible.
+
 ## Data boundary
 
 - No secrets, tokens, credentials, private keys, account recovery codes, private URLs, or sensitive personal data in commits, logs, issues, PRs, fixtures, screenshots, or generated artifacts.

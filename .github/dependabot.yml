@@ -4,6 +4,20 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    # Cooldown: hold version-update PRs so a freshly published (possibly
+    # compromised) release ages in public before it reaches CI. Security
+    # updates for known CVEs bypass this automatically.
+    cooldown:
+      default-days: 7
     groups:
       github-actions:
+        patterns: ["*"]
+  - package-ecosystem: "pip"
+    directory: "/dashboard"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    groups:
+      dashboard-pip:
         patterns: ["*"]

@@ -1,5 +1,13 @@
-Codex Handoff: testing-kits dashboard & platform fixes
-=====================================================
+Codex Handoff: testing-kits dashboard & platform fixes (ARCHIVED)
+=================================================================
+
+> **Historical archive — do not treat as current state.**
+> This handoff described work on a `codex/handoff` branch that has since been
+> merged into `main` and deleted (verified 2026-06-10: the branch no longer
+> exists locally or on `origin`). The changes it describes (Streamlit dashboard,
+> UTF-8 report generation, Windows harness robustness) are now in `main`.
+> Branch and PR references below are preserved verbatim for history only.
+> For current usage, see `README.md` and `dashboard/README.md`.
 
 Summary
 -------

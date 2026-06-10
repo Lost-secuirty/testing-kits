@@ -17,10 +17,13 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.12"
       - name: Self-test the scanner
         run: python3 tools/scan_staged.py --self-test
       - name: Scan PR diff for secrets / personal-tier paths
-        run: python3 tools/scan_staged.py --ci --base "origin/${{ github.base_ref }}"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 tools/scan_staged.py --ci --base "origin/${BASE_REF}"
