@@ -14,3 +14,7 @@ The minimum shape is:
 Existing harnesses are audited by `make proof`. Separate proof files are required only when safe/bad control evidence is not already explicit in the self-test or paired unittest.
 
 Coverage can show code was exercised, but it does not prove the test would catch a real bug. Use proof fixtures or mutation probes for that.
+
+This standard is a current proof baseline, not total correctness proof. It shows
+that fixture-defined safe cases pass and planted bad cases fail under current
+tooling.
