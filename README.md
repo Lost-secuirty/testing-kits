@@ -21,6 +21,14 @@ make selftest
 make proof
 ```
 
+Windows fallback when `make` is unavailable:
+
+```bash
+python -m unittest discover -s tests -t . -p "test_*.py"
+python tools/generate_report.py --check
+python tools/proof_audit.py --run-selftests
+```
+
 Single-harness smoke checks:
 
 ```bash
@@ -77,6 +85,10 @@ tools/        generate_report.py, proof_audit.py, harness_registry.py, rewrite_i
 - [`HARNESS_INVENTORY.md`](./HARNESS_INVENTORY.md) — full catalog.
 - [`HARNESS_ROADMAP.md`](./HARNESS_ROADMAP.md) — shipped batches, known gaps, hygiene backlog.
 - [`AGENTS.md`](./AGENTS.md) — contributor/agent contract: commands, boundaries, working agreement.
+- [`docs/REVIEWER_QUICKSTART.md`](./docs/REVIEWER_QUICKSTART.md) — quick review path, limits, and Windows fallbacks.
+- [`docs/AI_AUTHORED_TEST_AUDIT.md`](./docs/AI_AUTHORED_TEST_AUDIT.md) — checklist for AI-assisted test trust.
+- [`docs/AI_FAILURE_MODE_MAP.md`](./docs/AI_FAILURE_MODE_MAP.md) — maps AI coding risks to existing harness areas.
+- [`docs/PROOF_TEST_STANDARD.md`](./docs/PROOF_TEST_STANDARD.md) — safe fixture plus planted-bad proof rule.
 - [`CLAUDE.md`](./CLAUDE.md) — Claude-specific notes; points back to `AGENTS.md`.
 
 ## Status handling
@@ -98,4 +110,7 @@ A collection of small, inspectable test harnesses that demonstrate reusable test
 - Not a packaged framework.
 - Not a deployed service.
 - Not a dependency-heavy test platform.
+- Not a total correctness proof for any target application.
 - Not a substitute for domain review in healthcare/pharmacy contexts.
+- Not clinical validation, medication-safety certification, or pharmacy-grade
+  correctness assurance.

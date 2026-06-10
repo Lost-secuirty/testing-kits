@@ -14,6 +14,13 @@ Append-only log of gotchas, fixes, API surprises, tool behavior, and verificatio
 - `harnesses/core/complexity_test_harness.py` was real and tested but missing from the numbered inventory, which made the public count read 72 instead of the discovered 73.
 - Windows self-test/report runs need explicit UTF-8 subprocess decoding; relying on the console code page can crash report generation on Unicode harness output.
 
+## 2026-06-10 - reviewer polish wording
+
+- Use "current proof baseline" or "checks passing" for the 73/73 status; do not describe the harness suite as total correctness proof.
+- AI-authored tests need visible safe fixtures and planted-bad controls before their results are trusted.
+- Pharmacy-domain harness docs must stay limited to fixture-defined software behavior, not clinical validation or production medication-safety claims.
+- Run all-harness self-test/report commands sequentially; parallel `proof_audit` and `generate_report --check` runs can collide on local mock-server ports and create a false failure.
+
 ## 2026-06-10 - cleanup/update pass (docs, status convention, CI pins, dashboard deps)
 
 - Correction to the 2026-06-09 entry: the unexpanded `$branch` was `codex-core-rule-pack-2026-06-09`, merged via PR #14 (commits eddc291, 4698ced, 529ffae, 333cd41). Lesson: expand shell variables before pasting into append-only logs.
