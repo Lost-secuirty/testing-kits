@@ -2,6 +2,10 @@
 
 What changed?
 
+## Deviations from plan
+
+None.
+
 ## AI assistance
 
 - [ ] No AI-assisted code

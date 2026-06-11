@@ -1,5 +1,10 @@
 # CLAUDE.md - testing-kits
 
+> **Read this even if you are not Claude.** This file is auto-loaded by Claude Code, but
+> the rules here are not Claude-specific. The canonical, tool-agnostic contract for every
+> AI agent (and human) in this repo is **[`AGENTS.md`](AGENTS.md)** — read it first,
+> whoever you are. Below are only Claude-Code-specific notes.
+
 Auto-loaded by Claude Code. Read AGENTS.md first; it is the canonical contract for this repo. This file only adds Claude-specific notes.
 
 ## Claude-specific notes
