@@ -757,11 +757,11 @@ def find_free_port(preferred: int = 19120) -> int:
     """Find a free port, preferring the given one."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("", preferred))
+            s.bind(("127.0.0.1", preferred))
             return preferred
     except OSError:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("", 0))
+            s.bind(("127.0.0.1", 0))
             return s.getsockname()[1]
 
 

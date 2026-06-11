@@ -61,7 +61,7 @@ def _make_test_db(path):
         );
     """)
     conn.execute(
-        "INSERT OR IGNORE INTO Users (name, role, pin_hash) VALUES ('Nathan', 'admin', 'abc123')")
+        "INSERT OR IGNORE INTO Users (name, role, pin_hash) VALUES ('DefaultAdmin', 'admin', 'abc123')")
     conn.commit()
     conn.close()
 

@@ -181,7 +181,7 @@ def _run_self_test() -> int:
     must_clean = [
         "Beverly Hills 90210",                       # ZIP, not PII
         "order #" + "1234567812345678",              # 16-digit, fails Luhn
-        "date: 2026-06-02  project: replit-code",    # frontmatter date (DOB omitted)
+        "date: 2026-06-02  project: testing-kits",
         "see arXiv 2310.13548 and 2401.04088",       # arXiv ids
         "standup at 3pm to discuss the build",       # plain prose
         "this line mentions an api_key in passing",  # keyword, no value
@@ -193,17 +193,17 @@ def _run_self_test() -> int:
         labels = scan_line(s)
         if not any(l not in _PII_KINDS for l in labels):
             fails += 1
-            print(f"  FAIL: expected a BLOCK, got {labels}: {s[:20]!r}...")
+            print("  FAIL: expected secret block was not detected")
     for s in must_warn:
         labels = scan_line(s)
         if not labels or any(l not in _PII_KINDS for l in labels):
             fails += 1
-            print(f"  FAIL: expected WARN-only, got {labels}: {s!r}")
+            print("  FAIL: expected PII warning was not detected")
     for s in must_clean:
         labels = scan_line(s)
         if labels:
             fails += 1
-            print(f"  FAIL: false positive {labels} on: {s!r}")
+            print("  FAIL: clean fixture produced a false positive")
     if fails:
         print(f"self-test: {fails} failure(s)")
         return 1
