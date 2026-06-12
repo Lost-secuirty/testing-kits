@@ -1,13 +1,13 @@
 # AGENTS.md - testing-kits agent contract
 
-Canonical contract for any AI coding agent or human contributor working in this repo. Claude reads `CLAUDE.md`, which points back here. Keep this lean: rules that change behavior, real commands, and repo-specific boundaries.
+Universal instruction source for every human, agent, and automation system working in this repo. Read it together with `CLAUDE.md`; both files apply regardless of tool. Keep this lean: rules that change behavior, real commands, and repo-specific boundaries.
 
 ## Repo role
 Public pure-Python standard-library testing-harness collection. The value is small, inspectable harnesses with paired tests and no runtime dependency bloat.
 
 ## Start here
-1. Read this file first.
-2. Read `CLAUDE.md` only for Claude-specific notes.
+1. Read `AGENTS.md` and `CLAUDE.md` together as universal instruction sources.
+2. Apply scoped nested instructions when present.
 3. Read `SECURITY.md` before writes, deletes, installs, credentials, permissions, or outbound actions.
 4. Read `docs/LEARNINGS.md` for known gotchas before repeating old work.
 5. Inspect live repo state before claiming anything is done or current.
@@ -92,7 +92,7 @@ When sources disagree, trust them in this order — and never silently pick a si
 the conflict:
 
 1. Live repo state, passing tests, and CI output.
-2. `AGENTS.md`, then `SECURITY.md`, then tool-specific files such as `CLAUDE.md`.
+2. `AGENTS.md`, `CLAUDE.md`, and `SECURITY.md` together; the most restrictive applicable rule wins.
 3. Repo docs — `README.md`, `STATUS.md`, `docs/adr/`, `docs/LEARNINGS.md`.
 4. External docs and web research, cited when used.
 5. Chat history and memory — candidate context only.

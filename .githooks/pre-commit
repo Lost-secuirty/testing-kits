@@ -8,8 +8,12 @@
 # path from the personal/Drive tier. See tools/scan_staged.py and SECURITY.md.
 root=$(git rev-parse --show-toplevel)
 if command -v python3 >/dev/null 2>&1; then
-  exec python3 "$root/tools/scan_staged.py" --staged
-else
-  echo "pre-commit: python3 not found — secret/PII scan SKIPPED (install python3)." >&2
-  exit 0
+    exec python3 "$root/tools/scan_staged.py" --staged
+elif command -v python >/dev/null 2>&1; then
+    exec python "$root/tools/scan_staged.py" --staged
+elif command -v py >/dev/null 2>&1; then
+    exec py -3 "$root/tools/scan_staged.py" --staged
 fi
+
+echo "pre-commit: no Python 3 interpreter found; secret/PII gate cannot run." >&2
+exit 1
