@@ -101,8 +101,17 @@ def main() -> int:
 
         if "permissions" not in data:
             report("workflow-permissions", rel, "top-level permissions are required")
-        if "concurrency" not in data:
-            report("workflow-concurrency", rel, "concurrency cancellation is required")
+        concurrency = data.get("concurrency")
+        if not isinstance(concurrency, dict):
+            report("workflow-concurrency", rel, "concurrency must define group and cancellation")
+        else:
+            group = concurrency.get("group")
+            if not isinstance(group, str) or "github.ref" not in group:
+                report("workflow-concurrency", rel, "concurrency.group must be scoped by github.ref")
+            cancel = concurrency.get("cancel-in-progress")
+            conditional_cancel = isinstance(cancel, str) and cancel.strip().startswith("${{")
+            if cancel is not True and not conditional_cancel:
+                report("workflow-concurrency", rel, "concurrency.cancel-in-progress must be true or conditional")
         if has_event(data, "pull_request_target"):
             report("pull-request-target", rel, "pull_request_target is prohibited")
 

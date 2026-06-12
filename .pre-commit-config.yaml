@@ -28,12 +28,13 @@ repos:
       - id: repository-control-audit
         name: repository control audit
         entry: python tools/control_audit.py
-        language: system
+        language: python
+        additional_dependencies: [PyYAML==6.0.3]
         pass_filenames: false
         always_run: true
       - id: secret-pii-policy
         name: repository secret and PII policy
         entry: python tools/scan_staged.py --staged
-        language: system
+        language: python
         pass_filenames: false
         stages: [pre-commit]
