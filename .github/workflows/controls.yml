@@ -1,0 +1,113 @@
+name: repository-controls
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * 2"
+  workflow_dispatch:
+
+concurrency:
+  group: controls-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  control-audit:
+    name: Instruction and control audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Install audit dependencies
+        run: python -m pip install --disable-pip-version-check "PyYAML==6.0.3"
+      - name: Run repository control audit
+        run: python tools/control_audit.py
+
+  pre-commit:
+    name: Pre-commit gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Install pre-commit
+        run: python -m pip install --disable-pip-version-check "pre-commit==4.6.0"
+      - name: Run all pre-commit gates
+        run: pre-commit run --all-files --show-diff-on-failure
+
+  workflow-lint:
+    name: Workflow and shell lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned workflow tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz -o actionlint.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+          curl -fsSL https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz -o shellcheck.tar.xz
+          echo "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf shellcheck.tar.xz --strip-components=1 shellcheck-v0.11.0/shellcheck
+          curl -fsSL https://github.com/mvdan/sh/releases/download/v3.13.1/shfmt_v3.13.1_linux_amd64 -o shfmt
+          echo "fb096c5d1ac6beabbdbaa2874d025badb03ee07929f0c9ff67563ce8c75398b1  shfmt" | sha256sum -c -
+          chmod +x actionlint shellcheck shfmt
+          python -m pip install --disable-pip-version-check "zizmor==1.25.2"
+      - name: Lint GitHub workflows
+        run: ./actionlint
+      - name: Audit GitHub workflows
+        run: zizmor --min-severity medium .
+      - name: Lint and format-check shell scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' scripts < <(find . -type f -name '*.sh' -not -path './.git/*' -not -path './node_modules/*' -print0)
+          if (("${#scripts[@]}" > 0)); then
+            ./shellcheck "${scripts[@]}"
+            ./shfmt -d "${scripts[@]}"
+          fi
+
+  security-scan:
+    name: Secret and dependency scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install pinned security scanners
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz -o gitleaks.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          curl -fsSL https://github.com/google/osv-scanner/releases/download/v2.3.8/osv-scanner_linux_amd64 -o osv-scanner
+          echo "bc98e15319ed0d515e3f9235287ba53cdc5535d576d24fd573978ecfe9ab92dc  osv-scanner" | sha256sum -c -
+          chmod +x gitleaks osv-scanner
+      - name: Scan the checked-out tree for secrets
+        run: ./gitleaks detect --source . --no-git --no-banner --redact
+      - name: Scan dependency lockfiles
+        run: ./osv-scanner scan source --recursive --allow-no-lockfiles --experimental-exclude node_modules --experimental-exclude .venv .

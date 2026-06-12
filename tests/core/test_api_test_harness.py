@@ -492,7 +492,7 @@ class TestMockServerIntegration(unittest.TestCase):
 
     def test_rate_limit_exceeded_429(self):
         # Exhaust the limit
-        key = "exhaust-key-429"
+        key = "exhaust-key-429"  # gitleaks:allow - synthetic rate-limit fixture
         for _ in range(11):
             req = urllib.request.Request(
                 f"{self.base}/rate-limited",

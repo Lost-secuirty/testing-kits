@@ -393,7 +393,7 @@ class TestSensitiveValueDetector(unittest.TestCase):
         self.assertIn("password", report.warnings)
 
     def test_api_key_flagged(self):
-        config = {"api_key": "abcdef123456789"}
+        config = {"api_key": "abcdef123456789"}  # gitleaks:allow - scanner fixture
         report = self.detector.scan(config)
         self.assertIn("api_key", report.warnings)
 

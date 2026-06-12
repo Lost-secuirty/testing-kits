@@ -255,7 +255,7 @@ class TestSensitiveDataScanner(unittest.TestCase):
         self.assertIn("api_key", findings)
 
     def test_detects_token(self):
-        findings = self.scanner.scan_message("token=eyJhbGciOiJIUzI1NiJ9")
+        findings = self.scanner.scan_message("token=eyJhbGciOiJIUzI1NiJ9")  # gitleaks:allow allowlist secret
         self.assertIn("token", findings)
 
     def test_detects_bearer(self):

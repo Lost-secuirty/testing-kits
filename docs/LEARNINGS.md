@@ -31,3 +31,14 @@ Append-only log of gotchas, fixes, API surprises, tool behavior, and verificatio
 - `uvx zizmor` v1.25.2 on `.github/workflows/`: 3x artipacked (checkout without `persist-credentials: false`) and 1x high-confidence template-injection (`${{ github.base_ref }}` interpolated into a run block in scan.yml). Fixed all four (env-var indirection for the injection); re-run is clean.
 - Pre-existing, untouched: `ruff check harnesses tests tools` reports 2288 findings (mostly UP006/UP045 typing modernization) in harness/test/tool code. `make lint` still exits 0 because the Makefile makes the ruff step non-blocking. Fixing these means touching harness code, so it needs its own pass with paired-test evidence.
 - Verified on this pass: `make lint` exit 0, `make selftest` 73/73 green (47s), `make proof` full pass exit 0 (46s). Current PyPI floors verified 2026-06-10: streamlit 1.58.0, pandas 3.0.3, GitPython 3.1.50; dashboard floors raised to >=1.50 / >=2.2 / >=3.1.44.
+
+## 2026-06-11 - shared core adoption + scanner-family note
+
+- AGENTS.md working agreement / agent safety / source-of-truth swapped to the
+  cross-repo shared core (this repo's wording was the template). "Research
+  informs; the operator decides" moved under Operator rules; the audit fold-in
+  restored "system/developer instructions" to the cannot-override list.
+- The scan_staged.py family is deliberately divergent across repos: this repo
+  (and Journal-and-findings) WARN on PII; the public repos BLOCK it. The
+  variants are policy, not drift - read the module docstring before unifying.
+  testing-kits is the de-facto upstream of the family.

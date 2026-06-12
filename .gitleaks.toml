@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic secret fixtures used to self-test the repository scanner"
+paths = ['''^tools/scan_staged\.py$''']

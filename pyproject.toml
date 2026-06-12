@@ -4,7 +4,14 @@ version = "0.2.0"
 description = "Pure-stdlib Python testing-harness collection. Zero runtime dependencies."
 requires-python = ">=3.10"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["harnesses*"]
 
 [project.optional-dependencies]
 dev = ["ruff"]

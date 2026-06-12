@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "repository_kind": "python-tooling",
+  "visibility": "public",
+  "scanner_mode": "warn",
+  "instruction_sources": [
+    "AGENTS.md",
+    "CLAUDE.md"
+  ],
+  "nested_instruction_files": [],
+  "required_files": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "SECURITY.md",
+    ".pre-commit-config.yaml",
+    ".gitattributes",
+    ".gitignore",
+    ".gitleaks.toml",
+    ".yamllint.yml",
+    ".githooks/pre-commit",
+    "tools/scan_staged.py",
+    "tools/control_audit.py",
+    ".github/control-policy.json",
+    ".github/workflows/controls.yml",
+    ".github/workflows/scan.yml",
+    ".github/dependabot.yml"
+  ],
+  "required_workflows": [
+    "repository-controls",
+    "secret-pii-scan",
+    "Dependency Review",
+    "openssf-scorecard",
+    "main-artifacts",
+    "release"
+  ],
+  "exceptions": []
+}

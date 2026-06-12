@@ -1,8 +1,10 @@
 # CLAUDE.md - testing-kits
 
-Auto-loaded by Claude Code. Read AGENTS.md first; it is the canonical contract for this repo. This file only adds Claude-specific notes.
+The filename is historical. This is a universal instruction source for every human,
+agent, and automation system working in this repository. Read it together with
+`AGENTS.md` and `SECURITY.md`; all rules below apply regardless of the tool in use.
 
-## Claude-specific notes
+## Operational notes
 
 - Follow AGENTS.md for commands, boundaries, git workflow, source-of-truth order, and the Working Agreement.
 - Read SECURITY.md before writes, deletes, installs, permission changes, credential work, or outbound messages.
