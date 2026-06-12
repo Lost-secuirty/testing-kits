@@ -28,6 +28,7 @@
   "required_workflows": [
     "repository-controls",
     "secret-pii-scan",
+    "Dependency Review",
     "openssf-scorecard",
     "main-artifacts",
     "release"
