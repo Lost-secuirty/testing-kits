@@ -12,8 +12,10 @@ and the contract works there too).
 > `unittest` / `ruff` / CI quirk worth not re-learning). Do **not** import sheets from other
 > repos' stacks (no Node/Vite/Pixi here — wrong stack).
 
-Evidence basis: docs-in-context lifts coding-agent performance most for less-common /
-fast-moving libraries, and *working code examples* help more than prose (arXiv 2503.15231).
+Evidence basis: supplying **API documentation via retrieval (RAG)** lifts LLM code-generation
+performance most for less-common / fast-moving libraries, and *working code examples* contribute
+more than prose (arXiv 2503.15231 — the paper studies RAG over API docs, not repo-specific
+instruction files).
 
 ## The contract (binds every agent and subagent)
 
