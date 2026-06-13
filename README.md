@@ -4,7 +4,7 @@ Pure-Python standard-library testing-harness collection. **Zero runtime dependen
 
 Current public shape:
 
-- **73 harnesses** across reliability, security, AI, and pharmacy-domain testing.
+- **77 harnesses** across reliability, security, AI, and pharmacy-domain testing.
 - Each harness is a single self-contained Python file.
 - Each harness has a paired `unittest` suite.
 - Harnesses expose a built-in `--self-test` mode when applicable.
