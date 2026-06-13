@@ -114,3 +114,18 @@ A collection of small, inspectable test harnesses that demonstrate reusable test
 - Not a substitute for domain review in healthcare/pharmacy contexts.
 - Not clinical validation, medication-safety certification, or pharmacy-grade
   correctness assurance.
+
+## Repo map (the six-slot model)
+
+Across the connected repos the same skeleton repeats — **rules → memory →
+decisions → agent-tooling → verification → product**. This repo's shape (note:
+here *verification is the product*):
+
+- **Rules** — `AGENTS.md` (contract) · `CLAUDE.md` (pointer) · `SECURITY.md`; the reviewer docs (`docs/AI_CODE_POLICY.md`, `docs/PROOF_TEST_STANDARD.md`, `docs/AI_FAILURE_MODE_MAP.md`, `docs/REVIEWER_QUICKSTART.md`) stand in for a cheat-sheet.
+- **Memory** — `docs/LEARNINGS.md` (gotchas) · `docs/kb/` (per-agent journal) · `HARNESS_INVENTORY.md` / `HARNESS_ROADMAP.md` / `PORTFOLIO.md` (the catalog).
+- **Decisions** — no `docs/adr/`: this repo *predates* the ADR convention; required files/workflows are encoded in `.github/control-policy.json` (checked by `tools/control_audit.py`).
+- **Agent tooling** — `.claude/` (hooks + settings; no predefined agent roles).
+- **Verification** — `harnesses/` + `tests/` + `tools/proof_audit.py` (`make proof`) + `.github/workflows/` + the secret/PII gate (`.githooks/` + `tools/scan_staged.py`).
+- **Product** — `harnesses/` themselves: the deliverable *is* the verification — a portable library of proof harnesses to reference later.
+
+Plain-language **and** technical walk-through: [`docs/WALKTHROUGH.md`](./docs/WALKTHROUGH.md).
