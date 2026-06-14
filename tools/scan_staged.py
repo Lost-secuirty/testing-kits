@@ -102,7 +102,16 @@ def scan_line(line: str) -> list[str]:
 
 
 def _git(args: list[str]) -> str:
-    out = subprocess.run(["git"] + args, capture_output=True, text=True, check=False)
+    # Force UTF-8 decode: on Windows the default locale codec is cp1252, which crashes
+    # on UTF-8 diff content (non-ASCII in docs/code). Linux/CI default to UTF-8.
+    out = subprocess.run(
+        ["git"] + args,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
     return out.stdout
 
 
@@ -191,12 +200,12 @@ def _run_self_test() -> int:
     fails = 0
     for s in must_block:
         labels = scan_line(s)
-        if not any(l not in _PII_KINDS for l in labels):
+        if not any(label not in _PII_KINDS for label in labels):
             fails += 1
             print("  FAIL: expected secret block was not detected")
     for s in must_warn:
         labels = scan_line(s)
-        if not labels or any(l not in _PII_KINDS for l in labels):
+        if not labels or any(label not in _PII_KINDS for label in labels):
             fails += 1
             print("  FAIL: expected PII warning was not detected")
     for s in must_clean:
