@@ -65,7 +65,7 @@ Legend: ✅ implemented · 🟡 partial · ❌ absent · ➖ N/A (correctly not 
 | Full SHA-pin + least-priv `permissions` (both) | ✅ | ✅ | Verified across all workflows; `permissions: contents: read` defaults. |
 | SBOM on trusted branch (ChatGPT) | ✅ CycloneDX | ✅ SPDX | DEP-TEST-KIT supply-chain job; testing-kits `artifacts.yml`/`release.yml`. |
 | Propose-only retros, **no bot-push to PR heads** (ChatGPT) | ✅ | 🟡 | DEP-TEST-KIT ADR-0004 is exactly this (comment + artifact, never push). |
-| CodeQL (implied; testing-kits parity) | ❌ | ✅ | testing-kits `codeql.yml`; public repo → free. |
+| CodeQL (both) | ✅ default setup | ✅ `codeql.yml` | DEP-TEST-KIT runs CodeQL via GitHub **default setup** (the `Analyze (python)` checks); testing-kits via an advanced workflow. An advanced `codeql.yml` conflicts with default setup, so DEP-TEST-KIT keeps default setup — not a gap. |
 | OSV-Scanner cross-check (ChatGPT, non-blocking) | ➖ (uv audit is OSV-backed) | ✅ | testing-kits `controls.yml` runs osv-scanner. |
 | Provenance/attestation for shipped artifacts (ChatGPT) | ➖ (ships nothing) | ✅ | testing-kits `release.yml` attests; DEP-TEST-KIT correctly defers (no artifacts). |
 | `pull_request_target` used only for metadata (both) | ✅ none used | ✅ none used | **grep: zero matches anywhere** → structurally immune to the TanStack vector. |
@@ -78,9 +78,9 @@ Legend: ✅ implemented · 🟡 partial · ❌ absent · ➖ N/A (correctly not 
 | Daemonless/Podman + Ryuk caveats documented (Gemini) | ❌ | ➖ | Worth a `docs/LEARNINGS.md` note (relevant on your Windows/Docker-Desktop box). |
 
 **Headline:** your repos already implement nearly the entire **ChatGPT** doc — the only
-real gaps there are *DEP-TEST-KIT adding `dependency-review` + CodeQL, which testing-kits
-already has*. The **Gemini** doc is where the genuinely new (and more speculative)
-material lives: mutation-in-CI, gitlint, chaos testing, daemonless caveats.
+real gap there is *DEP-TEST-KIT adding `dependency-review`* (CodeQL was already covered by
+GitHub's default setup — not a gap). The **Gemini** doc is where the genuinely new (and
+more speculative) material lives: mutation-in-CI, gitlint, chaos testing, daemonless caveats.
 
 ---
 
@@ -90,8 +90,8 @@ material lives: mutation-in-CI, gitlint, chaos testing, daemonless caveats.
 
 1. **DEP-TEST-KIT: add `dependency-review` on PR** — closes a gap testing-kits already
    covers; PR-diff-scoped, public-repo-free, near-zero upkeep. *Blocking, low effort.*
-2. **DEP-TEST-KIT: add CodeQL** (Python, schedule+PR) — free on public repos; parity with
-   testing-kits. *Non-blocking, low effort.*
+2. ~~DEP-TEST-KIT: add CodeQL~~ — **already covered** by GitHub's default CodeQL setup; an
+   advanced `codeql.yml` conflicts with it, so there's nothing to add here.
 3. **Mutation gate, DEP-TEST-KIT first** — incremental (git-diff-scoped) `mutmut` on the
    harness code, **advisory first**, leveraging the dep you already ship. Caveat: local
    runs need WSL on Windows; CI Linux is fine. *Advisory→blocking later, medium effort.*
