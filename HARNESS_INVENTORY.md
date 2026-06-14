@@ -1,9 +1,9 @@
 # Test Harness Inventory
 
-**Total: 73 harnesses.** Per-harness self-test and proof status is generated locally by
+**Total: 77 harnesses.** Per-harness self-test and proof status is generated locally by
 `make report` and uploaded by CI as a workflow artifact. Entries #1–43 are
 documented in full below; #44–53 are bridged in a compact table; #54–59,
-#60–62, #63–67, #68–72, and #73 follow in full. As of the `fix-status-green` work every
+#60–62, #63–67, #68–72, #73, and #74–77 follow in full. As of the `fix-status-green` work every
 harness passes `--self-test`; the formerly-failing `srs`/`hermeticity` bugs
 and the Windows portability gaps are resolved.
 
@@ -794,6 +794,54 @@ Flags code bloat and maintainability regressions in AI-generated or human code. 
 
 ---
 
+## 74. CI Workflow Hardening Test Harness
+
+**File:** `harnesses/security/ci_workflow_hardening_test_harness.py`
+**Tests:** `tests/security/test_ci_workflow_hardening_test_harness.py` (+ `_proof.py`) — 9 tests
+**Port:** none (in-process; static audit of parsed workflow objects)
+
+Audits GitHub Actions workflow definitions for the poisoned-pipeline / pwn-request class — a CI-config attack surface neither Supply-Chain (#34, dependency hashes/slopsquat) nor App-Security (#36) nor CWE/KEV (#68) covers. `audit_workflow` flags: action `uses` refs not pinned to a full 40-hex commit SHA, `pull_request_target` (including the YAML `on`→boolean-`True` key quirk), fork checkout via `with.ref: github.head_ref`, missing top-level `permissions`, missing per-job `timeout-minutes`, `actions/checkout` without `persist-credentials: false`, fork-PR scan skips (`head.repo.full_name == github.repository`), and ungated `concurrency`. Stdlib-only: rules run on already-parsed dict fixtures (no PyYAML); ported from `tools/control_audit.py`. A planted `audit_workflow_naive` that skips the SHA-pin check proves the action-pin rule has teeth.
+
+**Key components:** `Finding`, `WorkflowCase`, `AuditResult`, `audit_workflow`, `audit_workflow_naive`, `ACTION` regex + 40-hex SHA pin check, `_events`, `_check_concurrency`
+
+---
+
+## 75. Check-Digit Identifier Test Harness
+
+**File:** `harnesses/core/check_digit_identifier_test_harness.py`
+**Tests:** `tests/core/test_check_digit_identifier_test_harness.py` (+ `_proof.py`) — 17 tests
+**Port:** none (in-process)
+
+Self-checking-identifier checksum oracles, generalized via `ChecksumSpec` + a `SCHEMES` registry (`validate(scheme, identifier)`): DEA (faithful port of pharmacy-app `verify_dea_logic` — 2 letters + payload digits + mod-10 weighted check, ASCII-only guard so Unicode digits like `٠` are rejected, the F-05 fix), Luhn (mod-10), and ISBN-10 (mod-11, `X` check). The headline oracle `single_digit_corruption_sweep` enumerates every single-digit substitution of a valid sample and asserts detection. Luhn and ISBN-10 detect 100% of single-digit errors; the DEA checksum provably cannot (a ±5 swap on a doubled position leaves the units-digit check unchanged), so the harness asserts DEA reproduces exactly its derived blind set (`dea_expected_escapes`) rather than hide the weakness. A `validate_naive` that checks only length/charset proves the check-digit step is load-bearing. Also surfaces the DEA prefix→prescriber class. Numeric/Money (#23) has no checksum logic.
+
+**Key components:** `ChecksumSpec`, `SCHEMES`, `validate`, `validate_naive`, `dea_is_valid`, `luhn_is_valid`, `isbn10_is_valid`, `single_digit_corruption_sweep`, `dea_expected_escapes`, `dea_prescriber_class`, `DEA_PREFIX_PRESCRIBER`
+
+---
+
+## 76. Diff Secret-Gate Test Harness
+
+**File:** `harnesses/security/diff_secret_gate_test_harness.py`
+**Tests:** `tests/security/test_diff_secret_gate_test_harness.py` (+ `_proof.py`) — 13 tests
+**Port:** none (in-process; parses a provided unified-diff string)
+
+A unified-diff-aware secret scanner. The novel oracle is **direction-awareness**: `scan_diff` reports a secret only on ADDED (`+`) lines with correct post-change line numbers — a secret on a REMOVED (`-`) line (e.g. a key being rotated out) does not trip the gate. `scan_line` matches secret tokens (AWS `AKIA…`, GitHub `ghp_`/`github_pat_`, PEM private-key blocks, Slack `xox[baprs]`, Google `AIza…`, generic `secret/token/password =` assignments) with an `allowlist secret` escape hatch. **Scope is secret tokens only** — PII (EMAIL/SSN/PHONE/CREDIT) is owned by PII/PHI Redaction (#62) and deliberately not duplicated. Ported from `tools/scan_staged.py` (PII regexes omitted). The planted `scan_diff_naive` scans every content line regardless of `+`/`-` and over-reports on a removed-secret diff, proving the direction logic has teeth. All fixture secrets are built by concatenation so the file does not trip its own gate.
+
+**Key components:** `SECRET_PATTERNS`, `scan_line`, `iter_added_lines`, `scan_diff`, `scan_diff_naive`, `DiffCase`, `DiffResult`, `run_case`
+
+---
+
+## 77. Lexical Date Canonicalization Test Harness
+
+**File:** `harnesses/core/lexical_date_canonicalization_test_harness.py`
+**Tests:** `tests/core/test_lexical_date_canonicalization_test_harness.py` (+ `_proof.py`) — 13 tests
+**Port:** none (in-process)
+
+Guards the data-corruption trap where a date string that parses fine but is not zero-padded silently breaks TEXT-column `ORDER BY` / range comparison: lexically `'2026-5-9' > '2026-10-01'`. Motivated by pharmacy-app `data.py` (`Inventory.exp_date TEXT NOT NULL`, `db_expired_inventory` does `WHERE exp_date < ? ORDER BY exp_date ASC`, and `_date_is_valid` accepts non-padded input via `strptime`). The headline invariant `lexical_matches_chronological`: for canonical dates, lexical sort == chronological sort; for a dataset containing a non-canonical string the two orders diverge, and `canonical_then_lexical_sort` restores agreement. `strict_is_valid` rejects parseable-but-non-canonical strings; the planted `lenient_is_valid` (mirroring the source `strptime` check) accepts `'2026-5-9'`, proving the strict rule is needed. Distinct from Time/DateTime (#20, round-trips only) and Date-Window Expiry (#42, calendar+SQL).
+
+**Key components:** `canonicalize`, `is_canonical`, `strict_is_valid`, `lenient_is_valid`, `lexical_sort`, `chronological_sort`, `canonical_then_lexical_sort`, `lexical_matches_chronological`, `CanonCase`, `SortCase`, `DIVERGENT_DATES`
+
+---
+
 ## Separate Lab: Dice Duel Reliability Lab
 
 **Folder:** `dice_duel_lab/`
@@ -869,7 +917,7 @@ production packaging, or CLI expansion.
 | 19330 | Circuit Breaker                            |
 | 19400 | JWT (HS256) Verification                   |
 | 19410 | PII / PHI Redaction                        |
-| —     | Database, CLI, SRS, Backup-Restore, Expiry-Window, Tracing, Queue, RAG Eval, the #44–53 research-pass harnesses, all of batch 6 (Agent Eval, IoT Telemetry, gRPC Contract, Browser/E2E, Drift Detection), and batch 7 — no networked mock server (SQLite / subprocess / in-process oracle) |
+| —     | Database, CLI, SRS, Backup-Restore, Expiry-Window, Tracing, Queue, RAG Eval, the #44–53 research-pass harnesses, all of batch 6 (Agent Eval, IoT Telemetry, gRPC Contract, Browser/E2E, Drift Detection), batch 7, and batch 8 (CI Workflow Hardening, Diff Secret-Gate, Check-Digit Identifier, Lexical Date Canonicalization) — no networked mock server (SQLite / subprocess / in-process oracle) |
 
 ## Running Everything
 
@@ -880,7 +928,7 @@ make proof         # run --self-test plus proof audit for every harness
 make report        # regenerate STATUS.md and STATUS.json
 ```
 
-**73 harnesses.** Live per-harness self-test and proof status is in `STATUS.md`
+**77 harnesses.** Live per-harness self-test and proof status is in `STATUS.md`
 and `STATUS.json` (auto-generated by `make report`). The earlier `pharmacy/srs`, `core/hermeticity`,
 and Windows portability (`prompt_injection`/`partial_fill`/`memory`) issues were
 resolved in the 2026-05-29 fix-status pass (see `HARNESS_ROADMAP.md` →
