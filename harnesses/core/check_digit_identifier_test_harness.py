@@ -98,8 +98,10 @@ def dea_is_valid(identifier: str) -> bool:
 
 
 def dea_prescriber_class(identifier: str) -> bool | None:
-    """Prefix-class signal: True/False if first letter is a known registrant type,
-    None if the prefix is unknown or the identifier is malformed."""
+    """Prefix-only registrant-class signal. Returns True/False when the first
+    character is a known registrant-type letter, and None when that character is
+    absent or not a recognised prefix. This inspects ONLY the prefix; it does not
+    validate full DEA structure -- use dea_is_valid() for checksum/shape."""
     if len(identifier) < 1 or not _is_ascii_upper(identifier[0]):
         return None
     return DEA_PREFIX_PRESCRIBER.get(identifier[0])
@@ -243,7 +245,9 @@ class SweepResult:
 VALID_SAMPLES: dict[str, tuple[str, ...]] = {
     # 2 ASCII letters + 6 payload digits + 1 check digit.
     "DEA": ("AB3456781", "BG1234563", "MX9876559"),
-    "LUHN": ("4539148803436467", "79927398713", "1234567812345670"),
+    # Non-PAN-length Luhn vectors (8/11/12 digits) so card-PAN/DLP scanners do
+    # not flag test data as a real card number (CodeRabbit finding).
+    "LUHN": ("12345674", "79927398713", "123456789015"),
     "ISBN10": ("0306406152", "0136091814", "080442957X"),
 }
 
@@ -258,11 +262,11 @@ CASES: tuple[IdentifierCase, ...] = (
     IdentifierCase("dea_unicode_digit", "DEA", "AB345678١", False, "Unicode digit rejected (F-05)"),
     IdentifierCase("dea_unicode_zero", "DEA", "AB34567٠0", False, "Unicode zero is not ASCII 0 (F-05)"),
     # Luhn valid / invalid.
-    IdentifierCase("luhn_valid_1", "LUHN", "4539148803436467", True, "valid Luhn"),
+    IdentifierCase("luhn_valid_1", "LUHN", "12345674", True, "valid Luhn (non-PAN length)"),
     IdentifierCase("luhn_valid_2", "LUHN", "79927398713", True, "valid Luhn"),
-    IdentifierCase("luhn_bad_check", "LUHN", "4539148803436468", False, "wrong check digit"),
-    IdentifierCase("luhn_unicode", "LUHN", "453914880343646٧", False, "Unicode digit rejected"),
-    IdentifierCase("luhn_alpha", "LUHN", "45391488034364AB", False, "letters rejected"),
+    IdentifierCase("luhn_bad_check", "LUHN", "12345675", False, "wrong check digit"),
+    IdentifierCase("luhn_unicode", "LUHN", "1234567٧", False, "Unicode digit rejected"),
+    IdentifierCase("luhn_alpha", "LUHN", "123456AB", False, "letters rejected"),
     # ISBN-10 valid / invalid.
     IdentifierCase("isbn_valid_1", "ISBN10", "0306406152", True, "valid ISBN-10"),
     IdentifierCase("isbn_valid_x", "ISBN10", "080442957X", True, "valid ISBN-10 with X check"),

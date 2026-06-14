@@ -40,7 +40,7 @@ class TestCheckDigitIdentifierHarness(unittest.TestCase):
     def test_ascii_only_guard_rejects_unicode_digit(self):
         # Arabic-Indic zero must NOT be treated as ASCII '0' (bug-fix F-05).
         self.assertFalse(harness.validate("DEA", "AB345678٠"))
-        self.assertFalse(harness.validate("LUHN", "453914880343646٧"))
+        self.assertFalse(harness.validate("LUHN", "1234567٧"))
         # And the all-ASCII helper agrees.
         self.assertFalse(harness._all_ascii_digits("12٠3"))
         self.assertTrue(harness._all_ascii_digits("1230"))
@@ -82,6 +82,7 @@ class TestCheckDigitIdentifierHarness(unittest.TestCase):
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            timeout=60,
             check=False,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -93,6 +94,7 @@ class TestCheckDigitIdentifierHarness(unittest.TestCase):
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            timeout=60,
             check=False,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -106,6 +108,7 @@ class TestCheckDigitIdentifierHarness(unittest.TestCase):
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            timeout=60,
             check=False,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)

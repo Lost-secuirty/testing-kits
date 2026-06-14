@@ -34,6 +34,7 @@ class TestCiWorkflowHardeningHarness(unittest.TestCase):
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            timeout=60,
             check=False,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -45,6 +46,7 @@ class TestCiWorkflowHardeningHarness(unittest.TestCase):
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            timeout=60,
             check=False,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)

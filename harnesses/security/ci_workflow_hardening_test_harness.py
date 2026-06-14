@@ -169,6 +169,9 @@ def audit_workflow(data: dict[str, Any]) -> list[Finding]:
 
     for job_name, job in jobs.items():
         if not isinstance(job, dict):
+            findings.append(
+                Finding("workflow-job", f"job '{job_name}' must be a mapping")
+            )
             continue
 
         # Each job must have timeout-minutes.
@@ -270,6 +273,9 @@ def audit_workflow_naive(data: dict[str, Any]) -> list[Finding]:
 
     for job_name, job in jobs.items():
         if not isinstance(job, dict):
+            findings.append(
+                Finding("workflow-job", f"job '{job_name}' must be a mapping")
+            )
             continue
         if "timeout-minutes" not in job:
             findings.append(
@@ -419,6 +425,12 @@ def _hardened_on_as_true_key() -> dict[str, Any]:
     return data
 
 
+def _hardened_malformed_job() -> dict[str, Any]:
+    data = _clone(_HARDENED)
+    data["jobs"] = {"build": "not-a-mapping"}
+    return data
+
+
 def _case(name: str, workflow: dict[str, Any], expected: tuple[str, ...],
           should_pass: bool, note: str) -> WorkflowCase:
     return WorkflowCase(
@@ -485,6 +497,10 @@ CASES: tuple[WorkflowCase, ...] = (
         "missing_concurrency", _hardened_no_concurrency(), ("workflow-concurrency",),
         False, "no concurrency block scoped on github.ref",
     ),
+    _case(
+        "malformed_job", _hardened_malformed_job(), ("workflow-job",), False,
+        "a job entry is not a mapping; the malformed-workflow signal must be reported",
+    ),
 )
 
 
@@ -498,8 +514,9 @@ def run_case(case: WorkflowCase) -> AuditResult:
     if case.should_pass:
         ok = len(codes) == 0
     else:
-        # Every expected finding code must be present.
-        ok = all(expected in codes for expected in case.expected_findings)
+        # Exact match: expected codes present AND no unexpected extras, so an
+        # over-reporting regression cannot quietly pass an unsafe fixture.
+        ok = set(codes) == set(case.expected_findings)
     return AuditResult(case=case, codes=codes, ok=ok)
 
 
