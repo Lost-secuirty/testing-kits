@@ -1,0 +1,15 @@
+# Conventional Commits enforcement (CI-only — gitlint's `sh` dep is Unix-only, so it
+# runs on the Linux CI runner; install locally with `uv tool install gitlint-core`).
+[general]
+contrib=contrib-title-conventional-commits
+ignore=body-is-missing
+ignore-merge-commits=true
+ignore-fixup-commits=true
+ignore-squash-commits=true
+ignore-revert-commits=true
+
+[title-max-length]
+line-length=72
+
+[body-max-line-length]
+line-length=120
