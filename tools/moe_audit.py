@@ -193,13 +193,20 @@ def lens_purity(changed_h: list[str]) -> Lens:
 
 def lens_controls() -> Lens:
     lens = Lens("controls")
-    rc, _out = _run([sys.executable, "tools/control_audit.py"], timeout=120)
+    rc, out = _run([sys.executable, "tools/control_audit.py"], timeout=120)
+    dep_missing = any(m in out for m in
+                      ("ModuleNotFoundError", "ImportError", "No module named"))
     if rc == 0:
         lens.add("repository control audit passes.")
-    elif rc == 127:
-        lens.add("control_audit.py not runnable in this environment.", level="info")
+    elif rc == 127 or dep_missing:
+        # The authoritative gate is the required "Instruction and control audit"
+        # check; here it just couldn't run (e.g. PyYAML absent). Advisory only.
+        lens.add("control audit not runnable in this job (missing dependency); see "
+                 "the required 'Instruction and control audit' check.", level="info")
     else:
-        lens.add(f"repository control audit FAILED (rc={rc}).", level="fail")
+        # Advisory warning, not a blocker — the required check is the real gate.
+        lens.add(f"control audit reported issues (rc={rc}); confirm via the required "
+                 "'Instruction and control audit' check.", level="warn")
     return lens
 
 
