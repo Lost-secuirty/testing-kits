@@ -4,27 +4,24 @@ Tests for Logging / Observability Test Harness (Harness 17 of 36).
 """
 
 import json
-import time
 import unittest
-import urllib.request
 import urllib.error
-from datetime import datetime, timezone, timedelta
+import urllib.request
+from datetime import datetime, timezone
 
 from harnesses.core.logging_test_harness import (
+    CorrelationTracker,
+    ErrorContextChecker,
     LogEntry,
     LogFormatValidator,
-    LogLevelChecker,
-    LOG_LEVEL_ORDER,
-    SensitiveDataScanner,
-    CorrelationTracker,
-    TimestampValidator,
-    PerformanceLogChecker,
-    ErrorContextChecker,
     LoggingReport,
+    LogLevelChecker,
     MockLoggingHandler,
+    PerformanceLogChecker,
+    SensitiveDataScanner,
+    TimestampValidator,
     run_full_report,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

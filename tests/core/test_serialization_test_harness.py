@@ -5,27 +5,23 @@ Tests for Serialization / Roundtrip Test Harness (Harness 15 of 36)
 
 import json
 import math
-import pickle
 import unittest
-import urllib.request
 import urllib.error
+import urllib.request
 
 from harnesses._teeth import verify
 from harnesses.core.serialization_test_harness import (
-    SerializationFormat,
-    RoundtripResult,
+    TEETH,
     FormatTester,
     LossDetector,
+    RoundtripResult,
     RoundtripRunner,
+    SerializationFormat,
     SerializationReport,
-    MockSerializationHandler,
-    SerializationServer,
     make_server,
-    TEETH,
-    prove,
     oracle_roundtrip,
+    prove,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper

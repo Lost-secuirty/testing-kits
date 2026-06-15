@@ -13,7 +13,6 @@ import datetime as dt
 import json
 import sys
 import time
-from pathlib import Path
 
 try:
     from tools.harness_registry import REPO_ROOT, discover_harnesses, run_self_test

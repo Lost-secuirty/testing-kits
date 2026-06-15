@@ -10,12 +10,8 @@ Tests for cli_test_harness.py (Harness 5 of 36)
 """
 
 import json
-import os
-import signal
 import subprocess
 import sys
-import tempfile
-import time
 import unittest
 from pathlib import Path
 
@@ -37,7 +33,6 @@ from harnesses.core.cli_test_harness import (
     prove,
     run_self_test,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -23,13 +23,12 @@ Usage:
 
 import argparse
 import json
-import re
 import sqlite3
 import sys
 import threading
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
 # ============================================================
 # EXPIRY STORE

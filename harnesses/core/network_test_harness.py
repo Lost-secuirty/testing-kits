@@ -21,11 +21,7 @@ Port: 19040 (dynamic, picked at runtime)
 
 from __future__ import annotations
 
-import http.server
 import json
-import math
-import queue
-import random
 import socket
 import threading
 import time
@@ -33,8 +29,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, List, Optional, Tuple
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Data Classes
@@ -53,7 +48,7 @@ class ConnectionConfig:
 class ConnectionResult:
     success: bool
     latency_ms: float = 0.0
-    error: Optional[str] = None
+    error: str | None = None
     attempts: int = 1
 
 
@@ -105,7 +100,7 @@ class MockNetworkHandler(BaseHTTPRequestHandler):
         cfg = getattr(self.server, "config", {})
 
         # Record request
-        log: Optional[list] = cfg.get("request_log")
+        log: list | None = cfg.get("request_log")
         if log is not None:
             log.append((self.command, self.path))
 
@@ -163,7 +158,7 @@ class MockNetworkHandler(BaseHTTPRequestHandler):
             pass
 
 
-def _start_mock_server(config: Optional[Dict[str, Any]] = None) -> Tuple[ThreadingHTTPServer, int]:
+def _start_mock_server(config: dict[str, Any] | None = None) -> tuple[ThreadingHTTPServer, int]:
     """Start a mock server on a random free port and return (server, port)."""
     server = ThreadingHTTPServer(("127.0.0.1", 0), MockNetworkHandler)
     server.config = config or {}  # type: ignore[attr-defined]
@@ -276,7 +271,7 @@ class TimeoutTester:
     """Verifies connection and read timeouts."""
 
     def __init__(self):
-        self._servers: List[ThreadingHTTPServer] = []
+        self._servers: list[ThreadingHTTPServer] = []
 
     def stop(self):
         for s in self._servers:
@@ -284,7 +279,7 @@ class TimeoutTester:
             s.server_close()
         self._servers.clear()
 
-    def _make_server(self, cfg: Dict) -> Tuple[str, int]:
+    def _make_server(self, cfg: dict) -> tuple[str, int]:
         s, port = _start_mock_server(cfg)
         self._servers.append(s)
         return "127.0.0.1", port
@@ -360,7 +355,7 @@ class TimeoutTester:
 class RetryTester:
     """Verifies retry logic with exponential backoff."""
 
-    def __init__(self, policy: Optional[RetryPolicy] = None):
+    def __init__(self, policy: RetryPolicy | None = None):
         self.policy = policy or RetryPolicy(
             base_delay=0.01, multiplier=2.0, max_delay=1.0, max_attempts=3
         )
@@ -372,8 +367,8 @@ class RetryTester:
         Returns ConnectionResult with attempts count.
         """
         policy = self.policy
-        last_error: Optional[str] = None
-        delays: List[float] = []
+        last_error: str | None = None
+        delays: list[float] = []
 
         for attempt in range(policy.max_attempts):
             try:
@@ -416,7 +411,7 @@ class RetryTester:
 
     def test_retry_succeeds_after_failures(self) -> ConnectionResult:
         """First N-1 requests fail, last one succeeds."""
-        log: List[Any] = []
+        log: list[Any] = []
         server, port = _start_mock_server({
             "fail_first_n": self.policy.max_attempts - 1,
             "lock": threading.Lock(),
@@ -430,7 +425,7 @@ class RetryTester:
             server.shutdown()
             server.server_close()
 
-    def test_backoff_schedule(self) -> List[float]:
+    def test_backoff_schedule(self) -> list[float]:
         """Return the expected delay sequence for policy.max_attempts."""
         return [
             self.policy.delay_for(i)
@@ -456,7 +451,7 @@ class PayloadTester:
     """Tests large payload handling."""
 
     def __init__(self):
-        self._servers: List[ThreadingHTTPServer] = []
+        self._servers: list[ThreadingHTTPServer] = []
 
     def stop(self):
         for s in self._servers:
@@ -469,7 +464,7 @@ class PayloadTester:
         self._servers.append(s)
         return f"http://127.0.0.1:{port}/"
 
-    def _fetch(self, url: str, timeout: float = 5.0) -> Tuple[bool, int, Optional[str]]:
+    def _fetch(self, url: str, timeout: float = 5.0) -> tuple[bool, int, str | None]:
         try:
             resp = urllib.request.urlopen(url, timeout=timeout)
             body = resp.read()
@@ -477,17 +472,17 @@ class PayloadTester:
         except Exception as exc:
             return False, 0, str(exc)
 
-    def test_1kb(self) -> Tuple[bool, int]:
+    def test_1kb(self) -> tuple[bool, int]:
         url = self._server_for_size(1024)
         ok, size, _ = self._fetch(url)
         return ok, size
 
-    def test_10kb(self) -> Tuple[bool, int]:
+    def test_10kb(self) -> tuple[bool, int]:
         url = self._server_for_size(10 * 1024)
         ok, size, _ = self._fetch(url)
         return ok, size
 
-    def test_100kb(self) -> Tuple[bool, int]:
+    def test_100kb(self) -> tuple[bool, int]:
         url = self._server_for_size(100 * 1024)
         ok, size, _ = self._fetch(url)
         return ok, size
@@ -534,12 +529,12 @@ class ConnectionPool:
         self.port = port
         self.max_size = max_size
         self.ttl = ttl
-        self._pool: List[_PooledConnection] = []
+        self._pool: list[_PooledConnection] = []
         self._lock = threading.Lock()
         self._checked_out: int = 0
 
     # ------------------------------------------------------------------
-    def checkout(self) -> Optional[_PooledConnection]:
+    def checkout(self) -> _PooledConnection | None:
         """Return an idle connection or create a new one (up to max_size)."""
         with self._lock:
             # Evict expired connections first
@@ -651,7 +646,7 @@ class ConnectionPoolTester:
 
     def test_concurrent_checkout(self) -> bool:
         """Multiple threads should each get a valid (or None) connection."""
-        results: List[Optional[_PooledConnection]] = []
+        results: list[_PooledConnection | None] = []
         lock = threading.Lock()
 
         def worker():
@@ -679,7 +674,7 @@ class ConnectionPoolTester:
 class ShutdownTester:
     """Verifies graceful shutdown while requests are in-flight."""
 
-    def test_graceful_shutdown(self, in_flight: int = 3, delay: float = 0.05) -> Dict[str, Any]:
+    def test_graceful_shutdown(self, in_flight: int = 3, delay: float = 0.05) -> dict[str, Any]:
         """
         Start a server with a small delay, fire `in_flight` requests concurrently,
         then shut the server down.  Check that:
@@ -687,8 +682,8 @@ class ShutdownTester:
           - in-flight requests either complete or receive a clean error
         """
         server, port = _start_mock_server({"delay": delay})
-        results: List[bool] = []
-        errors: List[str] = []
+        results: list[bool] = []
+        errors: list[str] = []
         lock = threading.Lock()
 
         def _req():
@@ -790,13 +785,13 @@ class DNSTester:
 
 @dataclass
 class NetworkReport:
-    protocol_results: Dict[str, bool] = field(default_factory=dict)
-    timeout_results: Dict[str, Any] = field(default_factory=dict)
-    retry_results: Dict[str, Any] = field(default_factory=dict)
-    payload_results: Dict[str, Any] = field(default_factory=dict)
-    pool_results: Dict[str, bool] = field(default_factory=dict)
-    shutdown_results: Dict[str, Any] = field(default_factory=dict)
-    dns_results: Dict[str, Any] = field(default_factory=dict)
+    protocol_results: dict[str, bool] = field(default_factory=dict)
+    timeout_results: dict[str, Any] = field(default_factory=dict)
+    retry_results: dict[str, Any] = field(default_factory=dict)
+    payload_results: dict[str, Any] = field(default_factory=dict)
+    pool_results: dict[str, bool] = field(default_factory=dict)
+    shutdown_results: dict[str, Any] = field(default_factory=dict)
+    dns_results: dict[str, Any] = field(default_factory=dict)
 
     @property
     def total_tests(self) -> int:

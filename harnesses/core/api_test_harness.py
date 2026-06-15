@@ -15,21 +15,22 @@ import json
 import re
 import socket
 import sys
+
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
-
-# Make the shared teeth contract importable whether run as a module or a script.
-import sys as _sys
 from pathlib import Path as _Path
+from typing import Any
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -40,24 +41,24 @@ class ApiTestCase:
     name: str
     method: str
     path: str
-    body: Optional[Any] = None
-    headers: Optional[Dict[str, str]] = None
-    expected_status: Optional[int] = None
-    expected_content_type: Optional[str] = None
-    expected_schema: Optional[Dict[str, Any]] = None
-    expected_headers: Optional[Dict[str, str]] = None
-    validator: Optional[Callable[[Any], Optional[str]]] = None
+    body: Any | None = None
+    headers: dict[str, str] | None = None
+    expected_status: int | None = None
+    expected_content_type: str | None = None
+    expected_schema: dict[str, Any] | None = None
+    expected_headers: dict[str, str] | None = None
+    validator: Callable[[Any], str | None] | None = None
 
 
 @dataclass
 class ApiTestResult:
     name: str
     passed: bool
-    status_code: Optional[int] = None
+    status_code: int | None = None
     response_body: Any = None
-    response_headers: Optional[Dict[str, str]] = None
+    response_headers: dict[str, str] | None = None
     duration_ms: float = 0.0
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -65,7 +66,7 @@ class ApiSuiteReport:
     total: int
     passed: int
     failed: int
-    results: List[ApiTestResult] = field(default_factory=list)
+    results: list[ApiTestResult] = field(default_factory=list)
     duration_ms: float = 0.0
 
     @property
@@ -105,7 +106,7 @@ class SchemaChecker:
         "null":    type(None),
     }
 
-    def validate(self, data: Any, schema: Dict[str, Any], path: str = "$") -> None:
+    def validate(self, data: Any, schema: dict[str, Any], path: str = "$") -> None:
         schema_type = schema.get("type")
         if schema_type:
             self._check_type(data, schema_type, path)
@@ -148,7 +149,7 @@ class SchemaChecker:
 # ---------------------------------------------------------------------------
 
 class RequestBuilder:
-    def __init__(self, base_url: str, default_headers: Optional[Dict[str, str]] = None):
+    def __init__(self, base_url: str, default_headers: dict[str, str] | None = None):
         self.base_url = base_url.rstrip("/")
         self.default_headers = default_headers or {}
 
@@ -157,7 +158,7 @@ class RequestBuilder:
         method: str,
         path: str,
         body: Any = None,
-        extra_headers: Optional[Dict[str, str]] = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> urllib.request.Request:
         url = self.base_url + path
         headers = {**self.default_headers}
@@ -185,12 +186,12 @@ class ResponseValidator:
     def __init__(self):
         self._schema_checker = SchemaChecker()
 
-    def validate_status(self, actual: int, expected: int) -> Optional[str]:
+    def validate_status(self, actual: int, expected: int) -> str | None:
         if actual != expected:
             return f"status {actual} != expected {expected}"
         return None
 
-    def validate_content_type(self, actual: str, expected: str) -> Optional[str]:
+    def validate_content_type(self, actual: str, expected: str) -> str | None:
         # Compare only the media type portion, ignore parameters
         actual_base = actual.split(";")[0].strip().lower()
         expected_base = expected.split(";")[0].strip().lower()
@@ -198,7 +199,7 @@ class ResponseValidator:
             return f"content-type '{actual_base}' != expected '{expected_base}'"
         return None
 
-    def validate_schema(self, data: Any, schema: Dict[str, Any]) -> Optional[str]:
+    def validate_schema(self, data: Any, schema: dict[str, Any]) -> str | None:
         try:
             self._schema_checker.validate(data, schema)
             return None
@@ -206,8 +207,8 @@ class ResponseValidator:
             return str(e)
 
     def validate_headers(
-        self, actual: Dict[str, str], expected: Dict[str, str]
-    ) -> Optional[str]:
+        self, actual: dict[str, str], expected: dict[str, str]
+    ) -> str | None:
         for key, expected_val in expected.items():
             actual_val = actual.get(key.lower()) or actual.get(key)
             if actual_val is None:
@@ -227,11 +228,11 @@ def _elapsed_ms(start_ns: int) -> float:
 
 
 class ApiTestSuite:
-    def __init__(self, base_url: str, default_headers: Optional[Dict[str, str]] = None):
+    def __init__(self, base_url: str, default_headers: dict[str, str] | None = None):
         self.base_url = base_url
         self._builder = RequestBuilder(base_url, default_headers)
         self._validator = ResponseValidator()
-        self._cases: List[ApiTestCase] = []
+        self._cases: list[ApiTestCase] = []
 
     def add(self, case: ApiTestCase) -> None:
         self._cases.append(case)
@@ -330,9 +331,9 @@ class ApiTestSuite:
 # Mock API server
 # ---------------------------------------------------------------------------
 
-_items: Dict[int, Dict[str, Any]] = {}
+_items: dict[int, dict[str, Any]] = {}
 _next_id = 1
-_request_counts: Dict[str, int] = {}
+_request_counts: dict[str, int] = {}
 _rate_limit = 10  # requests per key per window
 _RATE_WINDOW = 60
 
@@ -347,7 +348,7 @@ class MockApiHandler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         return self.rfile.read(length) if length else b""
 
-    def _send_json(self, status: int, data: Any, extra_headers: Optional[Dict[str, str]] = None) -> None:
+    def _send_json(self, status: int, data: Any, extra_headers: dict[str, str] | None = None) -> None:
         body = json.dumps(data).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -358,7 +359,7 @@ class MockApiHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _parse_path(self) -> Tuple[str, Dict[str, str]]:
+    def _parse_path(self) -> tuple[str, dict[str, str]]:
         parsed = urllib.parse.urlparse(self.path)
         qs = dict(urllib.parse.parse_qsl(parsed.query))
         return parsed.path, qs
@@ -515,7 +516,7 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
-def start_mock_server(port: int = 0) -> Tuple[http.server.HTTPServer, int]:
+def start_mock_server(port: int = 0) -> tuple[http.server.HTTPServer, int]:
     if port == 0:
         port = _find_free_port()
     server = http.server.HTTPServer(("127.0.0.1", port), MockApiHandler)
@@ -551,10 +552,10 @@ def reset_server_state() -> None:
 class ApiRequest:
     method: str
     path: str
-    body: Optional[Any] = None
-    headers: Optional[Tuple[Tuple[str, str], ...]] = None
+    body: Any | None = None
+    headers: tuple[tuple[str, str], ...] | None = None
 
-    def header(self, key: str) -> Optional[str]:
+    def header(self, key: str) -> str | None:
         if not self.headers:
             return None
         for k, v in self.headers:
@@ -567,9 +568,9 @@ class ApiRequest:
 class HandledResponse:
     status: int
     body: Any = None
-    headers: Tuple[Tuple[str, str], ...] = ()
+    headers: tuple[tuple[str, str], ...] = ()
 
-    def header(self, key: str) -> Optional[str]:
+    def header(self, key: str) -> str | None:
         for k, v in self.headers:
             if k.lower() == key.lower():
                 return v
@@ -578,7 +579,7 @@ class HandledResponse:
 
 # The handler operates over a tiny in-memory store seeded deterministically so
 # the corpus expectations are stable across runs (no global mutable id counter).
-_SEED_ITEMS: Dict[int, Dict[str, Any]] = {
+_SEED_ITEMS: dict[int, dict[str, Any]] = {
     1: {"id": 1, "name": "seed-widget", "value": 7},
 }
 
@@ -680,13 +681,13 @@ class ApiOracleCase:
     name: str
     request: ApiRequest
     expected_status: int
-    expected_content_type: Optional[str] = None
-    expected_schema: Optional[Dict[str, Any]] = None
-    expected_headers: Optional[Dict[str, str]] = None
+    expected_content_type: str | None = None
+    expected_schema: dict[str, Any] | None = None
+    expected_headers: dict[str, str] | None = None
     note: str = ""
 
 
-ORACLE_CASES: Tuple[ApiOracleCase, ...] = (
+ORACLE_CASES: tuple[ApiOracleCase, ...] = (
     ApiOracleCase(
         "health",
         ApiRequest("GET", "/health"),
@@ -732,12 +733,12 @@ ORACLE_CASES: Tuple[ApiOracleCase, ...] = (
 )
 
 
-def _audit_response(resp: HandledResponse, case: ApiOracleCase) -> List[str]:
+def _audit_response(resp: HandledResponse, case: ApiOracleCase) -> list[str]:
     """Judge a HandledResponse against a frozen case using the harness's own
     ResponseValidator/SchemaChecker. Returns a list of failure strings (empty
     means the response satisfies every frozen expectation)."""
     validator = ResponseValidator()
-    errors: List[str] = []
+    errors: list[str] = []
 
     e = validator.validate_status(resp.status, case.expected_status)
     if e:
@@ -800,7 +801,7 @@ TEETH = Teeth(
 )
 
 
-def list_oracle_cases() -> List[str]:
+def list_oracle_cases() -> list[str]:
     return [c.name for c in ORACLE_CASES]
 
 
@@ -926,7 +927,7 @@ def _run_self_test(as_json: bool = False, *, networked: bool = True, port: int =
 # CLI entry point
 # ---------------------------------------------------------------------------
 
-def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="API/REST Test Harness")
     p.add_argument("--self-test", action="store_true", help="Run built-in self-test")
     p.add_argument("--json", action="store_true",
@@ -940,7 +941,7 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
     if args.list_scenarios:

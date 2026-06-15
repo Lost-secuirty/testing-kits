@@ -7,21 +7,28 @@ Pure stdlib, zero external dependencies.
 from __future__ import annotations
 
 import decimal
-import math
-import threading
-import json
 import http.server
-from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_EVEN, ROUND_HALF_UP, ROUND_FLOOR, ROUND_CEILING, InvalidOperation
-from typing import Callable, List, Optional, Tuple
+import json
+import math
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+import threading
+from collections.abc import Callable
+from dataclasses import dataclass
+from decimal import (
+    ROUND_CEILING,
+    ROUND_FLOOR,
+    ROUND_HALF_EVEN,
+    ROUND_HALF_UP,
+    Decimal,
+    InvalidOperation,
+)
 from pathlib import Path as _Path
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Money class
@@ -64,7 +71,7 @@ class Money:
         quantizer = Decimal(10) ** -self.decimal_places
         return value.quantize(quantizer, rounding=self.rounding)
 
-    def rounded(self) -> "Money":
+    def rounded(self) -> Money:
         return Money(
             self._quantize(self._amount),
             self.currency,
@@ -72,13 +79,13 @@ class Money:
             self.decimal_places,
         )
 
-    def _check_currency(self, other: "Money"):
+    def _check_currency(self, other: Money):
         if self.currency != other.currency:
             raise CurrencyMismatchError(
                 f"Cannot operate on {self.currency} and {other.currency}"
             )
 
-    def add(self, other: "Money") -> "Money":
+    def add(self, other: Money) -> Money:
         self._check_currency(other)
         return Money(
             self._amount + other._amount,
@@ -87,7 +94,7 @@ class Money:
             self.decimal_places,
         )
 
-    def subtract(self, other: "Money") -> "Money":
+    def subtract(self, other: Money) -> Money:
         self._check_currency(other)
         return Money(
             self._amount - other._amount,
@@ -96,7 +103,7 @@ class Money:
             self.decimal_places,
         )
 
-    def multiply(self, scalar) -> "Money":
+    def multiply(self, scalar) -> Money:
         """Multiply by a scalar (int, float, or Decimal)."""
         if isinstance(scalar, float):
             scalar = Decimal(str(scalar))
@@ -109,7 +116,7 @@ class Money:
             self.decimal_places,
         )
 
-    def divide(self, scalar) -> "Money":
+    def divide(self, scalar) -> Money:
         """Divide by a scalar (int, float, or Decimal)."""
         if isinstance(scalar, float):
             scalar = Decimal(str(scalar))
@@ -122,7 +129,7 @@ class Money:
             self.decimal_places,
         )
 
-    def allocate(self, ratios: List) -> List["Money"]:
+    def allocate(self, ratios: list) -> list[Money]:
         """
         Distribute self among ratios using the largest-remainder method.
         Allocations sum to the exact total.
@@ -575,8 +582,8 @@ class NumericTestServer:
     def __init__(self, host: str = "127.0.0.1", port: int = 0):
         self.host = host
         self.port = port
-        self._server: Optional[http.server.HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: http.server.HTTPServer | None = None
+        self._thread: threading.Thread | None = None
 
     def start(self) -> int:
         """Start the server and return the actual port."""
@@ -655,8 +662,8 @@ class AllocCase:
     """One frozen allocation case with a literal, hand-computed expectation."""
     name: str
     total_cents: int
-    ratios: Tuple[int, ...]
-    expected_cents: Tuple[int, ...]   # the EXACT cent shares a correct splitter yields
+    ratios: tuple[int, ...]
+    expected_cents: tuple[int, ...]   # the EXACT cent shares a correct splitter yields
     note: str = ""
 
 
@@ -664,7 +671,7 @@ class AllocCase:
 # planted mutant gets each one wrong. Every ``expected_cents`` tuple is computed
 # by hand from the largest-remainder contract (extra pennies go to the largest
 # remainders, ties to the lowest index) — constants, never derived at runtime.
-ALLOC_CORPUS: Tuple[AllocCase, ...] = (
+ALLOC_CORPUS: tuple[AllocCase, ...] = (
     # $10.00 split 1:2 -> 333.33.. / 666.66.. ; the leftover penny goes to the
     # larger remainder (the 2-share), so 333 / 667. A truncate-only splitter
     # drops that penny (333/666 sums to 999); a half-up splitter inflates it.
@@ -691,7 +698,7 @@ ALLOC_CORPUS: Tuple[AllocCase, ...] = (
 
 # --- ORACLE: reuse the harness's own correct largest-remainder Money.allocate --
 
-def oracle_allocate(total_cents: int, ratios: Tuple[int, ...]) -> List[int]:
+def oracle_allocate(total_cents: int, ratios: tuple[int, ...]) -> list[int]:
     """Correct integer-cent allocation, delegating to the harness's own
     Decimal-backed largest-remainder ``Money.allocate``. Returns the cent share
     for each ratio; the shares sum to exactly ``total_cents``."""
@@ -702,7 +709,7 @@ def oracle_allocate(total_cents: int, ratios: Tuple[int, ...]) -> List[int]:
 
 # --- Planted buggy twins (each models a real money-rounding defect) ----------
 
-def float_accumulation_drift(total_cents: int, ratios: Tuple[int, ...]) -> List[int]:
+def float_accumulation_drift(total_cents: int, ratios: tuple[int, ...]) -> list[int]:
     """BUG: distributes the total using binary-float arithmetic accumulated in an
     explicit ``acc += share`` loop, then rounds each share to whole cents.
 
@@ -715,7 +722,7 @@ def float_accumulation_drift(total_cents: int, ratios: Tuple[int, ...]) -> List[
     """
     total_ratio = float(sum(ratios))
     total_dollars = total_cents / 100.0
-    shares: List[int] = []
+    shares: list[int] = []
     acc = 0.0  # BUG: float accumulator drifts; never reconciled to the total
     for r in ratios:
         # naive proportional share in dollars, accumulated with float drift
@@ -726,7 +733,7 @@ def float_accumulation_drift(total_cents: int, ratios: Tuple[int, ...]) -> List[
     return shares
 
 
-def truncate_no_remainder(total_cents: int, ratios: Tuple[int, ...]) -> List[int]:
+def truncate_no_remainder(total_cents: int, ratios: tuple[int, ...]) -> list[int]:
     """BUG: floors every share to whole cents and NEVER redistributes the
     leftover pennies — the classic 'lost penny' defect.
 
@@ -735,14 +742,14 @@ def truncate_no_remainder(total_cents: int, ratios: Tuple[int, ...]) -> List[int
     money (a real-world rounding-fraud / reconciliation bug).
     """
     total_ratio = sum(ratios)
-    shares: List[int] = []
+    shares: list[int] = []
     for r in ratios:
         # BUG: integer floor division drops the fractional cent, never restored
         shares.append((total_cents * r) // total_ratio)
     return shares
 
 
-def half_up_overallocates(total_cents: int, ratios: Tuple[int, ...]) -> List[int]:
+def half_up_overallocates(total_cents: int, ratios: tuple[int, ...]) -> list[int]:
     """BUG: rounds each share INDEPENDENTLY with ROUND_HALF_UP instead of
     distributing the exact remainder — creating pennies from nothing.
 
@@ -752,7 +759,7 @@ def half_up_overallocates(total_cents: int, ratios: Tuple[int, ...]) -> List[int
     """
     total_ratio = Decimal(sum(ratios))
     total = Decimal(total_cents)
-    shares: List[int] = []
+    shares: list[int] = []
     for r in ratios:
         exact = total * Decimal(r) / total_ratio
         # BUG: independent half-up rounding, no remainder reconciliation
@@ -760,7 +767,7 @@ def half_up_overallocates(total_cents: int, ratios: Tuple[int, ...]) -> List[int
     return shares
 
 
-def prove(impl: Callable[[int, Tuple[int, ...]], List[int]]) -> bool:
+def prove(impl: Callable[[int, tuple[int, ...]], list[int]]) -> bool:
     """True iff ``impl`` MIS-ALLOCATES any frozen corpus case (i.e. the bug is
     caught): a share diverges from the frozen literal, the wrong number of shares
     is returned, or the parts fail to sum to the exact total.
@@ -808,7 +815,7 @@ TEETH = Teeth(
 )
 
 
-def list_scenarios() -> List[str]:
+def list_scenarios() -> list[str]:
     """Names of the frozen allocation corpus cases (the teeth scenarios)."""
     return [c.name for c in ALLOC_CORPUS]
 
@@ -857,7 +864,7 @@ def _run_self_test(as_json: bool = False) -> int:
 # CLI — default action is the self-test (repo convention).
 # ---------------------------------------------------------------------------
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     import argparse
     p = argparse.ArgumentParser(description="Numeric / money correctness harness")
     p.add_argument("--self-test", action="store_true", help="Run built-in checks")

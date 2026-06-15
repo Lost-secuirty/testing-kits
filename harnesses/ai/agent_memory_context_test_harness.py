@@ -28,12 +28,13 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path as _Path
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
@@ -231,7 +232,7 @@ class MemoryQuery:
 # --- The frozen seed of memory items the store is built from ----------------
 # Two sessions ("alpha" and "beta") plus pinned/unpinned items so each invariant
 # has a case that a buggy retriever gets WRONG. Hand-authored, never derived.
-SEED_ITEMS: Tuple[MemoryItem, ...] = (
+SEED_ITEMS: tuple[MemoryItem, ...] = (
     # session alpha, topic "billing"
     MemoryItem("a_pin", "alpha", "billing", relevance=0.30, order=1, tokens=40, pinned=True),
     MemoryItem("a_hi", "alpha", "billing", relevance=0.95, order=5, tokens=40),
@@ -257,15 +258,15 @@ class ContextStore:
       are dropped, but a pinned item is never dropped for a lower-relevance one.
     """
 
-    def __init__(self, items: Tuple[MemoryItem, ...]) -> None:
+    def __init__(self, items: tuple[MemoryItem, ...]) -> None:
         self._items = items
 
-    def _session_topic_items(self, q: MemoryQuery) -> List[MemoryItem]:
+    def _session_topic_items(self, q: MemoryQuery) -> list[MemoryItem]:
         # SESSION ISOLATION: only this session's items, matching the topic.
         return [it for it in self._items
                 if it.session_id == q.session_id and it.topic == q.topic]
 
-    def _retain(self, items: List[MemoryItem], capacity: int) -> List[MemoryItem]:
+    def _retain(self, items: list[MemoryItem], capacity: int) -> list[MemoryItem]:
         pinned = [it for it in items if it.pinned]
         unpinned = [it for it in items if not it.pinned]
         # Evict least useful first: lowest relevance, ties -> oldest (lowest order).
@@ -276,7 +277,7 @@ class ContextStore:
         )[:slots]
         return pinned + kept_unpinned
 
-    def retrieve(self, q: MemoryQuery) -> Tuple[str, ...]:
+    def retrieve(self, q: MemoryQuery) -> tuple[str, ...]:
         candidates = self._retain(self._session_topic_items(q), q.capacity)
         # assemble: pinned (required) first, then by descending relevance/recency.
         pinned = sorted([it for it in candidates if it.pinned],
@@ -284,7 +285,7 @@ class ContextStore:
         rest = sorted([it for it in candidates if not it.pinned],
                       key=lambda it: (it.relevance, it.order), reverse=True)
         ordered = pinned + rest
-        out: List[str] = []
+        out: list[str] = []
         used = 0
         for it in ordered:
             if used + it.tokens <= q.token_budget:
@@ -295,7 +296,7 @@ class ContextStore:
 
 # --- ORACLE: the correct retriever over the harness's own ContextStore ------
 
-def oracle_retrieve(q: MemoryQuery) -> Tuple[str, ...]:
+def oracle_retrieve(q: MemoryQuery) -> tuple[str, ...]:
     """Correct retrieval: session-isolated, pinned-safe eviction, budgeted
     assembly that always keeps the required (pinned) item."""
     return ContextStore(SEED_ITEMS).retrieve(q)
@@ -312,7 +313,7 @@ class _CrossSessionLeakStore(ContextStore):
     user's context window.
     """
 
-    def _session_topic_items(self, q: MemoryQuery) -> List[MemoryItem]:
+    def _session_topic_items(self, q: MemoryQuery) -> list[MemoryItem]:
         # BUG: no session check — leaks across sessions.
         return [it for it in self._items if it.topic == q.topic]
 
@@ -327,7 +328,7 @@ class _EvictPinnedStore(ContextStore):
     relevant transient items show up.
     """
 
-    def _retain(self, items: List[MemoryItem], capacity: int) -> List[MemoryItem]:
+    def _retain(self, items: list[MemoryItem], capacity: int) -> list[MemoryItem]:
         # BUG: pinned flag ignored; lowest-relevance items (incl. pinned) evicted.
         return sorted(items, key=lambda it: (it.relevance, it.order), reverse=True)[:capacity]
 
@@ -343,11 +344,11 @@ class _BudgetDropsRequiredStore(ContextStore):
     contractually required to carry.
     """
 
-    def retrieve(self, q: MemoryQuery) -> Tuple[str, ...]:
+    def retrieve(self, q: MemoryQuery) -> tuple[str, ...]:
         candidates = self._retain(self._session_topic_items(q), q.capacity)
         # BUG: pinned no longer packed first; pure relevance/recency ordering.
         ordered = sorted(candidates, key=lambda it: (it.relevance, it.order), reverse=True)
-        out: List[str] = []
+        out: list[str] = []
         used = 0
         for it in ordered:
             if used + it.tokens <= q.token_budget:
@@ -356,11 +357,11 @@ class _BudgetDropsRequiredStore(ContextStore):
         return tuple(out)
 
 
-def _retriever_for(store_cls: type) -> Callable[[MemoryQuery], Tuple[str, ...]]:
+def _retriever_for(store_cls: type) -> Callable[[MemoryQuery], tuple[str, ...]]:
     """Build a retriever closure over a ContextStore subclass seeded identically
     to the oracle. Used to mint the planted-mutant retrievers."""
 
-    def retrieve(q: MemoryQuery) -> Tuple[str, ...]:
+    def retrieve(q: MemoryQuery) -> tuple[str, ...]:
         return store_cls(SEED_ITEMS).retrieve(q)
 
     return retrieve
@@ -374,7 +375,7 @@ mutant_budget_drops_required = _retriever_for(_BudgetDropsRequiredStore)
 # --- Frozen corpus: query -> expected ordered retrieved-id tuple ------------
 # Every expectation is a hand-computed literal derived from the contract above,
 # NEVER read back from the oracle object — that is what keeps prove() non-circular.
-MEMORY_CORPUS: Tuple[MemoryQuery, ...] = (
+MEMORY_CORPUS: tuple[MemoryQuery, ...] = (
     # SESSION ISOLATION: a beta query must return ONLY beta items, never alpha's.
     # capacity/budget large enough to hold all of beta's items.
     MemoryQuery("beta_isolated", "beta", "billing", capacity=10, token_budget=400,
@@ -395,7 +396,7 @@ MEMORY_CORPUS: Tuple[MemoryQuery, ...] = (
 
 # Literal expected retrieved-id tuples, in context order. Computed by hand from
 # the ContextStore contract (pinned first, then descending relevance, tie->newer).
-EXPECTED_RETRIEVED: Dict[str, Tuple[str, ...]] = {
+EXPECTED_RETRIEVED: dict[str, tuple[str, ...]] = {
     # beta only: b_secret (0.99) then b_other (0.50). No alpha ids.
     "beta_isolated": ("b_secret", "b_other"),
     # alpha only: pinned a_pin first, then a_hi(.95), a_mid(.60), a_lo(.20), a_lo2(.10).
@@ -407,7 +408,7 @@ EXPECTED_RETRIEVED: Dict[str, Tuple[str, ...]] = {
 }
 
 
-def prove(retriever: Callable[[MemoryQuery], Tuple[str, ...]]) -> bool:
+def prove(retriever: Callable[[MemoryQuery], tuple[str, ...]]) -> bool:
     """True iff ``retriever`` MISRETRIEVES any frozen corpus case (i.e. caught).
 
     Non-circular + deterministic: each result is compared against the literal
@@ -449,7 +450,7 @@ TEETH = Teeth(
 )
 
 
-def list_scenarios() -> List[str]:
+def list_scenarios() -> list[str]:
     """Names of the frozen memory-retrieval corpus cases (the teeth scenarios)."""
     return [q.name for q in MEMORY_CORPUS]
 
@@ -495,7 +496,7 @@ def _run_self_test(as_json: bool = False) -> int:
 # CLI entry point — default action is the self-test (repo convention).
 # ---------------------------------------------------------------------------
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run agent memory/context boundary controls")
     parser.add_argument("--self-test", action="store_true", help="run built-in checks")
     parser.add_argument("--json", action="store_true",

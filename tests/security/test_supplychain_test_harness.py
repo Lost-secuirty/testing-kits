@@ -8,7 +8,6 @@ import hashlib
 import json
 import unittest
 import urllib.request
-from typing import Dict, List, Set
 
 from harnesses._teeth import verify
 from harnesses.security.supplychain_test_harness import (
@@ -20,7 +19,6 @@ from harnesses.security.supplychain_test_harness import (
     LockedDep,
     LockfileDriftChecker,
     MockRegistry,
-    MockRegistryHandler,
     NonexistentPackageChecker,
     PinningChecker,
     RegistryPackageChecker,
@@ -35,7 +33,6 @@ from harnesses.security.supplychain_test_harness import (
     oracle_admit,
     prove,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -783,7 +780,7 @@ class TestTransitiveDepChecker(unittest.TestCase):
         graph = {'a': ['b'], 'b': [], 'c': ['b']}
         locked = {'a', 'b', 'c'}
         _, findings = self.checker.resolve(['a'], graph, locked)
-        phantom_findings = [f for f in findings if 'c' == f.package.lower()]
+        phantom_findings = [f for f in findings if f.package.lower() == 'c']
         self.assertTrue(phantom_findings)
 
     def test_phantom_dep_severity_warning(self):

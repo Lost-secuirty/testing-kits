@@ -23,19 +23,18 @@ import json
 import os
 import re
 import sys
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, Dict, List, Optional, Callable, Tuple
-from urllib.request import urlopen
-from urllib.error import URLError
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+import threading
+from collections.abc import Callable
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path as _Path
+from typing import Any
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # FieldSchema
@@ -47,10 +46,10 @@ class FieldSchema:
     type: str = "str"           # "str", "int", "float", "bool", "list", "dict"
     required: bool = False
     default: Any = None
-    min_val: Optional[float] = None
-    max_val: Optional[float] = None
-    enum: Optional[List[Any]] = None
-    regex: Optional[str] = None
+    min_val: float | None = None
+    max_val: float | None = None
+    enum: list[Any] | None = None
+    regex: str | None = None
     description: str = ""
 
 
@@ -64,16 +63,16 @@ class ConfigSchema:
     Keys can be dotted paths for nested fields (e.g. "db.host").
     """
 
-    def __init__(self, fields: Optional[Dict[str, FieldSchema]] = None):
-        self.fields: Dict[str, FieldSchema] = fields or {}
+    def __init__(self, fields: dict[str, FieldSchema] | None = None):
+        self.fields: dict[str, FieldSchema] = fields or {}
 
     def add_field(self, key: str, schema: FieldSchema) -> None:
         self.fields[key] = schema
 
-    def get_field(self, key: str) -> Optional[FieldSchema]:
+    def get_field(self, key: str) -> FieldSchema | None:
         return self.fields.get(key)
 
-    def all_keys(self) -> List[str]:
+    def all_keys(self) -> list[str]:
         return list(self.fields.keys())
 
 
@@ -84,8 +83,8 @@ class ConfigSchema:
 @dataclasses.dataclass
 class ConfigReport:
     """Holds validation results."""
-    errors: Dict[str, List[str]] = dataclasses.field(default_factory=dict)
-    warnings: Dict[str, List[str]] = dataclasses.field(default_factory=dict)
+    errors: dict[str, list[str]] = dataclasses.field(default_factory=dict)
+    warnings: dict[str, list[str]] = dataclasses.field(default_factory=dict)
 
     def add_error(self, field: str, message: str) -> None:
         self.errors.setdefault(field, []).append(message)
@@ -105,7 +104,7 @@ class ConfigReport:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _get_nested(config: Dict[str, Any], dotted_key: str) -> tuple[bool, Any]:
+def _get_nested(config: dict[str, Any], dotted_key: str) -> tuple[bool, Any]:
     """
     Retrieve a value using a dotted key from a nested dict.
     Returns (found: bool, value).
@@ -119,7 +118,7 @@ def _get_nested(config: Dict[str, Any], dotted_key: str) -> tuple[bool, Any]:
     return True, node
 
 
-def _set_nested(config: Dict[str, Any], dotted_key: str, value: Any) -> None:
+def _set_nested(config: dict[str, Any], dotted_key: str, value: Any) -> None:
     """Set a value using a dotted key in a nested dict (creates intermediates)."""
     parts = dotted_key.split(".")
     node = config
@@ -184,9 +183,9 @@ class ConfigValidator:
 
     def validate(
         self,
-        config: Dict[str, Any],
+        config: dict[str, Any],
         schema: ConfigSchema,
-        report: Optional[ConfigReport] = None,
+        report: ConfigReport | None = None,
     ) -> ConfigReport:
         if report is None:
             report = ConfigReport()
@@ -273,8 +272,8 @@ class EnvOverrideChecker:
         return f"{self.prefix}_{config_key.upper().replace('.', '_')}"
 
     def apply_overrides(
-        self, config: Dict[str, Any], env: Optional[Dict[str, str]] = None
-    ) -> Dict[str, Any]:
+        self, config: dict[str, Any], env: dict[str, str] | None = None
+    ) -> dict[str, Any]:
         """
         Return a new config dict with env-var overrides applied.
         If *env* is None, os.environ is used.
@@ -300,9 +299,9 @@ class EnvOverrideChecker:
 
     def check(
         self,
-        base_config: Dict[str, Any],
-        env: Dict[str, str],
-        expected_config: Dict[str, Any],
+        base_config: dict[str, Any],
+        env: dict[str, str],
+        expected_config: dict[str, Any],
     ) -> ConfigReport:
         """
         Apply env overrides to base_config and compare against expected_config.
@@ -341,17 +340,17 @@ class CrossFieldValidator:
     """
 
     def __init__(self) -> None:
-        self._rules: List[tuple[str, Callable[[Dict[str, Any]], Optional[str]]]] = []
+        self._rules: list[tuple[str, Callable[[dict[str, Any]], str | None]]] = []
 
     def add_rule(
         self,
         name: str,
-        rule: Callable[[Dict[str, Any]], Optional[str]],
+        rule: Callable[[dict[str, Any]], str | None],
     ) -> None:
         self._rules.append((name, rule))
 
     def validate(
-        self, config: Dict[str, Any], report: Optional[ConfigReport] = None
+        self, config: dict[str, Any], report: ConfigReport | None = None
     ) -> ConfigReport:
         if report is None:
             report = ConfigReport()
@@ -390,11 +389,11 @@ class SensitiveValueDetector:
     but should be noted).
     """
 
-    def __init__(self, key_patterns: Optional[List[str]] = None):
+    def __init__(self, key_patterns: list[str] | None = None):
         """
         key_patterns: additional regex patterns for sensitive key names.
         """
-        self._extra_patterns: List[re.Pattern] = []
+        self._extra_patterns: list[re.Pattern] = []
         for p in (key_patterns or []):
             self._extra_patterns.append(re.compile(p, re.I))
 
@@ -420,7 +419,7 @@ class SensitiveValueDetector:
         return True
 
     def scan(
-        self, config: Dict[str, Any], report: Optional[ConfigReport] = None, _prefix: str = ""
+        self, config: dict[str, Any], report: ConfigReport | None = None, _prefix: str = ""
     ) -> ConfigReport:
         if report is None:
             report = ConfigReport()
@@ -456,8 +455,8 @@ class MockConfigHandler(BaseHTTPRequestHandler):
     all handler instances share state.
     """
 
-    _config_store: Dict[str, Any] = {}
-    _schema_store: Dict[str, Any] = {}
+    _config_store: dict[str, Any] = {}
+    _schema_store: dict[str, Any] = {}
 
     def log_message(self, *args: Any) -> None:  # suppress access logs
         pass
@@ -516,11 +515,11 @@ class MockConfigServer:
 
     DEFAULT_PORT = 19020
 
-    def __init__(self, port: int = 0, initial_config: Optional[Dict[str, Any]] = None):
+    def __init__(self, port: int = 0, initial_config: dict[str, Any] | None = None):
         self._port = port
         self._initial_config = initial_config or {}
-        self._server: Optional[HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: HTTPServer | None = None
+        self._thread: threading.Thread | None = None
 
     @property
     def port(self) -> int:
@@ -548,7 +547,7 @@ class MockConfigServer:
             self._thread.join(timeout=2)
             self._thread = None
 
-    def __enter__(self) -> "MockConfigServer":
+    def __enter__(self) -> MockConfigServer:
         self.start()
         return self
 
@@ -576,9 +575,9 @@ class MockConfigServer:
 @dataclasses.dataclass(frozen=True)
 class ConfigSources:
     """The three precedence layers of a configuration load (lowest -> highest)."""
-    defaults: Tuple[Tuple[str, Any], ...] = ()   # built-in defaults (dotted keys)
-    file: Tuple[Tuple[str, Any], ...] = ()       # values from a config file (dotted keys)
-    env: Tuple[Tuple[str, str], ...] = ()        # raw environment variables (PREFIX_*)
+    defaults: tuple[tuple[str, Any], ...] = ()   # built-in defaults (dotted keys)
+    file: tuple[tuple[str, Any], ...] = ()       # values from a config file (dotted keys)
+    env: tuple[tuple[str, str], ...] = ()        # raw environment variables (PREFIX_*)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -591,15 +590,15 @@ class LoadOutcome:
     Both are stored canonically (sorted tuples) so two outcomes compare by value.
     """
     ok: bool
-    config: Tuple[Tuple[str, Any], ...] = ()
-    error_keys: Tuple[str, ...] = ()
+    config: tuple[tuple[str, Any], ...] = ()
+    error_keys: tuple[str, ...] = ()
 
     @staticmethod
-    def valid(config: Dict[str, Any]) -> "LoadOutcome":
+    def valid(config: dict[str, Any]) -> LoadOutcome:
         return LoadOutcome(ok=True, config=tuple(sorted(config.items())))
 
     @staticmethod
-    def invalid(error_keys: List[str]) -> "LoadOutcome":
+    def invalid(error_keys: list[str]) -> LoadOutcome:
         return LoadOutcome(ok=False, error_keys=tuple(sorted(set(error_keys))))
 
 
@@ -608,7 +607,7 @@ class LoadOutcome:
 _TEETH_ENV_PREFIX = "MYAPP"
 
 
-def _env_to_dotted(env_key: str, prefix: str = _TEETH_ENV_PREFIX) -> Optional[str]:
+def _env_to_dotted(env_key: str, prefix: str = _TEETH_ENV_PREFIX) -> str | None:
     """Map a PREFIX_DB_HOST env var name to the dotted key db.host, or None."""
     up = env_key.upper()
     pre = prefix.upper() + "_"
@@ -627,7 +626,7 @@ def load_config(sources: ConfigSources, schema: ConfigSchema) -> LoadOutcome:
     error_keys name the offending fields.
     """
     # 1. Merge by precedence into a flat dotted-key map.
-    merged: Dict[str, Any] = {}
+    merged: dict[str, Any] = {}
     for key, value in sources.defaults:
         merged[key] = value
     for key, value in sources.file:
@@ -638,8 +637,8 @@ def load_config(sources: ConfigSources, schema: ConfigSchema) -> LoadOutcome:
             merged[dotted] = env_val  # env overrides file/defaults
 
     # 2. Coerce + validate against the schema.
-    effective: Dict[str, Any] = {}
-    errors: List[str] = []
+    effective: dict[str, Any] = {}
+    errors: list[str] = []
     for key, field_schema in schema.fields.items():
         if key not in merged:
             if field_schema.required:
@@ -668,7 +667,7 @@ def load_config_env_ignored(sources: ConfigSources, schema: ConfigSchema) -> Loa
     deploy-time ``MYAPP_DB_HOST`` is silently shadowed by the checked-in config
     file. Operators think they overrode a setting; they did not.
     """
-    merged: Dict[str, Any] = {}
+    merged: dict[str, Any] = {}
     for key, value in sources.defaults:
         merged[key] = value
     # BUG: env applied first, then the file clobbers it back.
@@ -679,8 +678,8 @@ def load_config_env_ignored(sources: ConfigSources, schema: ConfigSchema) -> Loa
     for key, value in sources.file:
         merged[key] = value  # file wrongly wins over env
 
-    effective: Dict[str, Any] = {}
-    errors: List[str] = []
+    effective: dict[str, Any] = {}
+    errors: list[str] = []
     for key, field_schema in schema.fields.items():
         if key not in merged:
             if field_schema.required:
@@ -706,7 +705,7 @@ def load_config_missing_required_ok(sources: ConfigSources, schema: ConfigSchema
     passes validation and the service starts mis-configured instead of failing
     fast at load time.
     """
-    merged: Dict[str, Any] = {}
+    merged: dict[str, Any] = {}
     for key, value in sources.defaults:
         merged[key] = value
     for key, value in sources.file:
@@ -716,8 +715,8 @@ def load_config_missing_required_ok(sources: ConfigSources, schema: ConfigSchema
         if dotted is not None:
             merged[dotted] = env_val
 
-    effective: Dict[str, Any] = {}
-    errors: List[str] = []
+    effective: dict[str, Any] = {}
+    errors: list[str] = []
     for key, field_schema in schema.fields.items():
         if key not in merged:
             # BUG: required-ness never checked; missing fields just skipped.
@@ -743,7 +742,7 @@ def load_config_no_coercion(sources: ConfigSources, schema: ConfigSchema) -> Loa
     or a string sneaks past where an int was contractually required. The merged
     value differs from the correctly-coerced expected value.
     """
-    merged: Dict[str, Any] = {}
+    merged: dict[str, Any] = {}
     for key, value in sources.defaults:
         merged[key] = value
     for key, value in sources.file:
@@ -753,8 +752,8 @@ def load_config_no_coercion(sources: ConfigSources, schema: ConfigSchema) -> Loa
         if dotted is not None:
             merged[dotted] = env_val
 
-    effective: Dict[str, Any] = {}
-    errors: List[str] = []
+    effective: dict[str, Any] = {}
+    errors: list[str] = []
     for key, field_schema in schema.fields.items():
         if key not in merged:
             if field_schema.required:
@@ -779,11 +778,11 @@ class ConfigCase:
     note: str = ""
 
 
-def _schema(fields: Dict[str, FieldSchema]) -> ConfigSchema:
+def _schema(fields: dict[str, FieldSchema]) -> ConfigSchema:
     return ConfigSchema(dict(fields))
 
 
-ORACLE_CASES: Tuple[ConfigCase, ...] = (
+ORACLE_CASES: tuple[ConfigCase, ...] = (
     # Precedence: env MUST override file MUST override defaults.
     # This is the teeth case for the env-ignored mutant.
     ConfigCase(
@@ -862,7 +861,7 @@ ORACLE_CASES: Tuple[ConfigCase, ...] = (
 )
 
 
-def list_scenarios() -> List[str]:
+def list_scenarios() -> list[str]:
     return [c.name for c in ORACLE_CASES]
 
 
@@ -935,7 +934,7 @@ def _run_self_test(as_json: bool = False) -> int:
 # CLI — default action is the self-test (repo convention).
 # ---------------------------------------------------------------------------
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Configuration validation controls")
     parser.add_argument("--self-test", action="store_true", help="run built-in checks")
     parser.add_argument("--json", action="store_true",

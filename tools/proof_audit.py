@@ -27,13 +27,13 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 try:
-    from tools.harness_registry import HarnessRecord, REPO_ROOT, discover_harnesses, run_self_test
+    from tools.harness_registry import REPO_ROOT, HarnessRecord, discover_harnesses, run_self_test
 except ModuleNotFoundError:  # direct script execution from tools/
-    from harness_registry import HarnessRecord, REPO_ROOT, discover_harnesses, run_self_test
+    from harness_registry import REPO_ROOT, HarnessRecord, discover_harnesses, run_self_test
 
 # Categories kept on the older soft gate (out of scope for the teeth campaign).
 LEGACY_CATEGORIES = {"pharmacy"}

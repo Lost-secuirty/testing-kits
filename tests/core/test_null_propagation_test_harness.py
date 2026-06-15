@@ -3,12 +3,11 @@
 import math
 import unittest
 from dataclasses import dataclass
-from typing import Optional
 
 from harnesses._teeth import verify
 from harnesses.core.null_propagation_test_harness import (
-    TEETH,
     MUTATORS,
+    TEETH,
     NullProbeConfig,
     NullProbeRunner,
     Outcome,
@@ -108,8 +107,8 @@ class TestWalker(unittest.TestCase):
 
 @dataclass
 class _Box:
-    x: Optional[int] = None
-    y: Optional[str] = None
+    x: int | None = None
+    y: str | None = None
 
 
 class TestWalkerDataclass(unittest.TestCase):

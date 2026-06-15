@@ -6,22 +6,20 @@ import json
 import time
 import unittest
 import urllib.request
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 
 from harnesses.core.mutation_test_harness import (
+    Mutant,
     MutationHTTPServer,
     MutationOperator,
     MutationReport,
     MutationResult,
     MutationRunner,
-    Mutant,
-    MockMutationHandler,
     Mutator,
     SourceMutator,
     make_exec_test,
     sandbox_exec,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

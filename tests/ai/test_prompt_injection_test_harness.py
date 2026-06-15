@@ -4,8 +4,8 @@ import unittest
 
 from harnesses.ai.prompt_injection_test_harness import (
     CORPUS,
-    CorpusItem,
     PATTERNS,
+    CorpusItem,
     ScoreReport,
     _run_self_test,
     classify,

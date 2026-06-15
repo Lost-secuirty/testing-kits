@@ -1,13 +1,11 @@
 """
 Test suite for a11y_test_harness.py - ~127 tests covering all checkers.
 """
-import threading
 import unittest
-from urllib.request import urlopen
 from urllib.error import HTTPError
+from urllib.request import urlopen
 
 from harnesses.core.a11y_test_harness import (
-    A11yHTMLParser,
     A11yIssue,
     A11yReport,
     AltTextChecker,
@@ -17,7 +15,6 @@ from harnesses.core.a11y_test_harness import (
     LabelChecker,
     LangChecker,
     LinkTextChecker,
-    MockA11yHandler,
     MockA11yServer,
     TableChecker,
     contrast_ratio,
@@ -28,7 +25,6 @@ from harnesses.core.a11y_test_harness import (
     relative_luminance,
     run_checks,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper

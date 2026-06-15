@@ -160,7 +160,7 @@ class AuditLogHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_GET(self):
-        from urllib.parse import urlparse, parse_qs
+        from urllib.parse import parse_qs, urlparse
         parsed = urlparse(self.path)
         if parsed.path != "/audit":
             self.send_response(404)
@@ -298,7 +298,7 @@ def run_all_scenarios(verbose=False):
             s10.write("user", f"act_{i}")
         export_path = os.path.join(tmpdir10, "export.txt")
         s10.export(export_path)
-        with open(export_path, "r") as fh:
+        with open(export_path) as fh:
             lines = fh.readlines()
         # header: 4 lines + header row + 10 data rows = 16 lines total
         data_lines = [l for l in lines if l.startswith("202")]
@@ -315,7 +315,7 @@ def run_all_scenarios(verbose=False):
         s11.write("alice", "login")
         ep = os.path.join(tmpdir11, "exp.txt")
         s11.export(ep)
-        with open(ep, "r") as fh:
+        with open(ep) as fh:
             content = fh.read()
         check("11. Export header: starts with 'Pharmacy Audit Log Export'",
               content.startswith("Pharmacy Audit Log Export"),

@@ -25,18 +25,18 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass
-from decimal import ROUND_FLOOR, ROUND_HALF_EVEN, Decimal
-from enum import Enum
-from typing import Callable, Optional
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+from collections.abc import Callable
+from dataclasses import dataclass
+from decimal import ROUND_FLOOR, ROUND_HALF_EVEN, Decimal
+from enum import Enum
 from pathlib import Path as _Path
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Money
@@ -68,15 +68,15 @@ class Money:
         self._q = Decimal(10) ** -currency.minor_units
         self.amount = Decimal(str(amount)).quantize(self._q, rounding=ROUND_HALF_EVEN)
 
-    def _check(self, other: "Money") -> None:
+    def _check(self, other: Money) -> None:
         if self.currency.code != other.currency.code:
             raise CurrencyMismatchError(f"{self.currency.code} vs {other.currency.code}")
 
-    def __add__(self, other: "Money") -> "Money":
+    def __add__(self, other: Money) -> Money:
         self._check(other)
         return Money(self.amount + other.amount, self.currency)
 
-    def __sub__(self, other: "Money") -> "Money":
+    def __sub__(self, other: Money) -> Money:
         self._check(other)
         return Money(self.amount - other.amount, self.currency)
 
@@ -85,19 +85,19 @@ class Money:
                 and self.currency.code == other.currency.code
                 and self.amount == other.amount)
 
-    def __lt__(self, other: "Money") -> bool:
+    def __lt__(self, other: Money) -> bool:
         self._check(other)
         return self.amount < other.amount
 
-    def __le__(self, other: "Money") -> bool:
+    def __le__(self, other: Money) -> bool:
         self._check(other)
         return self.amount <= other.amount
 
-    def __gt__(self, other: "Money") -> bool:
+    def __gt__(self, other: Money) -> bool:
         self._check(other)
         return self.amount > other.amount
 
-    def __ge__(self, other: "Money") -> bool:
+    def __ge__(self, other: Money) -> bool:
         self._check(other)
         return self.amount >= other.amount
 
@@ -107,7 +107,7 @@ class Money:
     def is_zero(self) -> bool:
         return self.amount == 0
 
-    def allocate(self, ratios: list[int]) -> list["Money"]:
+    def allocate(self, ratios: list[int]) -> list[Money]:
         """Split into parts by integer ratios; distribute the remainder so the
         parts sum back to exactly this amount (largest-remainder method)."""
         total = self.amount
@@ -223,7 +223,7 @@ class PaymentProcessor:
         self.conflicts = 0
         self.transitions: list[tuple[str, str, PaymentState]] = []
 
-    def authorize(self, amount: Money, idempotency_key: Optional[str] = None) -> str:
+    def authorize(self, amount: Money, idempotency_key: str | None = None) -> str:
         if idempotency_key is not None and idempotency_key in self._idem:
             cid, amt, cur = self._idem[idempotency_key]
             if amt != str(amount.amount) or cur != amount.currency.code:
@@ -329,7 +329,7 @@ class DoubleRefundProcessor(PaymentProcessor):
 
 
 class ReplayChargesTwiceProcessor(PaymentProcessor):
-    def authorize(self, amount: Money, idempotency_key: Optional[str] = None) -> str:
+    def authorize(self, amount: Money, idempotency_key: str | None = None) -> str:
         return super().authorize(amount, idempotency_key=None)  # bug: ignores the key
 
 

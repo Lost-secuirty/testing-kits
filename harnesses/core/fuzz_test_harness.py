@@ -6,27 +6,28 @@ Mock HTTP server on dynamic port (default 18960).
 """
 
 import argparse
-import random
-import sys
-import math
-import traceback
 import hashlib
-import threading
-import time
+import math
+import random
 import socket
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
-from collections import defaultdict
+import sys
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+import threading
+import time
+import traceback
+from collections import defaultdict
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path as _Path
+from typing import Any
+from urllib.parse import parse_qs, urlparse
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
-
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -173,11 +174,11 @@ class CrashClassifier:
     }
 
     def __init__(self):
-        self._seen_fingerprints: Dict[str, CrashRecord] = {}
-        self._by_type: Dict[str, List[CrashRecord]] = defaultdict(list)
-        self._all_crashes: List[CrashRecord] = []
+        self._seen_fingerprints: dict[str, CrashRecord] = {}
+        self._by_type: dict[str, list[CrashRecord]] = defaultdict(list)
+        self._all_crashes: list[CrashRecord] = []
 
-    def classify(self, record: CrashRecord) -> Tuple[bool, str]:
+    def classify(self, record: CrashRecord) -> tuple[bool, str]:
         """
         Classify and store a crash record.
         Returns (is_new, severity).
@@ -190,16 +191,16 @@ class CrashClassifier:
         severity = self.SEVERITY_MAP.get(record.exception_type, "unknown")
         return is_new, severity
 
-    def get_unique_crashes(self) -> List[CrashRecord]:
+    def get_unique_crashes(self) -> list[CrashRecord]:
         return list(self._seen_fingerprints.values())
 
-    def get_crashes_by_type(self, exception_type: str) -> List[CrashRecord]:
+    def get_crashes_by_type(self, exception_type: str) -> list[CrashRecord]:
         return list(self._by_type.get(exception_type, []))
 
-    def get_all_crashes(self) -> List[CrashRecord]:
+    def get_all_crashes(self) -> list[CrashRecord]:
         return list(self._all_crashes)
 
-    def get_type_counts(self) -> Dict[str, int]:
+    def get_type_counts(self) -> dict[str, int]:
         return {k: len(v) for k, v in self._by_type.items()}
 
     def get_severity(self, exception_type: str) -> str:
@@ -213,8 +214,8 @@ class CrashClassifier:
             "severity_breakdown": self._severity_breakdown(),
         }
 
-    def _severity_breakdown(self) -> Dict[str, int]:
-        breakdown: Dict[str, int] = defaultdict(int)
+    def _severity_breakdown(self) -> dict[str, int]:
+        breakdown: dict[str, int] = defaultdict(int)
         for exc_type, crashes in self._by_type.items():
             sev = self.SEVERITY_MAP.get(exc_type, "unknown")
             breakdown[sev] += len(crashes)
@@ -230,8 +231,8 @@ class FuzzReport:
     successful_runs: int = 0
     crashed_runs: int = 0
     unique_crashes: int = 0
-    crash_records: List[CrashRecord] = field(default_factory=list)
-    coverage_hints: List[str] = field(default_factory=list)
+    crash_records: list[CrashRecord] = field(default_factory=list)
+    coverage_hints: list[str] = field(default_factory=list)
     elapsed_seconds: float = 0.0
     seed: int = 0
 
@@ -419,13 +420,13 @@ class BoundaryExplorer:
     def __init__(self, seed: int = 42):
         self._rng = random.Random(seed)
 
-    def int_boundaries(self) -> List[int]:
+    def int_boundaries(self) -> list[int]:
         return list(BOUNDARY_INTS)
 
-    def float_boundaries(self) -> List[float]:
+    def float_boundaries(self) -> list[float]:
         return list(BOUNDARY_FLOATS)
 
-    def string_boundaries(self) -> List[str]:
+    def string_boundaries(self) -> list[str]:
         return (
             list(BOUNDARY_STRINGS)
             + list(SQL_INJECTION_STRINGS)
@@ -433,7 +434,7 @@ class BoundaryExplorer:
             + list(UNICODE_STRINGS)
         )
 
-    def bytes_boundaries(self) -> List[bytes]:
+    def bytes_boundaries(self) -> list[bytes]:
         return [
             b"",
             b"\x00",
@@ -449,13 +450,13 @@ class BoundaryExplorer:
             b"\xef\xbb\xbf",  # UTF-8 BOM
         ]
 
-    def none_boundary(self) -> List[None]:
+    def none_boundary(self) -> list[None]:
         return [None]
 
-    def bool_boundaries(self) -> List[bool]:
+    def bool_boundaries(self) -> list[bool]:
         return [True, False]
 
-    def collection_boundaries(self) -> List[Any]:
+    def collection_boundaries(self) -> list[Any]:
         return [
             [], [None], [0, 0, 0],
             {}, {"key": None}, {"": ""},
@@ -463,8 +464,8 @@ class BoundaryExplorer:
             tuple(), (None,), (1, 2, 3),
         ]
 
-    def all_boundaries(self) -> List[Any]:
-        result: List[Any] = []
+    def all_boundaries(self) -> list[Any]:
+        result: list[Any] = []
         result.extend(self.int_boundaries())
         result.extend(self.float_boundaries())
         result.extend(self.string_boundaries())
@@ -478,7 +479,7 @@ class BoundaryExplorer:
         self,
         func: Callable,
         input_type: str = "all",
-    ) -> List[CrashRecord]:
+    ) -> list[CrashRecord]:
         """Probe a function with boundary values for the given type."""
         if input_type == "int":
             values = self.int_boundaries()
@@ -523,7 +524,7 @@ class FuzzRunner:
         self.max_iterations = max_iterations
         self._rng = random.Random(seed)
         self.classifier = CrashClassifier()
-        self._coverage_hints: List[str] = []
+        self._coverage_hints: list[str] = []
 
     def _generate_input(self, input_type: str) -> Any:
         """Generate a single fuzz input of the requested type."""
@@ -554,8 +555,8 @@ class FuzzRunner:
         self,
         target: Callable,
         input_type: str = "any",
-        iterations: Optional[int] = None,
-        timeout_seconds: Optional[float] = None,
+        iterations: int | None = None,
+        timeout_seconds: float | None = None,
     ) -> FuzzReport:
         """
         Fuzz a function by calling it with generated inputs.
@@ -609,7 +610,7 @@ class FuzzRunner:
     def fuzz_with_inputs(
         self,
         target: Callable,
-        inputs: List[Any],
+        inputs: list[Any],
     ) -> FuzzReport:
         """Fuzz with a provided list of inputs (deterministic)."""
         start_time = time.monotonic()
@@ -657,11 +658,11 @@ class MockFuzzHandler(BaseHTTPRequestHandler):
     """
 
     # Class-level storage shared across handler instances
-    received_requests: List[dict] = []
+    received_requests: list[dict] = []
     response_status: int = 200
     response_body: bytes = b'{"status": "ok"}'
-    response_headers: Dict[str, str] = {"Content-Type": "application/json"}
-    crash_on_path: Optional[str] = None
+    response_headers: dict[str, str] = {"Content-Type": "application/json"}
+    crash_on_path: str | None = None
 
     def log_message(self, format, *args):
         # Suppress default logging
@@ -744,8 +745,8 @@ class FuzzHTTPServer:
 
     def __init__(self, port: int = 0, host: str = "127.0.0.1"):
         self.host = host
-        self._server: Optional[HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: HTTPServer | None = None
+        self._thread: threading.Thread | None = None
         self._port = port
         self._running = False
 
@@ -799,20 +800,20 @@ class FuzzHTTPServer:
                 self._thread.join(timeout=2.0)
                 self._thread = None
 
-    def get_requests(self) -> List[dict]:
+    def get_requests(self) -> list[dict]:
         return list(MockFuzzHandler.received_requests)
 
     def set_response(
         self,
         status: int = 200,
         body: bytes = b'{"status": "ok"}',
-        headers: Optional[Dict[str, str]] = None,
+        headers: dict[str, str] | None = None,
     ):
         MockFuzzHandler.response_status = status
         MockFuzzHandler.response_body = body
         MockFuzzHandler.response_headers = headers or {"Content-Type": "application/json"}
 
-    def set_crash_path(self, path: Optional[str]):
+    def set_crash_path(self, path: str | None):
         MockFuzzHandler.crash_on_path = path
 
     def __enter__(self) -> "FuzzHTTPServer":
@@ -839,9 +840,9 @@ class HTTPFuzzClient:
         self,
         method: str,
         path: str,
-        body: Optional[bytes] = None,
-        headers: Optional[Dict[str, str]] = None,
-    ) -> Tuple[int, bytes, dict]:
+        body: bytes | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, bytes, dict]:
         """Send an HTTP request using low-level socket."""
         import http.client
         parsed = urlparse(self.base_url)
@@ -862,7 +863,7 @@ class HTTPFuzzClient:
         finally:
             conn.close()
 
-    def fuzz_paths(self, num: int = 20) -> List[dict]:
+    def fuzz_paths(self, num: int = 20) -> list[dict]:
         """Send requests with fuzzed URL paths."""
         results = []
         path_fuzzers = [
@@ -886,7 +887,7 @@ class HTTPFuzzClient:
                 results.append({"path": path, "status": None, "error": str(exc)})
         return results
 
-    def fuzz_bodies(self, num: int = 20) -> List[dict]:
+    def fuzz_bodies(self, num: int = 20) -> list[dict]:
         """Send requests with fuzzed request bodies."""
         results = []
         for _ in range(num):
@@ -1034,7 +1035,7 @@ class CorpusManager:
 
     def __init__(self, seed: int = 42, max_size: int = 1000):
         self._rng = random.Random(seed)
-        self._corpus: List[Any] = []
+        self._corpus: list[Any] = []
         self._max_size = max_size
         self._mutation_engine = MutationEngine(seed)
 
@@ -1070,7 +1071,7 @@ class CorpusManager:
     def size(self) -> int:
         return len(self._corpus)
 
-    def get_all(self) -> List[Any]:
+    def get_all(self) -> list[Any]:
         return list(self._corpus)
 
 
@@ -1084,16 +1085,16 @@ class DifferentialFuzzer:
 
     def __init__(self, seed: int = 42):
         self._rng = random.Random(seed)
-        self.divergences: List[dict] = []
+        self.divergences: list[dict] = []
 
     def compare(
         self,
         impl_a: Callable,
         impl_b: Callable,
-        inputs: List[Any],
+        inputs: list[Any],
         label_a: str = "impl_a",
         label_b: str = "impl_b",
-    ) -> List[dict]:
+    ) -> list[dict]:
         """
         Run both implementations on each input and record divergences.
         """
@@ -1168,7 +1169,7 @@ def truncate_repr(value: Any, max_len: int = 100) -> str:
     return r
 
 
-def generate_seed_sequence(master_seed: int, count: int) -> List[int]:
+def generate_seed_sequence(master_seed: int, count: int) -> list[int]:
     """Generate a reproducible sequence of seeds from a master seed."""
     rng = random.Random(master_seed)
     return [rng.randint(0, 2**32 - 1) for _ in range(count)]
@@ -1191,7 +1192,7 @@ def explore_boundaries(
     target: Callable,
     input_type: str = "all",
     seed: int = 42,
-) -> List[CrashRecord]:
+) -> list[CrashRecord]:
     """Convenience wrapper for boundary exploration."""
     explorer = BoundaryExplorer(seed=seed)
     return explorer.probe_function(target, input_type=input_type)
@@ -1248,7 +1249,7 @@ class FuzzCase:
 # classes in the hint (huge int, fixed-width overflow, unescaped delimiter,
 # empty/None handling, off-by-one on an empty sequence). Every value is a literal;
 # nothing is generated at prove() time.
-_FUZZ_CORPUS: Tuple[FuzzCase, ...] = (
+_FUZZ_CORPUS: tuple[FuzzCase, ...] = (
     FuzzCase("empty_string", "", True,
              "empty input: a robust parser returns a default, a naive one indexes [0]"),
     FuzzCase("none_value", None, True,
@@ -1313,7 +1314,7 @@ def overflow_target(value: Any) -> str:
         return f"bool:{value}"
     if isinstance(value, int):
         assert _INT32_MIN <= value <= _INT32_MAX, "int32 overflow"  # BUG
-        return f"int:ok"
+        return "int:ok"
     if isinstance(value, str):
         return "empty" if value == "" else f"str:{value.split(_DELIM, 1)[0]}"
     if isinstance(value, (list, tuple)):
@@ -1366,7 +1367,7 @@ def off_by_one_target(value: Any) -> str:
     return f"other:{type(value).__name__}"
 
 
-def _frozen_inputs() -> List[Any]:
+def _frozen_inputs() -> list[Any]:
     """The frozen corpus input values, in order — the deterministic replay list."""
     return [case.value for case in _FUZZ_CORPUS]
 
@@ -1410,7 +1411,7 @@ TEETH = Teeth(
 )
 
 
-def list_scenarios() -> List[str]:
+def list_scenarios() -> list[str]:
     """Names of the frozen fuzz-corpus cases (the teeth scenarios)."""
     return [c.name for c in _FUZZ_CORPUS]
 
@@ -1485,7 +1486,7 @@ def _run_demo() -> int:
     return 0
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Fuzz / crash-finding controls")
     parser.add_argument("--self-test", action="store_true", help="run built-in checks")
     parser.add_argument("--json", action="store_true",

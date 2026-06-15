@@ -3,10 +3,7 @@ Unit tests for scraper_test_harness.py
 46 tests covering all major components.
 """
 
-import threading
-import time
 import unittest
-import urllib.parse
 
 from harnesses._teeth import verify
 from harnesses.core.scraper_test_harness import (

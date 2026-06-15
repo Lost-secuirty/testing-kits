@@ -17,30 +17,25 @@ Run:
 
 import asyncio
 import json
-import math
-import sys
-import threading
 import time
 import unittest
 from unittest.mock import patch
 
 # Import the module under test
 from harnesses.core.stress_harness import (
+    SCENARIOS,
     HarnessConfig,
     MetricsCollector,
-    MockHandler,
     RequestResult,
-    SCENARIOS,
     StressEngine,
     TaskDef,
     WorkloadModel,
+    _do_http_request,
     build_parser,
     build_weighted_task_list,
     resolve_body,
     start_mock_server,
-    _do_http_request,
 )
-
 
 # ============================================================
 # 1. METRICS COLLECTOR TESTS

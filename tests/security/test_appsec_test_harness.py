@@ -3,33 +3,27 @@ Test suite for appsec_test_harness.py — 129 tests.
 Pure stdlib, zero external dependencies.
 """
 
-import base64
-import hashlib
-import hmac
 import json
 import pickle
-import struct
 import time
 import unittest
-import urllib.request
 import urllib.error
+import urllib.request
 
 from harnesses.security.appsec_test_harness import (
-    SSRFChecker,
+    AppSecReport,
     DeserializationChecker,
     JWTChecker,
-    OpenRedirectChecker,
     MassAssignmentChecker,
-    XXEChecker,
+    OpenRedirectChecker,
     SecFinding,
-    AppSecReport,
-    MockAppSecHandler,
-    start_mock_server,
-    stop_mock_server,
+    SSRFChecker,
+    XXEChecker,
     _b64url_decode,
     _b64url_encode,
+    start_mock_server,
+    stop_mock_server,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper

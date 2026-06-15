@@ -29,9 +29,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from enum import Enum
-from http import HTTPStatus
-from typing import Any, Dict, List, Optional, Tuple
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Enumerations and result types
@@ -66,7 +64,7 @@ class ScanResult:
     def is_vulnerable(self) -> bool:
         return self.status == ScanStatus.FAIL
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "test_name": self.test_name,
             "status": self.status.value,
@@ -84,18 +82,18 @@ class SecurityReport:
     """Aggregated report of all security scan results."""
     target_url: str
     scan_time: float = 0.0
-    results: List[ScanResult] = field(default_factory=list)
+    results: list[ScanResult] = field(default_factory=list)
 
     def add_result(self, result: ScanResult) -> None:
         self.results.append(result)
 
-    def vulnerabilities(self) -> List[ScanResult]:
+    def vulnerabilities(self) -> list[ScanResult]:
         return [r for r in self.results if r.is_vulnerable()]
 
-    def passed(self) -> List[ScanResult]:
+    def passed(self) -> list[ScanResult]:
         return [r for r in self.results if r.status == ScanStatus.PASS]
 
-    def errors(self) -> List[ScanResult]:
+    def errors(self) -> list[ScanResult]:
         return [r for r in self.results if r.status == ScanStatus.ERROR]
 
     def critical_count(self) -> int:
@@ -104,7 +102,7 @@ class SecurityReport:
     def high_count(self) -> int:
         return sum(1 for r in self.vulnerabilities() if r.severity == Severity.HIGH)
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         return {
             "target_url": self.target_url,
             "scan_time_seconds": round(self.scan_time, 3),
@@ -116,7 +114,7 @@ class SecurityReport:
             "high": self.high_count(),
         }
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "summary": self.summary(),
             "results": [r.to_dict() for r in self.results],
@@ -184,7 +182,7 @@ class MockSecurityHandler(http.server.BaseHTTPRequestHandler):
         path = parsed.path
         params = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
 
-        routes: Dict[str, Any] = {
+        routes: dict[str, Any] = {
             "/sql-safe": self._sql_safe,
             "/sql-vuln": self._sql_vuln,
             "/xss-safe": self._xss_safe,
@@ -233,7 +231,7 @@ class MockSecurityHandler(http.server.BaseHTTPRequestHandler):
         code: int,
         body: bytes,
         content_type: str = "application/json",
-        extra_headers: Optional[Dict[str, str]] = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> None:
         self.send_response(code)
         self.send_header("Content-Type", content_type)
@@ -248,7 +246,7 @@ class MockSecurityHandler(http.server.BaseHTTPRequestHandler):
         self,
         code: int,
         data: Any,
-        extra_headers: Optional[Dict[str, str]] = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> None:
         body = json.dumps(data).encode()
         self._send_response_body(code, body, "application/json", extra_headers)
@@ -257,7 +255,7 @@ class MockSecurityHandler(http.server.BaseHTTPRequestHandler):
         body = content.encode()
         self._send_response_body(code, body, "text/html")
 
-    def _get_param(self, params: Dict[str, List[str]], key: str, default: str = "") -> str:
+    def _get_param(self, params: dict[str, list[str]], key: str, default: str = "") -> str:
         return params.get(key, [default])[0]
 
     def _is_authenticated(self) -> bool:
@@ -268,13 +266,13 @@ class MockSecurityHandler(http.server.BaseHTTPRequestHandler):
     # SQL Injection endpoints
     # ------------------------------------------------------------------
 
-    def _sql_safe(self, params: Dict[str, List[str]]) -> None:
+    def _sql_safe(self, params: dict[str, list[str]]) -> None:
         q = self._get_param(params, "q")
         # Safe: does not reflect user input into SQL-like string
         result = {"status": "ok", "query": "SELECT * FROM items WHERE id = ?", "rows": []}
         self._send_json(200, result)
 
-    def _sql_vuln(self, params: Dict[str, List[str]]) -> None:
+    def _sql_vuln(self, params: dict[str, list[str]]) -> None:
         q = self._get_param(params, "q")
         # Vulnerable: directly interpolates user input into SQL string
         fake_sql = f"SELECT * FROM users WHERE name = '{q}'"
@@ -285,13 +283,13 @@ class MockSecurityHandler(http.server.BaseHTTPRequestHandler):
     # XSS endpoints
     # ------------------------------------------------------------------
 
-    def _xss_safe(self, params: Dict[str, List[str]]) -> None:
+    def _xss_safe(self, params: dict[str, list[str]]) -> None:
         q = self._get_param(params, "q")
         escaped = html.escape(q)
         content = f"<html><body><p>Search results for: {escaped}</p></body></html>"
         self._send_html(200, content)
 
-    def _xss_vuln(self, params: Dict[str, List[str]]) -> None:
+    def _xss_vuln(self, params: dict[str, list[str]]) -> None:
         q = self._get_param(params, "q")
         # Vulnerable: reflects raw user input without escaping
         content = f"<html><body><p>Search results for: {q}</p></body></html>"
@@ -301,14 +299,14 @@ class MockSecurityHandler(http.server.BaseHTTPRequestHandler):
     # Command Injection endpoints
     # ------------------------------------------------------------------
 
-    def _cmd_safe(self, params: Dict[str, List[str]]) -> None:
+    def _cmd_safe(self, params: dict[str, list[str]]) -> None:
         file_arg = self._get_param(params, "file")
         # Safe: strips shell metacharacters
         sanitised = re.sub(r"[;&|`$<>\\\n\r]", "", file_arg)
         result = {"status": "ok", "file": sanitised, "content": "file content here"}
         self._send_json(200, result)
 
-    def _cmd_vuln(self, params: Dict[str, List[str]]) -> None:
+    def _cmd_vuln(self, params: dict[str, list[str]]) -> None:
         file_arg = self._get_param(params, "file")
         # Vulnerable: reflects unsanitised argument as if it were passed to shell
         result = {
@@ -322,7 +320,7 @@ class MockSecurityHandler(http.server.BaseHTTPRequestHandler):
     # Path Traversal endpoints
     # ------------------------------------------------------------------
 
-    def _file_safe(self, params: Dict[str, List[str]]) -> None:
+    def _file_safe(self, params: dict[str, list[str]]) -> None:
         path = self._get_param(params, "path")
         # Safe: rejects traversal sequences
         if ".." in path or path.startswith("/"):
@@ -331,7 +329,7 @@ class MockSecurityHandler(http.server.BaseHTTPRequestHandler):
         result = {"status": "ok", "path": path, "content": "safe file content"}
         self._send_json(200, result)
 
-    def _file_vuln(self, params: Dict[str, List[str]]) -> None:
+    def _file_vuln(self, params: dict[str, list[str]]) -> None:
         path = self._get_param(params, "path")
         # Vulnerable: reflects literal path, including traversal sequences
         result = {"status": "ok", "path": path, "content": f"contents of {path}"}
@@ -341,13 +339,13 @@ class MockSecurityHandler(http.server.BaseHTTPRequestHandler):
     # Header Injection / CRLF endpoints
     # ------------------------------------------------------------------
 
-    def _redirect_safe(self, params: Dict[str, List[str]]) -> None:
+    def _redirect_safe(self, params: dict[str, list[str]]) -> None:
         url = self._get_param(params, "url", "http://example.com")
         # Safe: strip CRLF characters before setting Location header
         safe_url = url.replace("\r", "").replace("\n", "")
         self._send_json(302, {"redirect": safe_url}, extra_headers={"Location": safe_url})
 
-    def _redirect_vuln(self, params: Dict[str, List[str]]) -> None:
+    def _redirect_vuln(self, params: dict[str, list[str]]) -> None:
         url = self._get_param(params, "url", "http://example.com")
         # Vulnerable: echoes url directly into Location header (CRLF injection possible)
         # We can't actually inject CRLF via http.server (it sanitises), so we
@@ -362,19 +360,19 @@ class MockSecurityHandler(http.server.BaseHTTPRequestHandler):
     # Authentication endpoints
     # ------------------------------------------------------------------
 
-    def _protected(self, params: Dict[str, List[str]]) -> None:
+    def _protected(self, params: dict[str, list[str]]) -> None:
         if not self._is_authenticated():
             self._send_json(401, {"error": "Unauthorized"})
             return
         self._send_json(200, {"status": "ok", "data": "protected resource"})
 
-    def _admin(self, params: Dict[str, List[str]]) -> None:
+    def _admin(self, params: dict[str, list[str]]) -> None:
         if not self._is_authenticated():
             self._send_json(403, {"error": "Forbidden"})
             return
         self._send_json(200, {"status": "ok", "data": "admin resource"})
 
-    def _login(self, params: Dict[str, List[str]]) -> None:
+    def _login(self, params: dict[str, list[str]]) -> None:
         username = self._get_param(params, "username")
         password = self._get_param(params, "password")
         if username == "admin" and password == "correct-password":
@@ -386,12 +384,12 @@ class MockSecurityHandler(http.server.BaseHTTPRequestHandler):
     # Sensitive data exposure endpoints
     # ------------------------------------------------------------------
 
-    def _profile_safe(self, params: Dict[str, List[str]]) -> None:
+    def _profile_safe(self, params: dict[str, list[str]]) -> None:
         # Safe: only returns non-sensitive fields
         result = {"user_id": 42, "username": "alice", "email": "alice@example.com"}
         self._send_json(200, result)
 
-    def _profile_vuln(self, params: Dict[str, List[str]]) -> None:
+    def _profile_vuln(self, params: dict[str, list[str]]) -> None:
         # Vulnerable: leaks sensitive fields
         result = {
             "user_id": 42,
@@ -406,7 +404,7 @@ class MockSecurityHandler(http.server.BaseHTTPRequestHandler):
     # Health check
     # ------------------------------------------------------------------
 
-    def _health(self, params: Dict[str, List[str]]) -> None:
+    def _health(self, params: dict[str, list[str]]) -> None:
         self._send_json(200, {"status": "healthy"})
 
 
@@ -420,8 +418,8 @@ class MockSecurityServer:
     def __init__(self, host: str = "127.0.0.1", port: int = 0) -> None:
         self.host = host
         self.port = port
-        self._server: Optional[http.server.HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: http.server.HTTPServer | None = None
+        self._thread: threading.Thread | None = None
 
     def start(self) -> str:
         """Start the server and return the base URL."""
@@ -451,7 +449,7 @@ class MockSecurityServer:
     def base_url(self) -> str:
         return f"http://{self.host}:{self.port}"
 
-    def __enter__(self) -> "MockSecurityServer":
+    def __enter__(self) -> MockSecurityServer:
         self.start()
         return self
 
@@ -465,9 +463,9 @@ class MockSecurityServer:
 
 def _http_get(
     url: str,
-    headers: Optional[Dict[str, str]] = None,
+    headers: dict[str, str] | None = None,
     timeout: float = 5.0,
-) -> Tuple[int, Dict[str, str], bytes]:
+) -> tuple[int, dict[str, str], bytes]:
     """Perform a GET request; return (status_code, headers_dict, body_bytes)."""
     req = urllib.request.Request(url, headers=headers or {})
     try:
@@ -481,10 +479,10 @@ def _http_get(
 
 def _http_post(
     url: str,
-    data: Dict[str, str],
-    headers: Optional[Dict[str, str]] = None,
+    data: dict[str, str],
+    headers: dict[str, str] | None = None,
     timeout: float = 5.0,
-) -> Tuple[int, Dict[str, str], bytes]:
+) -> tuple[int, dict[str, str], bytes]:
     """Perform a POST request with form-encoded data."""
     encoded = urllib.parse.urlencode(data).encode()
     req = urllib.request.Request(
@@ -566,7 +564,7 @@ class InjectionScanner:
             remediation="Use parameterised queries / prepared statements",
         )
 
-    def scan_all(self) -> List[ScanResult]:
+    def scan_all(self) -> list[ScanResult]:
         return [
             self.scan_endpoint("/sql-safe"),
             self.scan_endpoint("/sql-vuln"),
@@ -643,7 +641,7 @@ class XSSScan:
             remediation="HTML-encode all user-supplied output",
         )
 
-    def scan_all(self) -> List[ScanResult]:
+    def scan_all(self) -> list[ScanResult]:
         return [
             self.scan_endpoint("/xss-safe"),
             self.scan_endpoint("/xss-vuln"),
@@ -715,7 +713,7 @@ class CommandInjectionScan:
             remediation="Avoid shell calls; use safe APIs; sanitise inputs",
         )
 
-    def scan_all(self) -> List[ScanResult]:
+    def scan_all(self) -> list[ScanResult]:
         return [
             self.scan_endpoint("/cmd-safe"),
             self.scan_endpoint("/cmd-vuln"),
@@ -782,7 +780,7 @@ class PathTraversalScan:
             remediation="Validate and normalise file paths; use a whitelist",
         )
 
-    def scan_all(self) -> List[ScanResult]:
+    def scan_all(self) -> list[ScanResult]:
         return [
             self.scan_endpoint("/file-safe"),
             self.scan_endpoint("/file-vuln"),
@@ -800,7 +798,7 @@ class PathTraversalScan:
 CRLF_MARKER = "X-Injected-Marker"
 CRLF_PAYLOADS = [
     f"http://example.com\r\n{CRLF_MARKER}: hacked",
-    f"http://example.com\r\nSet-Cookie: malicious=1",
+    "http://example.com\r\nSet-Cookie: malicious=1",
     f"http://example.com%0d%0a{CRLF_MARKER}: hacked",
 ]
 
@@ -810,7 +808,7 @@ def _http_get_raw(
     port: int,
     path_and_query: str,
     timeout: float = 5.0,
-) -> Tuple[int, Dict[str, str], bytes]:
+) -> tuple[int, dict[str, str], bytes]:
     """Low-level HTTP GET using http.client (bypasses urllib URL validation)."""
     conn = http.client.HTTPConnection(host, port, timeout=timeout)
     try:
@@ -908,9 +906,9 @@ class HeaderSecurityAudit:
     # Security headers presence check
     # ------------------------------------------------------------------
 
-    def check_security_headers(self, path: str = "/health") -> List[ScanResult]:
+    def check_security_headers(self, path: str = "/health") -> list[ScanResult]:
         endpoint = f"{self.base_url}{path}"
-        results: List[ScanResult] = []
+        results: list[ScanResult] = []
         try:
             _, headers, _ = _http_get(endpoint)
             lower_headers = {k.lower(): v for k, v in headers.items()}
@@ -962,7 +960,7 @@ class HeaderSecurityAudit:
             )
         return results
 
-    def scan_all(self) -> List[ScanResult]:
+    def scan_all(self) -> list[ScanResult]:
         return [
             self.scan_crlf_endpoint("/redirect-safe"),
             self.scan_crlf_endpoint("/redirect-vuln"),
@@ -980,7 +978,7 @@ class AuthBypassScan:
         self.base_url = base_url.rstrip("/")
 
     def _check_endpoint_rejects_unauthenticated(
-        self, path: str, expected_codes: Tuple[int, ...] = (401, 403)
+        self, path: str, expected_codes: tuple[int, ...] = (401, 403)
     ) -> ScanResult:
         endpoint = f"{self.base_url}{path}"
         bypass_attempts = [
@@ -1050,7 +1048,7 @@ class AuthBypassScan:
                 endpoint=endpoint,
             )
 
-    def scan_all(self) -> List[ScanResult]:
+    def scan_all(self) -> list[ScanResult]:
         results = []
         for path in ["/protected", "/admin"]:
             results.append(self._check_endpoint_rejects_unauthenticated(path))
@@ -1062,7 +1060,7 @@ class AuthBypassScan:
 # Sensitive Data Exposure Scanner
 # ---------------------------------------------------------------------------
 
-SENSITIVE_PATTERNS: List[Tuple[str, re.Pattern]] = [
+SENSITIVE_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("password", re.compile(r'"password"\s*:\s*"[^"]+"', re.IGNORECASE)),
     ("api_key", re.compile(r'"api_key"\s*:\s*"[^"]+"', re.IGNORECASE)),
     ("secret", re.compile(r'"secret"\s*:\s*"[^"]+"', re.IGNORECASE)),
@@ -1112,7 +1110,7 @@ class SensitiveDataExposureScan:
             remediation="Remove sensitive fields from API responses",
         )
 
-    def scan_all(self) -> List[ScanResult]:
+    def scan_all(self) -> list[ScanResult]:
         return [
             self.scan_endpoint("/profile-safe"),
             self.scan_endpoint("/profile-vuln"),

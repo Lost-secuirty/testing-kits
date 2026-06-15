@@ -5,17 +5,13 @@ Pure stdlib, zero external dependencies.
 
 from __future__ import annotations
 
-import html
 import re
-import math
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
-
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -38,24 +34,24 @@ class A11yIssue:
 
 @dataclass
 class A11yReport:
-    issues: List[A11yIssue] = field(default_factory=list)
+    issues: list[A11yIssue] = field(default_factory=list)
 
     def add(self, issue: A11yIssue) -> None:
         self.issues.append(issue)
 
-    def counts(self) -> Dict[str, int]:
-        counts: Dict[str, int] = {"ERROR": 0, "WARNING": 0, "INFO": 0}
+    def counts(self) -> dict[str, int]:
+        counts: dict[str, int] = {"ERROR": 0, "WARNING": 0, "INFO": 0}
         for issue in self.issues:
             counts[issue.severity] = counts.get(issue.severity, 0) + 1
         return counts
 
-    def errors(self) -> List[A11yIssue]:
+    def errors(self) -> list[A11yIssue]:
         return [i for i in self.issues if i.severity == "ERROR"]
 
-    def warnings(self) -> List[A11yIssue]:
+    def warnings(self) -> list[A11yIssue]:
         return [i for i in self.issues if i.severity == "WARNING"]
 
-    def by_checker(self, name: str) -> List[A11yIssue]:
+    def by_checker(self, name: str) -> list[A11yIssue]:
         return [i for i in self.issues if i.checker_name == name]
 
 
@@ -66,14 +62,14 @@ class A11yReport:
 class ElementInfo:
     """Represents a parsed HTML element."""
 
-    def __init__(self, tag: str, attrs: List[Tuple[str, Optional[str]]], text: str = ""):
+    def __init__(self, tag: str, attrs: list[tuple[str, str | None]], text: str = ""):
         self.tag = tag.lower()
-        self.attrs: Dict[str, Optional[str]] = {k.lower(): v for k, v in attrs}
+        self.attrs: dict[str, str | None] = {k.lower(): v for k, v in attrs}
         self.text = text
-        self.children: List["ElementInfo"] = []
-        self.parent: Optional["ElementInfo"] = None
+        self.children: list[ElementInfo] = []
+        self.parent: ElementInfo | None = None
 
-    def get(self, attr: str, default: Optional[str] = None) -> Optional[str]:
+    def get(self, attr: str, default: str | None = None) -> str | None:
         return self.attrs.get(attr.lower(), default)
 
     def __str__(self) -> str:
@@ -96,12 +92,12 @@ class A11yHTMLParser(HTMLParser):
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
-        self.elements: List[ElementInfo] = []
-        self._stack: List[ElementInfo] = []
-        self._current_text: List[str] = []
-        self.html_element: Optional[ElementInfo] = None
+        self.elements: list[ElementInfo] = []
+        self._stack: list[ElementInfo] = []
+        self._current_text: list[str] = []
+        self.html_element: ElementInfo | None = None
 
-    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         elem = ElementInfo(tag, attrs)
         if tag.lower() == "html":
             self.html_element = elem
@@ -127,10 +123,10 @@ class A11yHTMLParser(HTMLParser):
         if self._stack:
             self._current_text.append(data)
 
-    def get_elements_by_tag(self, tag: str) -> List[ElementInfo]:
+    def get_elements_by_tag(self, tag: str) -> list[ElementInfo]:
         return [e for e in self.elements if e.tag == tag.lower()]
 
-    def get_element_by_id(self, elem_id: str) -> Optional[ElementInfo]:
+    def get_element_by_id(self, elem_id: str) -> ElementInfo | None:
         for e in self.elements:
             if e.get("id") == elem_id:
                 return e
@@ -147,7 +143,7 @@ def parse_html(html_content: str) -> A11yHTMLParser:
 # Colour / contrast utilities
 # ---------------------------------------------------------------------------
 
-def _parse_hex_color(value: str) -> Optional[Tuple[int, int, int]]:
+def _parse_hex_color(value: str) -> tuple[int, int, int] | None:
     value = value.strip().lstrip("#")
     if len(value) == 3:
         value = "".join(c * 2 for c in value)
@@ -162,14 +158,14 @@ def _parse_hex_color(value: str) -> Optional[Tuple[int, int, int]]:
     return None
 
 
-def _parse_rgb_color(value: str) -> Optional[Tuple[int, int, int]]:
+def _parse_rgb_color(value: str) -> tuple[int, int, int] | None:
     m = re.match(r"rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)", value.strip())
     if m:
         return int(m.group(1)), int(m.group(2)), int(m.group(3))
     return None
 
 
-def parse_color(value: str) -> Optional[Tuple[int, int, int]]:
+def parse_color(value: str) -> tuple[int, int, int] | None:
     """Parse #rrggbb, #rgb, or rgb() color value to (r, g, b) tuple."""
     value = value.strip()
     if value.startswith("#"):
@@ -190,7 +186,7 @@ def relative_luminance(r: int, g: int, b: int) -> float:
     return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
 
 
-def contrast_ratio(rgb1: Tuple[int, int, int], rgb2: Tuple[int, int, int]) -> float:
+def contrast_ratio(rgb1: tuple[int, int, int], rgb2: tuple[int, int, int]) -> float:
     """WCAG contrast ratio between two colours."""
     l1 = relative_luminance(*rgb1)
     l2 = relative_luminance(*rgb2)
@@ -199,9 +195,9 @@ def contrast_ratio(rgb1: Tuple[int, int, int], rgb2: Tuple[int, int, int]) -> fl
     return (lighter + 0.05) / (darker + 0.05)
 
 
-def parse_inline_style(style: str) -> Dict[str, str]:
+def parse_inline_style(style: str) -> dict[str, str]:
     """Parse a CSS inline style string into a dict."""
-    result: Dict[str, str] = {}
+    result: dict[str, str] = {}
     if not style:
         return result
     for part in style.split(";"):
@@ -222,8 +218,8 @@ SUSPICIOUS_ALT_WORDS = {"image", "photo", "picture", "graphic", "icon", "img", "
 class AltTextChecker:
     NAME = "AltTextChecker"
 
-    def check(self, parser: A11yHTMLParser) -> List[A11yIssue]:
-        issues: List[A11yIssue] = []
+    def check(self, parser: A11yHTMLParser) -> list[A11yIssue]:
+        issues: list[A11yIssue] = []
         for img in parser.get_elements_by_tag("img"):
             if "alt" not in img.attrs:
                 issues.append(A11yIssue(
@@ -284,11 +280,11 @@ SKIP_INPUT_TYPES = {"hidden", "submit", "reset", "button", "image"}
 class LabelChecker:
     NAME = "LabelChecker"
 
-    def check(self, parser: A11yHTMLParser) -> List[A11yIssue]:
-        issues: List[A11yIssue] = []
+    def check(self, parser: A11yHTMLParser) -> list[A11yIssue]:
+        issues: list[A11yIssue] = []
 
         # Build set of label targets (for= attributes)
-        labeled_ids: Set[str] = set()
+        labeled_ids: set[str] = set()
         for label in parser.get_elements_by_tag("label"):
             for_attr = label.get("for")
             if for_attr:
@@ -327,8 +323,8 @@ class LabelChecker:
 class HeadingOrderChecker:
     NAME = "HeadingOrderChecker"
 
-    def check(self, parser: A11yHTMLParser) -> List[A11yIssue]:
-        issues: List[A11yIssue] = []
+    def check(self, parser: A11yHTMLParser) -> list[A11yIssue]:
+        issues: list[A11yIssue] = []
         HEADING_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6"]
 
         headings = []
@@ -389,7 +385,7 @@ VALID_ARIA_ROLES = {
 }
 
 # Required aria-* attributes for certain roles
-REQUIRED_ARIA_ATTRS: Dict[str, List[str]] = {
+REQUIRED_ARIA_ATTRS: dict[str, list[str]] = {
     "checkbox": ["aria-checked"],
     "combobox": ["aria-expanded"],
     "scrollbar": ["aria-controls", "aria-valuenow"],
@@ -406,8 +402,8 @@ FOCUSABLE_TAGS = {"a", "button", "input", "select", "textarea", "details", "summ
 class AriaChecker:
     NAME = "AriaChecker"
 
-    def check(self, parser: A11yHTMLParser) -> List[A11yIssue]:
-        issues: List[A11yIssue] = []
+    def check(self, parser: A11yHTMLParser) -> list[A11yIssue]:
+        issues: list[A11yIssue] = []
 
         for elem in parser.elements:
             role = elem.get("role")
@@ -469,8 +465,8 @@ class ContrastChecker:
     NORMAL_TEXT_RATIO = 4.5
     LARGE_TEXT_RATIO = 3.0
 
-    def check(self, parser: A11yHTMLParser) -> List[A11yIssue]:
-        issues: List[A11yIssue] = []
+    def check(self, parser: A11yHTMLParser) -> list[A11yIssue]:
+        issues: list[A11yIssue] = []
 
         for elem in parser.elements:
             style = elem.get("style", "")
@@ -530,8 +526,8 @@ class ContrastChecker:
 class LangChecker:
     NAME = "LangChecker"
 
-    def check(self, parser: A11yHTMLParser) -> List[A11yIssue]:
-        issues: List[A11yIssue] = []
+    def check(self, parser: A11yHTMLParser) -> list[A11yIssue]:
+        issues: list[A11yIssue] = []
 
         html_elem = parser.html_element
         # Also search elements list as fallback
@@ -570,8 +566,8 @@ NON_DESCRIPTIVE_LINK_TEXTS = {"click here", "here", "read more", "more", "link",
 class LinkTextChecker:
     NAME = "LinkTextChecker"
 
-    def check(self, parser: A11yHTMLParser) -> List[A11yIssue]:
-        issues: List[A11yIssue] = []
+    def check(self, parser: A11yHTMLParser) -> list[A11yIssue]:
+        issues: list[A11yIssue] = []
 
         for anchor in parser.get_elements_by_tag("a"):
             text = anchor.text.strip()
@@ -608,8 +604,8 @@ class LinkTextChecker:
 class TableChecker:
     NAME = "TableChecker"
 
-    def check(self, parser: A11yHTMLParser) -> List[A11yIssue]:
-        issues: List[A11yIssue] = []
+    def check(self, parser: A11yHTMLParser) -> list[A11yIssue]:
+        issues: list[A11yIssue] = []
 
         for table in parser.get_elements_by_tag("table"):
             # Check if it's a data table (has <td> elements)
@@ -683,7 +679,7 @@ def run_checks(html_content: str, checkers=None) -> A11yReport:
 DEFAULT_PORT = 19180
 
 # Sample HTML pages for testing
-SAMPLE_PAGES: Dict[str, str] = {
+SAMPLE_PAGES: dict[str, str] = {
     "/": """<!DOCTYPE html>
 <html lang="en">
 <head><title>Good Page</title></head>
@@ -792,8 +788,8 @@ class MockA11yServer:
 
     def __init__(self, port: int = DEFAULT_PORT) -> None:
         self.port = port
-        self.server: Optional[HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self.server: HTTPServer | None = None
+        self._thread: threading.Thread | None = None
 
     def start(self) -> None:
         self.server = HTTPServer(("127.0.0.1", self.port), MockA11yHandler)
@@ -813,7 +809,7 @@ class MockA11yServer:
     def url(self, path: str = "/") -> str:
         return f"http://127.0.0.1:{self.port}{path}"
 
-    def __enter__(self) -> "MockA11yServer":
+    def __enter__(self) -> MockA11yServer:
         self.start()
         return self
 
@@ -861,7 +857,7 @@ def main() -> int:
     if args.self_test:
         return _run_self_test(verbose=args.verbose)
     if args.file:
-        with open(args.file, "r", encoding="utf-8") as f:
+        with open(args.file, encoding="utf-8") as f:
             content = f.read()
         report = run_checks(content)
         print(f"Found {len(report.issues)} issues:")

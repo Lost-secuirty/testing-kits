@@ -27,11 +27,12 @@ from __future__ import annotations
 import argparse
 import math
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 # Make the shared teeth contract importable whether run as a module or a script.
 from pathlib import Path as _Path
+
 if str(_Path(__file__).resolve().parents[2]) not in sys.path:
     sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402

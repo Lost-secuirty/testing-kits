@@ -4,18 +4,15 @@ Pure stdlib, zero external dependencies.
 """
 
 import dataclasses
-import math
 import threading
 import time
 import unittest
-from collections import deque
 
 from harnesses.core.ratelimit_test_harness import (
     FakeClock,
     FixedWindow,
     LeakyBucket,
     LimiterStats,
-    MockRateLimitHandler,
     PerKeyTokenBuckets,
     RateLimitDecision,
     RateLimitReport,
@@ -25,7 +22,6 @@ from harnesses.core.ratelimit_test_harness import (
     http_get,
     make_report,
 )
-
 
 # ===========================================================================
 # FakeClock (10 tests)
@@ -1239,7 +1235,6 @@ class TestMockServer(unittest.TestCase):
         srv, _, _, port = self._start()
         srv.stop()
         # After stop, connection should fail
-        import urllib.error
         with self.assertRaises(Exception):
             http_get(f"http://127.0.0.1:{port}/", timeout=1.0)
 

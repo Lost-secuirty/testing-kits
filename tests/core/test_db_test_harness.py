@@ -14,18 +14,16 @@ Harness 3 of 36 — Database Test Harness
 """
 
 import sqlite3
-import threading
-import time
 import unittest
 
 from harnesses._teeth import verify
 from harnesses.core.db_test_harness import (
     MIGRATIONS,
     TEETH,
+    ConcurrentWriteTester,
     ConnectionPool,
     ConnectionPoolExhausted,
     ConnectionPoolMonitor,
-    ConcurrentWriteTester,
     DbTestRunner,
     MigrationChecker,
     MockDbHandler,
@@ -34,7 +32,6 @@ from harnesses.core.db_test_harness import (
     oracle_run,
     prove,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper
@@ -178,12 +175,11 @@ class TestTransactions(unittest.TestCase):
     def test_transaction_context_manager_rolls_back_on_exception(self):
         db = fresh_db()
         try:
-            with self.assertRaises(ValueError):
-                with db.transaction():
-                    db._conn.execute(
-                        "INSERT INTO users (name, email) VALUES ('RbTxn', 'rbtxn@test.com')"
-                    )
-                    raise ValueError("forced error")
+            with self.assertRaises(ValueError), db.transaction():
+                db._conn.execute(
+                    "INSERT INTO users (name, email) VALUES ('RbTxn', 'rbtxn@test.com')"
+                )
+                raise ValueError("forced error")
             count = db.row_count("users")
             self.assertEqual(count, 0)
         finally:

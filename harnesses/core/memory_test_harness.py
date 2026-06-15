@@ -16,25 +16,24 @@ Zero external dependencies — pure Python stdlib.
 from __future__ import annotations
 
 import gc
-import math
 import os
+
 try:
     import resource  # Unix-only; absent on Windows
 except ImportError:
     resource = None
+import json
 import socket
 import sys
 import threading
 import time
 import tracemalloc
 import weakref
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Event, Thread
-from typing import Any, Callable, Dict, List, Optional, Tuple
-import json
-import io
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Platform helpers
@@ -44,7 +43,7 @@ def _rss_bytes() -> int:
     """Return current RSS in bytes.  Uses /proc/self/status on Linux,
     resource module as fallback."""
     try:
-        with open("/proc/self/status", "r") as f:
+        with open("/proc/self/status") as f:
             for line in f:
                 if line.startswith("VmRSS:"):
                     # format: "VmRSS:    12345 kB"
@@ -224,11 +223,11 @@ class ObjectTracker:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._created: Dict[str, int] = {}
-        self._destroyed: Dict[str, int] = {}
-        self._weak_refs: List[weakref.ref] = []
+        self._created: dict[str, int] = {}
+        self._destroyed: dict[str, int] = {}
+        self._weak_refs: list[weakref.ref] = []
 
-    def record_create(self, kind: str, obj: Optional[Any] = None) -> None:
+    def record_create(self, kind: str, obj: Any | None = None) -> None:
         with self._lock:
             self._created[kind] = self._created.get(kind, 0) + 1
             if obj is not None:
@@ -251,10 +250,10 @@ class ObjectTracker:
         """Return count of tracked objects still alive."""
         return sum(1 for r in self._weak_refs if r() is not None)
 
-    def report(self) -> Dict[str, Dict[str, int]]:
+    def report(self) -> dict[str, dict[str, int]]:
         """Return per-kind {created, destroyed, leaked} counts."""
         with self._lock:
-            result: Dict[str, Dict[str, int]] = {}
+            result: dict[str, dict[str, int]] = {}
             all_kinds = set(self._created) | set(self._destroyed)
             for kind in sorted(all_kinds):
                 created = self._created.get(kind, 0)
@@ -275,7 +274,7 @@ class ObjectTracker:
 # Linear regression helpers
 # ---------------------------------------------------------------------------
 
-def _linear_regression(xs: List[float], ys: List[float]) -> Tuple[float, float, float]:
+def _linear_regression(xs: list[float], ys: list[float]) -> tuple[float, float, float]:
     """Return (slope, intercept, r_squared) for a simple linear regression."""
     n = len(xs)
     if n < 2:
@@ -295,7 +294,7 @@ def _linear_regression(xs: List[float], ys: List[float]) -> Tuple[float, float, 
     return slope, intercept, r_sq
 
 
-def analyze_snapshots(snapshots: List[MemorySnapshot],
+def analyze_snapshots(snapshots: list[MemorySnapshot],
                       threshold_bytes_per_iter: float = 1024.0) -> LeakReport:
     """Perform linear regression on RSS values across snapshots.
 
@@ -349,7 +348,7 @@ class SoakTestRunner:
 
     def __init__(self, threshold_bytes_per_iter: float = 1024.0) -> None:
         self.threshold_bytes_per_iter = threshold_bytes_per_iter
-        self.snapshots: List[MemorySnapshot] = []
+        self.snapshots: list[MemorySnapshot] = []
 
     def _take_snapshot(self) -> MemorySnapshot:
         gc.collect()
@@ -366,7 +365,7 @@ class SoakTestRunner:
         fn: Callable[[], Any],
         iterations: int = 100,
         snapshot_interval: int = 10,
-    ) -> "SoakResult":
+    ) -> SoakResult:
         """Execute *fn* for *iterations* calls, snapshotting every *snapshot_interval* calls.
 
         Returns a SoakResult with snapshots and leak analysis.
@@ -408,7 +407,7 @@ class SoakTestRunner:
 @dataclass
 class SoakResult:
     """Aggregate result from a SoakTestRunner.run() call."""
-    snapshots: List[MemorySnapshot]
+    snapshots: list[MemorySnapshot]
     leak_report: LeakReport
     gc_report: GCPressureReport
     iterations: int
@@ -458,7 +457,7 @@ class MockMemoryHandler(BaseHTTPRequestHandler):
     """
 
     # Class-level store so tests can inject state
-    allocated_buffers: List[bytes] = []
+    allocated_buffers: list[bytes] = []
     _lock: threading.Lock = threading.Lock()
 
     def log_message(self, fmt: str, *args: Any) -> None:
@@ -532,11 +531,11 @@ class MockServer:
     def __init__(self, host: str = "127.0.0.1", port: int = 0) -> None:
         self.host = host
         self.port = port if port != 0 else find_free_port()
-        self._server: Optional[HTTPServer] = None
-        self._thread: Optional[Thread] = None
+        self._server: HTTPServer | None = None
+        self._thread: Thread | None = None
         self._ready = Event()
 
-    def start(self) -> "MockServer":
+    def start(self) -> MockServer:
         """Start the HTTP server in a background daemon thread."""
         self._server = HTTPServer((self.host, self.port), MockMemoryHandler)
         self._server.timeout = 0.1
@@ -565,7 +564,7 @@ class MockServer:
     def base_url(self) -> str:
         return f"http://{self.host}:{self.port}"
 
-    def __enter__(self) -> "MockServer":
+    def __enter__(self) -> MockServer:
         return self.start()
 
     def __exit__(self, *_: Any) -> None:
@@ -581,13 +580,13 @@ class TraceMallocMonitor:
 
     def __init__(self, nframe: int = 5) -> None:
         self.nframe = nframe
-        self._snapshot1: Optional[tracemalloc.Snapshot] = None
+        self._snapshot1: tracemalloc.Snapshot | None = None
 
     def start(self) -> None:
         tracemalloc.start(self.nframe)
         self._snapshot1 = tracemalloc.take_snapshot()
 
-    def stop_and_diff(self, top_n: int = 10) -> List[tracemalloc.StatisticDiff]:
+    def stop_and_diff(self, top_n: int = 10) -> list[tracemalloc.StatisticDiff]:
         """Return top N allocation diffs since start()."""
         if self._snapshot1 is None:
             return []
@@ -674,14 +673,14 @@ class MemoryAssertions:
 # HTTP client helper (stdlib only)
 # ---------------------------------------------------------------------------
 
-def http_get(url: str, timeout: float = 5.0) -> Tuple[int, bytes]:
+def http_get(url: str, timeout: float = 5.0) -> tuple[int, bytes]:
     """Minimal HTTP/1.1 GET using stdlib.  Returns (status, body).
 
     Unlike urlopen, does NOT raise on 4xx/5xx — those are returned as
     (status, body) tuples so callers can assert on the status code.
     """
+    from urllib.error import HTTPError, URLError
     from urllib.request import urlopen
-    from urllib.error import URLError, HTTPError
     try:
         with urlopen(url, timeout=timeout) as resp:
             return resp.status, resp.read()

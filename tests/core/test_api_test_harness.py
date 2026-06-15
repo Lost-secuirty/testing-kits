@@ -2,7 +2,6 @@
 
 import json
 import threading
-import time
 import unittest
 import urllib.error
 import urllib.request
@@ -13,8 +12,6 @@ from harnesses.core.api_test_harness import (
     ApiTestCase,
     ApiTestResult,
     ApiTestSuite,
-    ApiSuiteReport,
-    MockApiHandler,
     RequestBuilder,
     ResponseValidator,
     SchemaChecker,
@@ -24,7 +21,6 @@ from harnesses.core.api_test_harness import (
     reset_server_state,
     start_mock_server,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

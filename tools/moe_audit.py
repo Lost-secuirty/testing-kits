@@ -123,7 +123,7 @@ def lens_teeth(changed_h: list[str]) -> Lens:
     pend = [k for k in changed_keys if rows.get(k, {}).get("scope") == "pending"]
     newly_req = [k for k in changed_keys if rows.get(k, {}).get("scope") == "required"]
     if newly_req:
-        lens.add(f"changed harnesses now **required** (teeth wired): "
+        lens.add("changed harnesses now **required** (teeth wired): "
                  + ", ".join(f"`{k}`" for k in sorted(set(newly_req))))
     if pend:
         lens.add("changed harnesses still **pending** (touched but no verified TEETH — "

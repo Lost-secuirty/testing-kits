@@ -28,20 +28,21 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import inspect
 import math
 import sys
-from dataclasses import dataclass, field, is_dataclass, fields as dc_fields
-from enum import Enum
-from typing import Any, Callable, Optional, get_args, get_origin, get_type_hints
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+from collections.abc import Callable
+from dataclasses import dataclass, is_dataclass
+from dataclasses import fields as dc_fields
+from enum import Enum
 from pathlib import Path as _Path
+from typing import Any
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Config and data
@@ -320,11 +321,11 @@ def _bad_sum(values: list) -> float:
 
 @dataclass
 class _Address:
-    street: Optional[str] = None
-    zip: Optional[str] = None
+    street: str | None = None
+    zip: str | None = None
 
 
-def _good_address_dataclass(addr: "_Address") -> str:
+def _good_address_dataclass(addr: _Address) -> str:
     if addr is None or not addr.zip:
         raise ValueError("addr.zip is required")
     return addr.zip

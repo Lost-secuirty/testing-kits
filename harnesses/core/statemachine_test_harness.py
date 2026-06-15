@@ -9,22 +9,21 @@ from __future__ import annotations
 
 import argparse
 import json
-import socket
 import sys
-import threading
-import time
-from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, Callable, Dict, FrozenSet, List, Optional, Set, Tuple
-from urllib.parse import urlparse, parse_qs
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+import threading
+from collections.abc import Callable
+from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path as _Path
+from typing import Any
+from urllib.parse import parse_qs, urlparse
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Core FSM types
@@ -36,8 +35,8 @@ class Transition:
     from_state: str
     to_state: str
     trigger: str                              # event name
-    guard: Optional[Callable[[], bool]] = None   # optional predicate
-    action: Optional[Callable[[], None]] = None  # optional side-effect
+    guard: Callable[[], bool] | None = None   # optional predicate
+    action: Callable[[], None] | None = None  # optional side-effect
 
     def is_enabled(self) -> bool:
         """Return True if the guard allows this transition (or there is no guard)."""
@@ -64,17 +63,17 @@ class StateMachine:
 
     def __init__(
         self,
-        states: Set[str],
+        states: set[str],
         initial_state: str,
-        transitions: List[Transition],
-        terminal_states: Optional[Set[str]] = None,
+        transitions: list[Transition],
+        terminal_states: set[str] | None = None,
     ):
         if initial_state not in states:
             raise ValueError(f"initial_state '{initial_state}' not in states")
         self._states = set(states)
         self._initial_state = initial_state
         self._transitions = list(transitions)
-        self._terminal_states: Set[str] = set(terminal_states) if terminal_states else set()
+        self._terminal_states: set[str] = set(terminal_states) if terminal_states else set()
         self._state = initial_state
 
     # ------------------------------------------------------------------
@@ -90,15 +89,15 @@ class StateMachine:
         return self._state in self._terminal_states
 
     @property
-    def states(self) -> Set[str]:
+    def states(self) -> set[str]:
         return set(self._states)
 
     @property
-    def transitions(self) -> List[Transition]:
+    def transitions(self) -> list[Transition]:
         return list(self._transitions)
 
     @property
-    def terminal_states(self) -> Set[str]:
+    def terminal_states(self) -> set[str]:
         return set(self._terminal_states)
 
     @property
@@ -177,7 +176,7 @@ class TransitionTester:
     def __init__(self, machine: StateMachine):
         self._machine = machine
 
-    def run(self, steps: List[Tuple[str, str]]) -> List[Dict[str, Any]]:
+    def run(self, steps: list[tuple[str, str]]) -> list[dict[str, Any]]:
         """
         Execute each (event, expected_state) step.
 
@@ -186,7 +185,7 @@ class TransitionTester:
         """
         results = []
         for event, expected in steps:
-            result: Dict[str, Any] = {"event": event, "expected": expected}
+            result: dict[str, Any] = {"event": event, "expected": expected}
             try:
                 actual = self._machine.send(event)
                 result["actual"] = actual
@@ -206,7 +205,7 @@ class InvalidTransitionTester:
     def __init__(self, machine: StateMachine):
         self._machine = machine
 
-    def test(self, event: str) -> Dict[str, Any]:
+    def test(self, event: str) -> dict[str, Any]:
         """
         Attempt *event* from the current state.
 
@@ -237,11 +236,11 @@ class ReachabilityAnalyzer:
     def __init__(self, machine: StateMachine):
         self._machine = machine
 
-    def reachable_states(self) -> Set[str]:
+    def reachable_states(self) -> set[str]:
         """Return the set of states reachable from initial_state."""
-        visited: Set[str] = set()
+        visited: set[str] = set()
         queue = [self._machine.initial_state]
-        adj: Dict[str, Set[str]] = {}
+        adj: dict[str, set[str]] = {}
         for t in self._machine.transitions:
             adj.setdefault(t.from_state, set()).add(t.to_state)
 
@@ -255,7 +254,7 @@ class ReachabilityAnalyzer:
                     queue.append(neighbour)
         return visited
 
-    def orphaned_states(self) -> Set[str]:
+    def orphaned_states(self) -> set[str]:
         """Return states that are defined but cannot be reached from initial_state."""
         return self._machine.states - self.reachable_states()
 
@@ -268,12 +267,12 @@ class CycleDetector:
 
     def has_cycle(self) -> bool:
         """Return True if the state graph contains at least one cycle."""
-        adj: Dict[str, Set[str]] = {}
+        adj: dict[str, set[str]] = {}
         for t in self._machine.transitions:
             adj.setdefault(t.from_state, set()).add(t.to_state)
 
         WHITE, GRAY, BLACK = 0, 1, 2
-        color: Dict[str, int] = {s: WHITE for s in self._machine.states}
+        color: dict[str, int] = {s: WHITE for s in self._machine.states}
 
         def dfs(node: str) -> bool:
             color[node] = GRAY
@@ -291,18 +290,18 @@ class CycleDetector:
                     return True
         return False
 
-    def find_cycles(self) -> List[List[str]]:
+    def find_cycles(self) -> list[list[str]]:
         """Return a list of cycles (each cycle is a list of state names)."""
-        adj: Dict[str, List[str]] = {}
+        adj: dict[str, list[str]] = {}
         for t in self._machine.transitions:
             adj.setdefault(t.from_state, [])
             if t.to_state not in adj[t.from_state]:
                 adj[t.from_state].append(t.to_state)
 
-        cycles: List[List[str]] = []
-        visited: Set[str] = set()
-        path: List[str] = []
-        path_set: Set[str] = set()
+        cycles: list[list[str]] = []
+        visited: set[str] = set()
+        path: list[str] = []
+        path_set: set[str] = set()
 
         def dfs(node: str) -> None:
             visited.add(node)
@@ -329,22 +328,22 @@ class CoverageTracker:
 
     def __init__(self, machine: StateMachine):
         self._machine = machine
-        self._exercised: Set[Tuple[str, str, str]] = set()   # (from, to, trigger)
+        self._exercised: set[tuple[str, str, str]] = set()   # (from, to, trigger)
 
-    def _key(self, t: Transition) -> Tuple[str, str, str]:
+    def _key(self, t: Transition) -> tuple[str, str, str]:
         return (t.from_state, t.to_state, t.trigger)
 
     def record(self, from_state: str, to_state: str, trigger: str) -> None:
         """Record that a transition was exercised."""
         self._exercised.add((from_state, to_state, trigger))
 
-    def all_transition_keys(self) -> Set[Tuple[str, str, str]]:
+    def all_transition_keys(self) -> set[tuple[str, str, str]]:
         return {self._key(t) for t in self._machine.transitions}
 
-    def covered(self) -> Set[Tuple[str, str, str]]:
+    def covered(self) -> set[tuple[str, str, str]]:
         return set(self._exercised)
 
-    def uncovered(self) -> Set[Tuple[str, str, str]]:
+    def uncovered(self) -> set[tuple[str, str, str]]:
         return self.all_transition_keys() - self._exercised
 
     def coverage_ratio(self) -> float:
@@ -366,14 +365,14 @@ class DeterminismChecker:
     def __init__(self, machine: StateMachine):
         self._machine = machine
 
-    def check(self) -> Dict[Tuple[str, str], List[Transition]]:
+    def check(self) -> dict[tuple[str, str], list[Transition]]:
         """
         Return a mapping of (state, event) → [transitions] for any pair
         that has more than one transition defined (potential nondeterminism).
 
         An empty dict means the machine is deterministic.
         """
-        mapping: Dict[Tuple[str, str], List[Transition]] = {}
+        mapping: dict[tuple[str, str], list[Transition]] = {}
         for t in self._machine.transitions:
             key = (t.from_state, t.trigger)
             mapping.setdefault(key, []).append(t)
@@ -425,7 +424,7 @@ class MockStateMachineHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _machine_snapshot(self) -> Dict[str, Any]:
+    def _machine_snapshot(self) -> dict[str, Any]:
         return {
             "state": self.machine.state,
             "is_terminal": self.machine.is_terminal,
@@ -529,11 +528,11 @@ class MockStateMachineServer:
         …
     """
 
-    def __init__(self, machine: Optional[StateMachine] = None, port: int = 0):
+    def __init__(self, machine: StateMachine | None = None, port: int = 0):
         self._machine = machine or make_order_machine()
         self._port = port  # 0 = OS-assigned dynamic port
-        self._server: Optional[HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: HTTPServer | None = None
+        self._thread: threading.Thread | None = None
         self._coverage_tracker = CoverageTracker(self._machine)
 
     @property
@@ -554,7 +553,7 @@ class MockStateMachineServer:
     def url(self) -> str:
         return f"http://127.0.0.1:{self.port}"
 
-    def start(self) -> "MockStateMachineServer":
+    def start(self) -> MockStateMachineServer:
         # Inject shared references into the handler class
         MockStateMachineHandler.machine = self._machine
         MockStateMachineHandler.coverage_tracker = self._coverage_tracker
@@ -574,7 +573,7 @@ class MockStateMachineServer:
             self._thread.join(timeout=5)
             self._thread = None
 
-    def __enter__(self) -> "MockStateMachineServer":
+    def __enter__(self) -> MockStateMachineServer:
         return self.start()
 
     def __exit__(self, *_: Any) -> None:
@@ -604,11 +603,11 @@ class MockStateMachineServer:
 class FsmSpec:
     """An immutable finite-state-machine specification for the checker corpus."""
     name: str
-    states: FrozenSet[str]
+    states: frozenset[str]
     initial: str
     # (from_state, to_state, trigger) triples — guards/actions are irrelevant to
     # the structural checks (reachability/determinism), so the corpus omits them.
-    edges: Tuple[Tuple[str, str, str], ...]
+    edges: tuple[tuple[str, str, str], ...]
 
     def to_machine(self) -> StateMachine:
         return StateMachine(
@@ -621,8 +620,8 @@ class FsmSpec:
 @dataclass(frozen=True)
 class CheckerVerdict:
     """The structural verdict a checker returns for one spec."""
-    reachable: FrozenSet[str]
-    orphaned: FrozenSet[str]
+    reachable: frozenset[str]
+    orphaned: frozenset[str]
     deterministic: bool
 
 
@@ -664,7 +663,7 @@ def check_fsm_nondeterminism_blind(spec: FsmSpec) -> CheckerVerdict:
     machine = spec.to_machine()
     reach = ReachabilityAnalyzer(machine)
     # Wrong grouping key: (from, to) — never collides for distinct targets.
-    seen: Dict[Tuple[str, str], int] = {}
+    seen: dict[tuple[str, str], int] = {}
     for t in machine.transitions:
         key = (t.from_state, t.to_state)
         seen[key] = seen.get(key, 0) + 1
@@ -705,12 +704,12 @@ def check_fsm_undirected_reachability(spec: FsmSpec) -> CheckerVerdict:
     """
     machine = spec.to_machine()
     det = DeterminismChecker(machine)
-    adj: Dict[str, Set[str]] = {}
+    adj: dict[str, set[str]] = {}
     for t in machine.transitions:
         adj.setdefault(t.from_state, set()).add(t.to_state)
         adj.setdefault(t.to_state, set()).add(t.from_state)  # BUG: reverse edge
 
-    visited: Set[str] = set()
+    visited: set[str] = set()
     queue = [machine.initial_state]
     while queue:
         node = queue.pop()
@@ -730,7 +729,7 @@ def check_fsm_undirected_reachability(spec: FsmSpec) -> CheckerVerdict:
 
 # --- Frozen corpus: spec -> expected verdict (literal, hand-computed) -------
 
-CHECKER_CORPUS: Tuple[CheckerCase, ...] = (
+CHECKER_CORPUS: tuple[CheckerCase, ...] = (
     # Linear A->B->C: fully reachable, deterministic.
     CheckerCase(
         FsmSpec(
@@ -880,7 +879,7 @@ TEETH = Teeth(
 )
 
 
-def list_scenarios() -> List[str]:
+def list_scenarios() -> list[str]:
     """Names of the frozen checker-corpus specs (the teeth scenarios)."""
     return [c.spec.name for c in CHECKER_CORPUS]
 
@@ -919,7 +918,7 @@ def _run_self_test(as_json: bool = False) -> int:
 # CLI — default action is the self-test (repo convention).
 # ---------------------------------------------------------------------------
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="State machine correctness controls")
     parser.add_argument("--self-test", action="store_true", help="run built-in checks")
     parser.add_argument("--json", action="store_true",

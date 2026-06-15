@@ -26,11 +26,12 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
 
 # Make the shared teeth contract importable whether run as a module or a script.
 from pathlib import Path as _Path
+
 if str(_Path(__file__).resolve().parents[2]) not in sys.path:
     sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
@@ -180,7 +181,7 @@ MUTATED_DOM = apply_mutation(INITIAL_DOM)
 # ---------------------------------------------------------------------------
 
 
-def resolve(selector: Selector, dom: Dom) -> Optional[str]:
+def resolve(selector: Selector, dom: Dom) -> str | None:
     if selector.kind == "xpath":
         return _resolve_xpath(dom, selector.value)
     attr = {"role": "role", "label": "label", "testid": "testid"}[selector.kind]
@@ -190,7 +191,7 @@ def resolve(selector: Selector, dom: Dom) -> Optional[str]:
     return None
 
 
-def _resolve_xpath(dom: Dom, path: str) -> Optional[str]:
+def _resolve_xpath(dom: Dom, path: str) -> str | None:
     parts = [int(p) for p in path.strip("/").split("/") if p != ""]
     cur = dom.root
     for idx in parts:
@@ -299,11 +300,11 @@ def hydration_diff(a: Dom, b: Dom) -> int:
     return diff
 
 
-def oracle_selector(dom: Dom) -> Optional[str]:
+def oracle_selector(dom: Dom) -> str | None:
     return resolve(Selector("testid", "submit-btn"), dom)
 
 
-def brittle_xpath_selector(dom: Dom) -> Optional[str]:
+def brittle_xpath_selector(dom: Dom) -> str | None:
     """Buggy: absolute XPath valid only against the pre-render tree."""
     return resolve(Selector("xpath", SUBMIT_XPATH_INITIAL), dom)
 
@@ -346,7 +347,7 @@ def _check_unmocked(fetch_impl: Callable[[str, dict], MockResponse]) -> int:
         return 0
 
 
-def _check_selector(strategy: Callable[[Dom], Optional[str]]) -> int:
+def _check_selector(strategy: Callable[[Dom], str | None]) -> int:
     nid = strategy(MUTATED_DOM)
     node = MUTATED_DOM.nodes.get(nid) if nid else None
     return 0 if (node is not None and node.testid == "submit-btn") else 1

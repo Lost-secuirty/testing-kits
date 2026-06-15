@@ -27,8 +27,8 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
 
 _TOK = re.compile(r"[a-z0-9]+")
 
@@ -232,7 +232,7 @@ CitedFn = Callable[[RagCase, list[str]], tuple[str, ...]]
 def evaluate(cases: list[RagCase], corpus: list[Passage],
              config: RagConfig | None = None,
              retriever: Retriever = retrieve,
-             cited_fn: Optional[CitedFn] = None) -> RagReport:
+             cited_fn: CitedFn | None = None) -> RagReport:
     config = config or RagConfig()
     cmap = {p.doc_id: p for p in corpus}
     recalls, faiths, grounds = [], [], []

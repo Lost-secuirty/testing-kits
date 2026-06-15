@@ -4,36 +4,30 @@ Test suite for contract_test_harness.py
 interface compliance, invariant checking, and the mock HTTP server.
 """
 
-import inspect
 import json
 import time
 import unittest
-import urllib.request
-import urllib.error
-from urllib.request import urlopen, Request
+from urllib.request import Request, urlopen
 
 from harnesses._teeth import verify
 from harnesses.core.contract_test_harness import (
-    ViolationType,
-    ContractViolation,
-    Contract,
-    Condition,
-    ContractChecker,
-    InterfaceSpec,
-    InterfaceChecker,
-    InvariantChecker,
-    MockContractServer,
-    ScenarioResult,
-    MethodSpec,
-    InterfaceCheckResult,
-    InvariantResult,
-    contract,
     TEETH,
+    Condition,
+    Contract,
+    ContractChecker,
+    ContractViolation,
     FieldSpec,
+    InterfaceChecker,
+    InterfaceCheckResult,
+    InterfaceSpec,
+    InvariantChecker,
+    InvariantResult,
+    MockContractServer,
+    ViolationType,
     check_compatibility,
+    contract,
     prove,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper functions used across tests

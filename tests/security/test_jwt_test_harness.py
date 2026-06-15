@@ -3,14 +3,14 @@
 import unittest
 
 from harnesses.security.jwt_test_harness import (
-    b64url_encode,
     b64url_decode,
+    b64url_encode,
     encode,
-    verify,
     forge_alg_none,
     forge_alg_swap,
-    tamper_payload,
     run_all_scenarios,
+    tamper_payload,
+    verify,
 )
 
 NOW = 1_700_000_000

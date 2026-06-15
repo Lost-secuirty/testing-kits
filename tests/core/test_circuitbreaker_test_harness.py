@@ -4,8 +4,8 @@ import unittest
 
 from harnesses.core.circuitbreaker_test_harness import (
     CLOSED,
-    OPEN,
     HALF_OPEN,
+    OPEN,
     CircuitBreaker,
     CircuitBreakerOracle,
     CircuitOpenError,

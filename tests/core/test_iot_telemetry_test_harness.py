@@ -13,7 +13,6 @@ from harnesses.core.iot_telemetry_test_harness import (
     TEETH,
     IotConfig,
     IotReport,
-    Message,
     _run_self_test,
     ingest,
     list_scenarios,

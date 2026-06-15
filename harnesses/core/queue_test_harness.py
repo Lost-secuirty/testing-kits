@@ -25,13 +25,14 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass
-from enum import Enum
-from typing import Callable, Optional
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+from collections.abc import Callable
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path as _Path
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Teeth  # noqa: E402
@@ -120,7 +121,7 @@ class InMemoryBroker:
                 return False
         return True
 
-    def poll(self, consumer: str = "c") -> Optional[_Record]:
+    def poll(self, consumer: str = "c") -> _Record | None:
         if self.in_flight() >= self.config.max_in_flight:
             return None
         now = self.clock.now()
@@ -190,7 +191,7 @@ class InMemoryBroker:
 class NaiveBroker(InMemoryBroker):
     """Acks on delivery (poll). A crash before processing loses the message."""
 
-    def poll(self, consumer: str = "c") -> Optional[_Record]:
+    def poll(self, consumer: str = "c") -> _Record | None:
         rec = super().poll(consumer)
         if rec is not None:
             rec.done = True  # bug: considered handled the instant it's delivered

@@ -10,22 +10,23 @@ import html
 import re
 import socket
 import sys
+
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, Callable, Dict, List, Optional, Tuple
-
-# Make the shared teeth contract importable whether run as a module or a script.
-import sys as _sys
 from pathlib import Path as _Path
+from typing import Any
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # HTML parsing helpers (no external libs)
@@ -48,7 +49,7 @@ class SimpleHTMLParser:
         return html.unescape(no_tags)
 
     @staticmethod
-    def _get_attr(tag_str: str, attr: str) -> Optional[str]:
+    def _get_attr(tag_str: str, attr: str) -> str | None:
         """Extract the value of *attr* from a raw tag string."""
         pattern = r'(?i)' + re.escape(attr) + r'\s*=\s*(?:"([^"]*?)"|\'([^\']*?)\'|([^\s>]+))'
         m = re.search(pattern, tag_str)
@@ -60,12 +61,12 @@ class SimpleHTMLParser:
     # Element finders
     # ------------------------------------------------------------------
 
-    def find_all_tags(self, tag: str) -> List[str]:
+    def find_all_tags(self, tag: str) -> list[str]:
         """Return list of full opening-tag strings for *tag*."""
         pattern = r'(?i)<' + re.escape(tag) + r'(?:\s[^>]*)?\s*/?>'
         return re.findall(pattern, self.html)
 
-    def find_all_with_content(self, tag: str) -> List[Tuple[str, str]]:
+    def find_all_with_content(self, tag: str) -> list[tuple[str, str]]:
         """Return list of (opening_tag, inner_text) for paired tags."""
         pattern = r'(?is)<(' + re.escape(tag) + r')(\s[^>]*)?>(.+?)</\1>'
         results = []
@@ -89,7 +90,7 @@ class SimpleHTMLParser:
     # Link extraction
     # ------------------------------------------------------------------
 
-    def get_links(self, base_url: str = '') -> List[Dict[str, str]]:
+    def get_links(self, base_url: str = '') -> list[dict[str, str]]:
         """Return list of dicts with 'href' and 'text' for all <a> tags."""
         links = []
         for open_tag, text in self.find_all_with_content('a'):
@@ -110,7 +111,7 @@ class SimpleHTMLParser:
     # Image extraction
     # ------------------------------------------------------------------
 
-    def get_images(self, base_url: str = '') -> List[Dict[str, str]]:
+    def get_images(self, base_url: str = '') -> list[dict[str, str]]:
         """Return list of dicts with 'src' and 'alt' for all <img> tags."""
         images = []
         for tag_str in self.find_all_tags('img'):
@@ -125,7 +126,7 @@ class SimpleHTMLParser:
     # Table extraction
     # ------------------------------------------------------------------
 
-    def get_tables(self) -> List[List[List[str]]]:
+    def get_tables(self) -> list[list[list[str]]]:
         """Return list of tables; each table is a list of rows; each row is a list of cell strings."""
         tables = []
         table_pattern = r'(?is)<table[^>]*>(.*?)</table>'
@@ -157,7 +158,7 @@ class SelectorValidator:
         self.html = html_text
         self._parser = SimpleHTMLParser(html_text)
 
-    def select(self, selector: str) -> List[Tuple[str, str]]:
+    def select(self, selector: str) -> list[tuple[str, str]]:
         """
         Evaluate *selector* and return list of (open_tag, inner_text).
         Supported forms:
@@ -196,7 +197,7 @@ class SelectorValidator:
 
         raise ValueError(f"Unsupported selector: {selector!r}")
 
-    def _by_tag_and_attr(self, tag: str, attr: str, value: str) -> List[Tuple[str, str]]:
+    def _by_tag_and_attr(self, tag: str, attr: str, value: str) -> list[tuple[str, str]]:
         results = []
         for open_tag, text in self._parser.find_all_with_content(tag):
             v = SimpleHTMLParser._get_attr(open_tag, attr)
@@ -204,7 +205,7 @@ class SelectorValidator:
                 results.append((open_tag, text))
         return results
 
-    def _by_tag_and_class(self, tag: str, cls: str) -> List[Tuple[str, str]]:
+    def _by_tag_and_class(self, tag: str, cls: str) -> list[tuple[str, str]]:
         results = []
         for open_tag, text in self._parser.find_all_with_content(tag):
             classes = (SimpleHTMLParser._get_attr(open_tag, 'class') or '').split()
@@ -212,7 +213,7 @@ class SelectorValidator:
                 results.append((open_tag, text))
         return results
 
-    def _by_attr_any_tag(self, attr: str, value: str) -> List[Tuple[str, str]]:
+    def _by_attr_any_tag(self, attr: str, value: str) -> list[tuple[str, str]]:
         # Try common block/inline tags
         results = []
         seen = set()
@@ -227,7 +228,7 @@ class SelectorValidator:
                     seen.add(key)
         return results
 
-    def _by_class_any_tag(self, cls: str) -> List[Tuple[str, str]]:
+    def _by_class_any_tag(self, cls: str) -> list[tuple[str, str]]:
         results = []
         seen = set()
         for tag in ['div', 'span', 'p', 'section', 'article', 'header', 'footer',
@@ -270,7 +271,7 @@ class PaginationTester:
         self.max_pages = max_pages
         self.delay = delay
 
-    def _find_next_link(self, html_text: str, current_url: str) -> Optional[str]:
+    def _find_next_link(self, html_text: str, current_url: str) -> str | None:
         parser = SimpleHTMLParser(html_text)
         links = parser.get_links(base_url=current_url)
         for link in links:
@@ -290,7 +291,7 @@ class PaginationTester:
             return urllib.parse.urljoin(current_url, href)
         return None
 
-    def crawl(self, start_url: str) -> List[Dict]:
+    def crawl(self, start_url: str) -> list[dict]:
         """Follow pagination starting at *start_url*. Return list of page dicts."""
         pages = []
         url = start_url
@@ -326,8 +327,8 @@ class RateLimitChecker:
     def __init__(self, min_delay: float = 1.0):
         self.min_delay = min_delay
         self._lock = threading.Lock()
-        self._last_request_time: Optional[float] = None
-        self.request_times: List[float] = []
+        self._last_request_time: float | None = None
+        self.request_times: list[float] = []
 
     def wait_if_needed(self):
         """Block until the minimum delay has elapsed since the last request."""
@@ -362,7 +363,7 @@ class RateLimitChecker:
             return 0.0
         return (len(times) - 1) / total_time
 
-    def fetch(self, url: str) -> Dict:
+    def fetch(self, url: str) -> dict:
         """Rate-limited HTTP GET."""
         self.wait_if_needed()
         return _http_get(url)
@@ -377,13 +378,13 @@ class RobotsTxtParser:
 
     def __init__(self, content: str, user_agent: str = '*'):
         self.user_agent = user_agent
-        self._rules: Dict[str, List[Tuple[str, str]]] = {}  # agent -> [(allow/disallow, path)]
-        self._crawl_delay: Dict[str, Optional[float]] = {}
-        self._sitemaps: List[str] = []
+        self._rules: dict[str, list[tuple[str, str]]] = {}  # agent -> [(allow/disallow, path)]
+        self._crawl_delay: dict[str, float | None] = {}
+        self._sitemaps: list[str] = []
         self._parse(content)
 
     def _parse(self, content: str):
-        current_agents: List[str] = []
+        current_agents: list[str] = []
         for raw_line in content.splitlines():
             line = raw_line.split('#', 1)[0].strip()
             if not line:
@@ -411,7 +412,7 @@ class RobotsTxtParser:
             elif key == 'sitemap':
                 self._sitemaps.append(value)
 
-    def _get_rules(self) -> List[Tuple[str, str]]:
+    def _get_rules(self) -> list[tuple[str, str]]:
         """Get rules for our user-agent (fall back to '*')."""
         ua = self.user_agent.lower()
         if ua in self._rules:
@@ -440,14 +441,14 @@ class RobotsTxtParser:
                     best_allowed = True
         return best_allowed
 
-    def get_crawl_delay(self) -> Optional[float]:
+    def get_crawl_delay(self) -> float | None:
         ua = self.user_agent.lower()
         if ua in self._crawl_delay:
             return self._crawl_delay[ua]
         return self._crawl_delay.get('*')
 
     @property
-    def sitemaps(self) -> List[str]:
+    def sitemaps(self) -> list[str]:
         return self._sitemaps
 
 
@@ -456,7 +457,7 @@ class RobotsTxtParser:
 # ---------------------------------------------------------------------------
 
 def _http_get(url: str, timeout: int = 10, follow_redirects: bool = True,
-              headers: Optional[Dict[str, str]] = None) -> Dict:
+              headers: dict[str, str] | None = None) -> dict:
     """
     Perform an HTTP GET.  Returns dict with keys:
       status, body, headers, final_url, redirect_chain
@@ -506,7 +507,7 @@ def _http_get(url: str, timeout: int = 10, follow_redirects: bool = True,
     raise RuntimeError(f"Too many redirects for {url}")
 
 
-def _http_get_no_follow(url: str, timeout: int = 10) -> Dict:
+def _http_get_no_follow(url: str, timeout: int = 10) -> dict:
     """HTTP GET without following redirects, returns raw status + Location."""
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -544,10 +545,10 @@ class ErrorRecoveryFetcher:
     def __init__(self, max_retries: int = 3, retry_delay: float = 0.1):
         self.max_retries = max_retries
         self.retry_delay = retry_delay
-        self.skipped_urls: List[str] = []
-        self.retry_counts: Dict[str, int] = {}
+        self.skipped_urls: list[str] = []
+        self.retry_counts: dict[str, int] = {}
 
-    def fetch(self, url: str) -> Optional[Dict]:
+    def fetch(self, url: str) -> dict | None:
         attempts = 0
         while attempts <= self.max_retries:
             try:
@@ -688,7 +689,7 @@ class MockScraperHandler(BaseHTTPRequestHandler):
     """HTTP request handler for the scraper test mock server."""
 
     # Track 5xx hit counts per path for error-recovery tests
-    _error_hit_counts: Dict[str, int] = {}
+    _error_hit_counts: dict[str, int] = {}
     _error_hit_lock = threading.Lock()
 
     def log_message(self, format, *args):
@@ -770,7 +771,7 @@ class MockScraperHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def _send_error_response(self, code: int, message: str):
-        data = f'<html><body><h1>{code} {message}</h1></body></html>'.encode('utf-8')
+        data = f'<html><body><h1>{code} {message}</h1></body></html>'.encode()
         self.send_response(code)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.send_header('Content-Length', str(len(data)))
@@ -778,7 +779,7 @@ class MockScraperHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
-def start_mock_server(port: int = 18910) -> Tuple[HTTPServer, str]:
+def start_mock_server(port: int = 18910) -> tuple[HTTPServer, str]:
     """
     Start the mock HTTP server on *port* in a daemon thread.
     Returns (server, base_url).
@@ -808,7 +809,7 @@ class ScraperTestRunner:
 
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip('/')
-        self.results: List[Dict] = []
+        self.results: list[dict] = []
 
     def _record(self, name: str, passed: bool, detail: str = ''):
         self.results.append({'name': name, 'passed': passed, 'detail': detail})
@@ -1113,7 +1114,7 @@ _FROZEN_ROBOTS_TXT = (
 # Cyclic page graph: each key maps to its next-page key (or None to terminate).
 # pa -> pb -> pc -> pb forms a back-edge cycle; a correct crawl visits each page
 # at most once and stops, a naive crawler revisits pb/pc forever.
-_FROZEN_PAGE_GRAPH: Dict[str, Optional[str]] = {
+_FROZEN_PAGE_GRAPH: dict[str, str | None] = {
     "pa": "pb",
     "pb": "pc",
     "pc": "pb",  # back-edge -> cycle
@@ -1133,7 +1134,7 @@ class ScrapeTask:
 # Hand-computed expectations. The extract rows preserve the header AND both data
 # rows in document order; the robots verdicts follow the frozen policy; the crawl
 # visits exactly the reachable distinct pages once, in order, then stops.
-TEETH_CORPUS: Tuple[ScrapeTask, ...] = (
+TEETH_CORPUS: tuple[ScrapeTask, ...] = (
     # --- field extraction: the full table, header first, in document order -----
     ScrapeTask("extract_full_table", "extract", None,
                [["Name", "Price", "Stock"],
@@ -1158,16 +1159,16 @@ TEETH_CORPUS: Tuple[ScrapeTask, ...] = (
 
 # --- ORACLE: reuse the harness's own correct extraction / robots / crawl logic ---
 
-def _bounded_crawl(start: str, next_of: Callable[[str], Optional[str]]) -> List[str]:
+def _bounded_crawl(start: str, next_of: Callable[[str], str | None]) -> list[str]:
     """Follow next-page links from ``start`` with a visited-set guard.
 
     Mirrors PaginationTester.crawl's cycle protection: a page already visited
     terminates the walk, so a cyclic graph cannot loop forever. The _CRAWL_BOUND
     is a belt-and-braces cap so a buggy ``next_of`` still cannot hang prove().
     """
-    visited: List[str] = []
+    visited: list[str] = []
     seen = set()
-    key: Optional[str] = start
+    key: str | None = start
     while key is not None and len(visited) < _CRAWL_BOUND:
         if key in seen:
             break
@@ -1230,8 +1231,8 @@ def unbounded_crawl_scrape(task: ScrapeTask) -> Any:
     list overruns the expected 3 pages) rather than by hanging.
     """
     if task.kind == "paginate":
-        visited: List[str] = []
-        key: Optional[str] = task.arg
+        visited: list[str] = []
+        key: str | None = task.arg
         # BUG: no `seen` set — a back-edge in the graph never terminates.
         while key is not None and len(visited) < _CRAWL_BOUND:
             visited.append(key)
@@ -1279,7 +1280,7 @@ TEETH = Teeth(
 )
 
 
-def list_scenarios() -> List[str]:
+def list_scenarios() -> list[str]:
     """Names of the frozen corpus tasks (the teeth scenarios)."""
     return [t.name for t in TEETH_CORPUS]
 
@@ -1329,7 +1330,7 @@ def _network_self_test(port: int = 18910) -> bool:
 # CLI — default action is the (network-free) teeth self-test (repo convention).
 # ---------------------------------------------------------------------------
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description='Web Scraper Test Harness')
     parser.add_argument('--self-test', action='store_true',
                         help='run built-in (network-free) teeth checks')

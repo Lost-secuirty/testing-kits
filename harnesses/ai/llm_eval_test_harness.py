@@ -16,8 +16,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Utilities
@@ -68,8 +67,8 @@ class MockLLM:
     def __init__(
         self,
         temperature: float = 0.0,
-        dangerous_patterns: Optional[List[str]] = None,
-        scripted_responses: Optional[Dict[str, str]] = None,
+        dangerous_patterns: list[str] | None = None,
+        scripted_responses: dict[str, str] | None = None,
         max_tokens: int = 256,
     ):
         self.temperature = temperature
@@ -77,7 +76,7 @@ class MockLLM:
             re.compile(p, re.IGNORECASE | re.DOTALL)
             for p in (dangerous_patterns if dangerous_patterns is not None else _DEFAULT_DANGEROUS_PATTERNS)
         ]
-        self.scripted_responses: Dict[str, str] = scripted_responses or {}
+        self.scripted_responses: dict[str, str] = scripted_responses or {}
         self.max_tokens = max_tokens
         self._call_count = 0
 
@@ -221,7 +220,7 @@ class JudgeStubGrader:
 
     def __init__(
         self,
-        required_phrases: List[str],
+        required_phrases: list[str],
         case_sensitive: bool = False,
         require_all: bool = True,
     ):
@@ -279,7 +278,7 @@ class ConsistencyChecker:
         self.n_runs = n_runs
         self.pass_rate_threshold = pass_rate_threshold
 
-    def check(self, prompt: str, expected: str) -> Tuple[bool, float, List[GradeResult]]:
+    def check(self, prompt: str, expected: str) -> tuple[bool, float, list[GradeResult]]:
         results = []
         for _ in range(self.n_runs):
             output = self.llm.complete(prompt)
@@ -328,11 +327,11 @@ class InjectionTester:
     contain the injection payload keyword.
     """
 
-    def __init__(self, llm: MockLLM, prompts: Optional[List[str]] = None):
+    def __init__(self, llm: MockLLM, prompts: list[str] | None = None):
         self.llm = llm
         self.prompts = prompts if prompts is not None else INJECTION_PROMPTS
 
-    def run(self) -> Tuple[bool, float, List[Dict[str, Any]]]:
+    def run(self) -> tuple[bool, float, list[dict[str, Any]]]:
         details = []
         for prompt in self.prompts:
             response = self.llm.complete(prompt)
@@ -359,11 +358,11 @@ class RefusalChecker:
     Verifies that dangerous prompts (violence, self-harm, illegal content) are refused.
     """
 
-    def __init__(self, llm: MockLLM, prompts: Optional[List[str]] = None):
+    def __init__(self, llm: MockLLM, prompts: list[str] | None = None):
         self.llm = llm
         self.prompts = prompts if prompts is not None else DANGEROUS_PROMPTS
 
-    def run(self) -> Tuple[bool, float, List[Dict[str, Any]]]:
+    def run(self) -> tuple[bool, float, list[dict[str, Any]]]:
         details = []
         for prompt in self.prompts:
             response = self.llm.complete(prompt)
@@ -390,7 +389,7 @@ class TestCase:
     prompt: str
     grader: Any
     expected: str = ""
-    tags: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -406,14 +405,14 @@ class CaseResult:
 @dataclass
 class EvalReport:
     suite_name: str
-    case_results: List[CaseResult]
+    case_results: list[CaseResult]
     pass_rate: float
     total: int
     passed: int
     failed: int
     summary: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "suite_name": self.suite_name,
             "pass_rate": self.pass_rate,
@@ -443,7 +442,7 @@ class EvalSuite:
     def __init__(self, name: str, llm: MockLLM):
         self.name = name
         self.llm = llm
-        self.test_cases: List[TestCase] = []
+        self.test_cases: list[TestCase] = []
 
     def add_case(self, case: TestCase) -> "EvalSuite":
         self.test_cases.append(case)
@@ -455,7 +454,7 @@ class EvalSuite:
         prompt: str,
         grader,
         expected: str = "",
-        tags: Optional[List[str]] = None,
+        tags: list[str] | None = None,
     ) -> "EvalSuite":
         self.test_cases.append(
             TestCase(name=name, prompt=prompt, grader=grader, expected=expected, tags=tags or [])
@@ -626,11 +625,11 @@ class MockLLMServer:
     Use as a context manager or call start()/stop() manually.
     """
 
-    def __init__(self, port: int = 0, llm: Optional[MockLLM] = None):
+    def __init__(self, port: int = 0, llm: MockLLM | None = None):
         self.llm = llm or MockLLM()
         self._port = port
-        self._server: Optional[http.server.HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: http.server.HTTPServer | None = None
+        self._thread: threading.Thread | None = None
 
     @property
     def port(self) -> int:

@@ -13,7 +13,6 @@ Tests for the Property-Based Test Harness (Harness 11 of 36).
 
 import json
 import random
-import time
 import unittest
 import urllib.error
 import urllib.request
@@ -21,7 +20,6 @@ from typing import Any
 
 from harnesses.core.property_test_harness import (
     CounterExample,
-    MockPropertyHandler,
     MockPropertyServer,
     Property,
     PropertyReport,
@@ -43,7 +41,6 @@ from harnesses.core.property_test_harness import (
     is_simpler,
     run_suite_and_report,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper

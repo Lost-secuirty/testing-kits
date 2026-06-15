@@ -3,7 +3,6 @@
 import unittest
 
 from harnesses.core.feature_flag_test_harness import (
-    ComboResult,
     Flag,
     FlagMatrixConfig,
     FlagMatrixRunner,

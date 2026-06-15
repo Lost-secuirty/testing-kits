@@ -14,11 +14,8 @@ Unit tests for chaos_test_harness.py  (Harness 7 of 36)
 
 import json
 import time
-import threading
 import unittest
-import urllib.error
-import urllib.request
-from unittest.mock import MagicMock, patch, call as mcall
+from unittest.mock import MagicMock
 
 from harnesses.core.chaos_test_harness import (
     CircuitBreaker,
@@ -35,7 +32,6 @@ from harnesses.core.chaos_test_harness import (
     retry_with_backoff,
     start_mock_server,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared server fixture

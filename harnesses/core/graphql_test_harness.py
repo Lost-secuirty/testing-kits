@@ -26,12 +26,13 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from dataclasses import dataclass, field
-from typing import Callable, Optional
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path as _Path
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Teeth  # noqa: E402
@@ -84,7 +85,7 @@ class Schema:
     fields: dict[str, list[FieldDef]]
     query_type: str = "Query"
 
-    def lookup(self, type_name: str, field_name: str) -> Optional[FieldDef]:
+    def lookup(self, type_name: str, field_name: str) -> FieldDef | None:
         for fd in self.fields.get(type_name, []):
             if fd.field_name == field_name:
                 return fd
@@ -119,10 +120,10 @@ RESOLVERS_FULL = SCHEMA.all_pairs()
 @dataclass
 class Selection:
     name: str
-    alias: Optional[str]
+    alias: str | None
     is_fragment_spread: bool
-    fragment_name: Optional[str]
-    children: list["Selection"] = field(default_factory=list)
+    fragment_name: str | None
+    children: list[Selection] = field(default_factory=list)
 
 
 _TOKEN = re.compile(r"\.\.\.|[{}():]|[A-Za-z_][A-Za-z0-9_]*")
@@ -134,7 +135,7 @@ class _Parser:
         self.t = tokens
         self.i = 0
 
-    def peek(self) -> Optional[str]:
+    def peek(self) -> str | None:
         return self.t[self.i] if self.i < len(self.t) else None
 
     def next(self) -> str:
@@ -228,7 +229,7 @@ def query_depth(node: Selection) -> int:
     return best
 
 
-def _sel_cost(sel: Selection, schema: Schema, type_name: str, config: "GraphQLConfig") -> int:
+def _sel_cost(sel: Selection, schema: Schema, type_name: str, config: GraphQLConfig) -> int:
     fd = schema.lookup(type_name, sel.name)
     child_type = fd.field_type if fd else type_name
     real_children = [c for c in sel.children if not c.is_fragment_spread]
@@ -241,13 +242,13 @@ def _sel_cost(sel: Selection, schema: Schema, type_name: str, config: "GraphQLCo
     return sub
 
 
-def query_cost(node: Selection, schema: Schema, config: "GraphQLConfig") -> int:
+def query_cost(node: Selection, schema: Schema, config: GraphQLConfig) -> int:
     return sum(_sel_cost(c, schema, schema.query_type, config)
                for c in node.children if not c.is_fragment_spread)
 
 
 def detect_n_plus_one(node: Selection, schema: Schema,
-                      type_name: Optional[str] = None,
+                      type_name: str | None = None,
                       batched: frozenset[tuple[str, str]] = frozenset()
                       ) -> list[tuple[str, str]]:
     type_name = type_name or schema.query_type
@@ -290,7 +291,7 @@ def fragment_cycles(fragments: dict[str, FragmentDef]) -> int:
 
 
 def validate_fields(node: Selection, schema: Schema,
-                    type_name: Optional[str] = None) -> None:
+                    type_name: str | None = None) -> None:
     type_name = type_name or schema.query_type
     for sel in node.children:
         if sel.is_fragment_spread:
@@ -310,7 +311,7 @@ def validate_fragments(node: Selection, fragments: dict[str, FragmentDef]) -> No
             validate_fragments(sel, fragments)
 
 
-def enforce_limits(node: Selection, schema: Schema, config: "GraphQLConfig") -> int:
+def enforce_limits(node: Selection, schema: Schema, config: GraphQLConfig) -> int:
     depth = query_depth(node)
     if depth > config.max_depth:
         raise QueryTooDeep(f"depth {depth} > {config.max_depth}")
@@ -320,7 +321,7 @@ def enforce_limits(node: Selection, schema: Schema, config: "GraphQLConfig") -> 
     return cost
 
 
-def naive_execute(node: Selection, schema: Schema, config: "GraphQLConfig") -> int:
+def naive_execute(node: Selection, schema: Schema, config: GraphQLConfig) -> int:
     """Broken executor: runs without any depth/cost guard."""
     return query_cost(node, schema, config)
 

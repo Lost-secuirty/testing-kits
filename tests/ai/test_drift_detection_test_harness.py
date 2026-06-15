@@ -6,6 +6,9 @@ import unittest
 from harnesses._teeth import verify
 from harnesses.ai.drift_detection_test_harness import (
     CENTROID_ALERT,
+    COS_BASE_DOCS,
+    COS_CUR_DOCS,
+    COS_QUERY,
     COSINE_DROP_ALERT,
     DRIFT_BASE_DIST,
     DRIFT_CUR_DIST,
@@ -21,6 +24,8 @@ from harnesses.ai.drift_detection_test_harness import (
     PSI_ALERT,
     PSI_ZB_BASE,
     PSI_ZB_CUR,
+    RANK_BASE,
+    RANK_REVERSED,
     SCENARIOS,
     SPEARMAN_ALERT,
     STABLE_CASE,
@@ -33,9 +38,6 @@ from harnesses.ai.drift_detection_test_harness import (
     compute_drift,
     cosine_mean_drop,
     cosine_unnormalized_drop,
-    COS_BASE_DOCS,
-    COS_CUR_DOCS,
-    COS_QUERY,
     hellinger,
     js_div,
     kl_div,
@@ -45,8 +47,6 @@ from harnesses.ai.drift_detection_test_harness import (
     psi,
     psi_zero_floor,
     rank_overlap_only,
-    RANK_BASE,
-    RANK_REVERSED,
     spearman,
 )
 

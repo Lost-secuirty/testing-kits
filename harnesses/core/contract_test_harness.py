@@ -14,17 +14,18 @@ import json
 import logging
 import socket
 import sys
-import threading
-import time
-import traceback
-from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
-from urllib.parse import urlparse, parse_qs
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+import threading
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path as _Path
+from typing import Any
+from urllib.parse import urlparse
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
@@ -53,7 +54,7 @@ class ContractViolation(Exception):
     violation_type: ViolationType
     message: str
     function_name: str
-    args: Tuple = field(default_factory=tuple)
+    args: tuple = field(default_factory=tuple)
     result: Any = None
 
     def __str__(self) -> str:
@@ -94,16 +95,16 @@ class Contract:
     def __init__(
         self,
         func: Callable,
-        preconditions: Optional[List[Condition]] = None,
-        postconditions: Optional[List[Condition]] = None,
-        type_spec: Optional[Dict[str, Type]] = None,
-        return_type: Optional[Type] = None,
+        preconditions: list[Condition] | None = None,
+        postconditions: list[Condition] | None = None,
+        type_spec: dict[str, type] | None = None,
+        return_type: type | None = None,
     ):
         self.func = func
-        self.preconditions: List[Condition] = preconditions or []
-        self.postconditions: List[Condition] = postconditions or []
-        self.type_spec: Dict[str, Type] = type_spec or {}
-        self.return_type: Optional[Type] = return_type
+        self.preconditions: list[Condition] = preconditions or []
+        self.postconditions: list[Condition] = postconditions or []
+        self.type_spec: dict[str, type] = type_spec or {}
+        self.return_type: type | None = return_type
         # Expose callable name for diagnostics
         self.__name__ = getattr(func, "__name__", repr(func))
         self.__doc__ = getattr(func, "__doc__", "")
@@ -112,7 +113,7 @@ class Contract:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _bind_args(self, args: Tuple, kwargs: Dict) -> Dict[str, Any]:
+    def _bind_args(self, args: tuple, kwargs: dict) -> dict[str, Any]:
         """Return a mapping of parameter name → value using inspect."""
         try:
             sig = inspect.signature(self.func)
@@ -122,7 +123,7 @@ class Contract:
         except TypeError:
             return {}
 
-    def _check_types(self, bound: Dict[str, Any], raw_args: Tuple) -> None:
+    def _check_types(self, bound: dict[str, Any], raw_args: tuple) -> None:
         for param_name, expected_type in self.type_spec.items():
             if param_name in bound:
                 value = bound[param_name]
@@ -138,7 +139,7 @@ class Contract:
                         result=None,
                     )
 
-    def _check_return_type(self, result: Any, raw_args: Tuple) -> None:
+    def _check_return_type(self, result: Any, raw_args: tuple) -> None:
         if self.return_type is not None and not isinstance(result, self.return_type):
             raise ContractViolation(
                 violation_type=ViolationType.TYPE,
@@ -151,7 +152,7 @@ class Contract:
                 result=result,
             )
 
-    def _check_preconditions(self, bound: Dict[str, Any], raw_args: Tuple) -> None:
+    def _check_preconditions(self, bound: dict[str, Any], raw_args: tuple) -> None:
         for cond in self.preconditions:
             try:
                 ok = cond.check(bound)
@@ -172,7 +173,7 @@ class Contract:
                     result=None,
                 )
 
-    def _check_postconditions(self, bound: Dict[str, Any], result: Any, raw_args: Tuple) -> None:
+    def _check_postconditions(self, bound: dict[str, Any], result: Any, raw_args: tuple) -> None:
         for cond in self.postconditions:
             try:
                 ok = cond.check(bound, result)
@@ -232,11 +233,11 @@ class Contract:
 
 @dataclass
 class ScenarioResult:
-    scenario_args: Tuple
-    scenario_kwargs: Dict
+    scenario_args: tuple
+    scenario_kwargs: dict
     passed: bool
-    violation: Optional[ContractViolation] = None
-    exception: Optional[Exception] = None
+    violation: ContractViolation | None = None
+    exception: Exception | None = None
     result: Any = None
 
 
@@ -248,14 +249,14 @@ class ContractChecker:
 
     def __init__(self, contract: Contract):
         self.contract = contract
-        self.results: List[ScenarioResult] = []
+        self.results: list[ScenarioResult] = []
 
     def check(
         self,
-        scenarios: List[Tuple],
+        scenarios: list[tuple],
         *,
-        expect_violation: Optional[ViolationType] = None,
-    ) -> List[ScenarioResult]:
+        expect_violation: ViolationType | None = None,
+    ) -> list[ScenarioResult]:
         """
         Run each scenario through the contract.
 
@@ -304,7 +305,7 @@ class ContractChecker:
     def all_passed(self) -> bool:
         return all(r.passed for r in self.results)
 
-    def failures(self) -> List[ScenarioResult]:
+    def failures(self) -> list[ScenarioResult]:
         return [r for r in self.results if not r.passed]
 
     def summary(self) -> str:
@@ -320,8 +321,8 @@ class ContractChecker:
 @dataclass
 class MethodSpec:
     name: str
-    args: List[str] = field(default_factory=list)          # positional param names (excluding self)
-    return_type: Optional[Type] = None
+    args: list[str] = field(default_factory=list)          # positional param names (excluding self)
+    return_type: type | None = None
     required: bool = True
 
 
@@ -332,13 +333,13 @@ class InterfaceSpec:
 
     def __init__(self, name: str):
         self.name = name
-        self.methods: Dict[str, MethodSpec] = {}
+        self.methods: dict[str, MethodSpec] = {}
 
     def add_method(
         self,
         method_name: str,
-        args: Optional[List[str]] = None,
-        return_type: Optional[Type] = None,
+        args: list[str] | None = None,
+        return_type: type | None = None,
         required: bool = True,
     ) -> "InterfaceSpec":
         self.methods[method_name] = MethodSpec(
@@ -361,7 +362,7 @@ class InterfaceSpec:
 class InterfaceCheckResult:
     method_name: str
     compliant: bool
-    violation_type: Optional[ViolationType] = None
+    violation_type: ViolationType | None = None
     message: str = ""
 
 
@@ -373,9 +374,9 @@ class InterfaceChecker:
 
     def __init__(self, spec: InterfaceSpec):
         self.spec = spec
-        self.results: List[InterfaceCheckResult] = []
+        self.results: list[InterfaceCheckResult] = []
 
-    def check(self, obj: Any) -> List[InterfaceCheckResult]:
+    def check(self, obj: Any) -> list[InterfaceCheckResult]:
         self.results = []
 
         for method_name, method_spec in self.spec.methods.items():
@@ -466,7 +467,7 @@ class InterfaceChecker:
     def all_compliant(self) -> bool:
         return all(r.compliant for r in self.results)
 
-    def violations(self) -> List[InterfaceCheckResult]:
+    def violations(self) -> list[InterfaceCheckResult]:
         return [r for r in self.results if not r.compliant]
 
     def summary(self) -> str:
@@ -496,9 +497,9 @@ class InvariantChecker:
     in a sequence.
     """
 
-    def __init__(self, invariants: Optional[List[Condition]] = None):
-        self.invariants: List[Condition] = invariants or []
-        self.results: List[InvariantResult] = []
+    def __init__(self, invariants: list[Condition] | None = None):
+        self.invariants: list[Condition] = invariants or []
+        self.results: list[InvariantResult] = []
 
     def add_invariant(self, check: Callable, description: str) -> "InvariantChecker":
         self.invariants.append(Condition(check=check, description=description))
@@ -507,8 +508,8 @@ class InvariantChecker:
     def check_sequence(
         self,
         obj: Any,
-        operations: List[Tuple[str, Callable]],
-    ) -> List[InvariantResult]:
+        operations: list[tuple[str, Callable]],
+    ) -> list[InvariantResult]:
         """
         Apply each operation to obj and verify all invariants afterwards.
 
@@ -561,7 +562,7 @@ class InvariantChecker:
     def all_hold(self) -> bool:
         return all(r.holds for r in self.results)
 
-    def violations(self) -> List[InvariantResult]:
+    def violations(self) -> list[InvariantResult]:
         return [r for r in self.results if not r.holds]
 
     def summary(self) -> str:
@@ -574,7 +575,7 @@ class InvariantChecker:
 # MockContractHandler – HTTP server
 # ---------------------------------------------------------------------------
 
-_SERVER_REGISTRY: Dict[str, "MockContractServer"] = {}
+_SERVER_REGISTRY: dict[str, "MockContractServer"] = {}
 
 
 class MockContractHandler(BaseHTTPRequestHandler):
@@ -657,7 +658,7 @@ class MockContractHandler(BaseHTTPRequestHandler):
         violation = body.get("violation")
 
         server_obj: MockContractServer = self.server  # type: ignore[assignment]
-        record: Dict[str, Any] = {
+        record: dict[str, Any] = {
             "function": function_name,
             "args": args,
             "timestamp": time.time(),
@@ -680,7 +681,7 @@ class MockContractHandler(BaseHTTPRequestHandler):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _read_body(self) -> Optional[Dict]:
+    def _read_body(self) -> dict | None:
         try:
             length = int(self.headers.get("Content-Length", 0))
             raw = self.rfile.read(length)
@@ -704,9 +705,9 @@ class MockContractServer(HTTPServer):
     def __init__(self, host: str = "127.0.0.1", port: int = 0):
         # port=0 → OS assigns a free port
         super().__init__((host, port), MockContractHandler)
-        self.results: List[Dict] = []
-        self.violations: List[Dict] = []
-        self._thread: Optional[threading.Thread] = None
+        self.results: list[dict] = []
+        self.violations: list[dict] = []
+        self._thread: threading.Thread | None = None
 
     @property
     def base_url(self) -> str:
@@ -731,10 +732,10 @@ class MockContractServer(HTTPServer):
 # ---------------------------------------------------------------------------
 
 def contract(
-    preconditions: Optional[List[Tuple[Callable, str]]] = None,
-    postconditions: Optional[List[Tuple[Callable, str]]] = None,
-    type_spec: Optional[Dict[str, Type]] = None,
-    return_type: Optional[Type] = None,
+    preconditions: list[tuple[Callable, str]] | None = None,
+    postconditions: list[tuple[Callable, str]] | None = None,
+    type_spec: dict[str, type] | None = None,
+    return_type: type | None = None,
 ) -> Callable:
     """
     Decorator factory that wraps a function in a Contract.
@@ -847,11 +848,11 @@ class FieldSpec:
     """One field in a contract schema."""
     type: str
     required: bool = True
-    enum: Optional[Tuple[Any, ...]] = None  # allowed literal values, if constrained
+    enum: tuple[Any, ...] | None = None  # allowed literal values, if constrained
 
 
 # A contract schema maps field name -> FieldSpec.
-ContractSchema = Dict[str, FieldSpec]
+ContractSchema = dict[str, FieldSpec]
 
 
 def check_compatibility(old: ContractSchema, new: ContractSchema) -> bool:
@@ -986,7 +987,7 @@ class CompatCase:
     note: str = ""
 
 
-COMPAT_CASES: Tuple[CompatCase, ...] = (
+COMPAT_CASES: tuple[CompatCase, ...] = (
     # --- compatible changes the oracle must NOT flag ----------------------
     CompatCase(
         "identical_schema",
@@ -1097,7 +1098,7 @@ TEETH = Teeth(
 )
 
 
-def list_scenarios() -> List[str]:
+def list_scenarios() -> list[str]:
     """Names of the frozen compatibility corpus cases (the teeth scenarios)."""
     return [c.name for c in COMPAT_CASES]
 
@@ -1203,7 +1204,7 @@ def _mock_server_smoke() -> bool:
 # CLI — default action is the self-test (repo convention).
 # ---------------------------------------------------------------------------
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Contract / interface controls")
     parser.add_argument("--self-test", action="store_true", help="run built-in checks")
     parser.add_argument("--json", action="store_true",

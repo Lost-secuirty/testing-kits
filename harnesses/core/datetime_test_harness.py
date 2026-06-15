@@ -4,14 +4,13 @@ Pure stdlib, zero external dependencies.
 Mock HTTP server on dynamic port (default 19060).
 """
 
+import calendar
 import datetime
-from datetime import timezone, timedelta
-import time
-import threading
 import http.server
 import json
-import calendar
-import sys
+import threading
+import time
+from datetime import timedelta, timezone
 
 # Try to import zoneinfo (Python 3.9+)
 try:

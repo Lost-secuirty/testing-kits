@@ -5,16 +5,12 @@ Tests for regression_snapshot_test_harness.py
 
 import hashlib
 import json
-import os
-import tempfile
-import time
 import unittest
 
 from harnesses.core.regression_snapshot_test_harness import (
     CompareMode,
     ComparisonResult,
     MockRegressionServer,
-    RegressionResult,
     RegressionRunner,
     RegressionTest,
     Snapshot,
@@ -25,7 +21,6 @@ from harnesses.core.regression_snapshot_test_harness import (
     make_store,
     make_test,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper

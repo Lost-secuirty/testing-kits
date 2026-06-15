@@ -31,9 +31,9 @@ import argparse
 import ast
 import sys
 import textwrap
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Coverage probe
@@ -56,7 +56,7 @@ class CoverageProbe:
         self.taken.add(frame.f_lineno)
         return self._trace
 
-    def __enter__(self) -> "CoverageProbe":
+    def __enter__(self) -> CoverageProbe:
         self._prev_trace = sys.gettrace()
         sys.settrace(self._trace)
         return self
@@ -143,7 +143,6 @@ TARGET_SOURCE = textwrap.dedent("""
 def _load_target_module() -> tuple[Any, str]:
     import importlib.util
     import tempfile
-    import os
 
     tmp = tempfile.NamedTemporaryFile(
         mode="w", suffix=".py", delete=False, encoding="utf-8"

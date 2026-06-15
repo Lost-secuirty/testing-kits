@@ -14,11 +14,12 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Dict
 
 # Make the shared teeth contract importable whether run as a module or a script.
 from pathlib import Path as _Path
+
 if str(_Path(__file__).resolve().parents[2]) not in sys.path:
     sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
@@ -146,7 +147,7 @@ TEETH_TOLERANCE: float = 0.02
 # from TABLE.weight at runtime). These are the hand-computed fair odds for the
 # 70 / 25 / 5 drop table; they are the non-circular yardstick prove() judges
 # against. Corrupting any value here must make prove(oracle) flip to True.
-FAIR_PROPORTIONS: Dict[str, float] = {
+FAIR_PROPORTIONS: dict[str, float] = {
     "common": 0.70,
     "rare": 0.25,
     "jackpot": 0.05,
@@ -155,7 +156,7 @@ FAIR_PROPORTIONS: Dict[str, float] = {
 
 # --- ORACLE: reuse the harness's own correct LcgRng + pick_outcome ------------
 
-def oracle_sampler(seed: int, draws: int) -> Dict[str, int]:
+def oracle_sampler(seed: int, draws: int) -> dict[str, int]:
     """Correct sampler: replay the harness's own seeded ``LcgRng`` through its
     own ``pick_outcome`` and tally the realized counts. Reuses the harness code
     under test — it does not reinvent the distribution."""
@@ -168,7 +169,7 @@ def oracle_sampler(seed: int, draws: int) -> Dict[str, int]:
 
 # --- Planted buggy twins (each models a real drop-table defect) --------------
 
-def biased_sampler(seed: int, draws: int) -> Dict[str, int]:
+def biased_sampler(seed: int, draws: int) -> dict[str, int]:
     """BUG: a stuck/constant random source (``BiasedRng`` always yields 0.01),
     so every roll falls into the first bucket and rare/jackpot never pay out."""
     rng = BiasedRng()
@@ -192,7 +193,7 @@ def _pick_drops_jackpot(rng: object, table: tuple[WeightedOutcome, ...] = TABLE)
     return table[0].name  # BUG: jackpot folded back into the first outcome
 
 
-def cursor_drops_jackpot_sampler(seed: int, draws: int) -> Dict[str, int]:
+def cursor_drops_jackpot_sampler(seed: int, draws: int) -> dict[str, int]:
     """Sampler that uses the off-by-one picker above with the correct RNG."""
     rng = LcgRng(seed)
     counts = {item.name: 0 for item in TABLE}
@@ -215,7 +216,7 @@ class TruncatedRangeRng:
         return (self.state / 0x80000000) * 0.90
 
 
-def truncated_range_sampler(seed: int, draws: int) -> Dict[str, int]:
+def truncated_range_sampler(seed: int, draws: int) -> dict[str, int]:
     """Sampler driven by the range-truncated RNG above."""
     rng = TruncatedRangeRng(seed)
     counts = {item.name: 0 for item in TABLE}
@@ -224,7 +225,7 @@ def truncated_range_sampler(seed: int, draws: int) -> Dict[str, int]:
     return counts
 
 
-def prove(impl: Callable[[int, int], Dict[str, int]]) -> bool:
+def prove(impl: Callable[[int, int], dict[str, int]]) -> bool:
     """True iff ``impl``'s realized distribution diverges from the FROZEN
     advertised odds (i.e. the planted bias is caught).
 

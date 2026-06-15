@@ -14,18 +14,18 @@ import http.server
 import json
 import re
 import sys
-import threading
-import urllib.request
-from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Set, Tuple
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+import threading
+import urllib.request
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path as _Path
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -53,7 +53,7 @@ class FindingRecord:
     severity: str   # "error" | "warning" | "info"
     package: str
     message: str
-    details: Optional[str] = None
+    details: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -70,8 +70,8 @@ class PinningChecker:
     EXACT_PIN_RE = re.compile(r'^==\d+(\.\d+)*$')
     WILDCARD_VALUES = {'*', 'latest', 'any'}
 
-    def check(self, name: str, specifier: str) -> List[FindingRecord]:
-        findings: List[FindingRecord] = []
+    def check(self, name: str, specifier: str) -> list[FindingRecord]:
+        findings: list[FindingRecord] = []
         spec = specifier.strip()
 
         if not spec:
@@ -104,7 +104,7 @@ class PinningChecker:
         ))
         return findings
 
-    def check_all(self, deps: Dict[str, str]) -> List[FindingRecord]:
+    def check_all(self, deps: dict[str, str]) -> list[FindingRecord]:
         """Check a mapping of {name: specifier}."""
         findings = []
         for name, spec in deps.items():
@@ -122,7 +122,7 @@ class IntegrityChecker:
     Uses hmac.compare_digest for constant-time comparison.
     """
 
-    def verify(self, dep: LockedDep, artifact_bytes: bytes) -> Tuple[bool, str]:
+    def verify(self, dep: LockedDep, artifact_bytes: bytes) -> tuple[bool, str]:
         """
         Returns (ok, message).
         ok=True  → digest matches
@@ -139,8 +139,8 @@ class IntegrityChecker:
         return True, f"Integrity OK for '{dep.name}=={dep.version}'"
 
     def verify_all(
-        self, locked: List[LockedDep], artifacts: Dict[str, bytes]
-    ) -> List[FindingRecord]:
+        self, locked: list[LockedDep], artifacts: dict[str, bytes]
+    ) -> list[FindingRecord]:
         """
         artifacts: {dep.name: bytes}
         Returns findings for every mismatch.
@@ -179,9 +179,9 @@ class LockfileDriftChecker:
 
     def check(
         self,
-        manifest_packages: Set[str],
-        locked_packages: Set[str],
-    ) -> List[FindingRecord]:
+        manifest_packages: set[str],
+        locked_packages: set[str],
+    ) -> list[FindingRecord]:
         findings = []
 
         manifest_norm = {p.lower() for p in manifest_packages}
@@ -238,10 +238,10 @@ class NonexistentPackageChecker:
     - Levenshtein-1 near-matches → warning (possible typosquat).
     """
 
-    def __init__(self, known_packages: Set[str]):
-        self.known_packages: Set[str] = {p.lower() for p in known_packages}
+    def __init__(self, known_packages: set[str]):
+        self.known_packages: set[str] = {p.lower() for p in known_packages}
 
-    def check(self, name: str) -> List[FindingRecord]:
+    def check(self, name: str) -> list[FindingRecord]:
         findings = []
         lower = name.lower()
 
@@ -273,7 +273,7 @@ class NonexistentPackageChecker:
 
         return findings
 
-    def check_all(self, names: List[str]) -> List[FindingRecord]:
+    def check_all(self, names: list[str]) -> list[FindingRecord]:
         findings = []
         for name in names:
             findings.extend(self.check(name))
@@ -296,7 +296,7 @@ class ReproducibleBuildChecker:
         inputs: dict,
         *,
         attempts: int = 2,
-    ) -> Tuple[bool, List[FindingRecord]]:
+    ) -> tuple[bool, list[FindingRecord]]:
         """
         Returns (reproducible: bool, findings).
         """
@@ -353,17 +353,7 @@ def _version_satisfies(version: str, specifier: str) -> bool:
         for op in ('>=', '<=', '!=', '==', '>', '<'):
             if part.startswith(op):
                 bound = _version_tuple(part[len(op):])
-                if op == '>=' and not (ver >= bound):
-                    return False
-                elif op == '<=' and not (ver <= bound):
-                    return False
-                elif op == '!=' and not (ver != bound):
-                    return False
-                elif op == '==' and not (ver == bound):
-                    return False
-                elif op == '>' and not (ver > bound):
-                    return False
-                elif op == '<' and not (ver < bound):
+                if op == '>=' and not (ver >= bound) or op == '<=' and not (ver <= bound) or op == '!=' and not (ver != bound) or op == '==' and not (ver == bound) or op == '>' and not (ver > bound) or op == '<' and not (ver < bound):
                     return False
                 break
     return True
@@ -372,10 +362,10 @@ def _version_satisfies(version: str, specifier: str) -> bool:
 class KnownVulnChecker:
     """Matches locked dependencies against a mock advisory database."""
 
-    def __init__(self, advisories: List[Advisory]):
+    def __init__(self, advisories: list[Advisory]):
         self.advisories = advisories
 
-    def check(self, dep: LockedDep) -> List[FindingRecord]:
+    def check(self, dep: LockedDep) -> list[FindingRecord]:
         findings = []
         pkg_lower = dep.name.lower()
         for adv in self.advisories:
@@ -394,7 +384,7 @@ class KnownVulnChecker:
                 ))
         return findings
 
-    def check_all(self, deps: List[LockedDep]) -> List[FindingRecord]:
+    def check_all(self, deps: list[LockedDep]) -> list[FindingRecord]:
         findings = []
         for dep in deps:
             findings.extend(self.check(dep))
@@ -414,17 +404,17 @@ class TransitiveDepChecker:
 
     def resolve(
         self,
-        root_deps: List[str],
-        dep_graph: Dict[str, List[str]],
-        lockfile_names: Set[str],
-    ) -> Tuple[Set[str], List[FindingRecord]]:
+        root_deps: list[str],
+        dep_graph: dict[str, list[str]],
+        lockfile_names: set[str],
+    ) -> tuple[set[str], list[FindingRecord]]:
         """
         BFS from root_deps through dep_graph.
         Returns (all_transitive_names, findings).
         """
-        visited: Set[str] = set()
+        visited: set[str] = set()
         queue = list(root_deps)
-        findings: List[FindingRecord] = []
+        findings: list[FindingRecord] = []
 
         while queue:
             pkg = queue.pop(0)
@@ -473,18 +463,18 @@ class SupplyChainReport:
     """Aggregates findings from all checkers."""
 
     def __init__(self):
-        self.findings: List[FindingRecord] = []
+        self.findings: list[FindingRecord] = []
 
-    def add(self, findings: List[FindingRecord]) -> None:
+    def add(self, findings: list[FindingRecord]) -> None:
         self.findings.extend(findings)
 
-    def errors(self) -> List[FindingRecord]:
+    def errors(self) -> list[FindingRecord]:
         return [f for f in self.findings if f.severity == 'error']
 
-    def warnings(self) -> List[FindingRecord]:
+    def warnings(self) -> list[FindingRecord]:
         return [f for f in self.findings if f.severity == 'warning']
 
-    def infos(self) -> List[FindingRecord]:
+    def infos(self) -> list[FindingRecord]:
         return [f for f in self.findings if f.severity == 'info']
 
     def has_errors(self) -> bool:
@@ -496,10 +486,10 @@ class SupplyChainReport:
         i = len(self.infos())
         return f"SupplyChainReport: {e} error(s), {w} warning(s), {i} info(s)"
 
-    def findings_for(self, package: str) -> List[FindingRecord]:
+    def findings_for(self, package: str) -> list[FindingRecord]:
         return [f for f in self.findings if f.package.lower() == package.lower()]
 
-    def checkers_reported(self) -> Set[str]:
+    def checkers_reported(self) -> set[str]:
         return {f.checker for f in self.findings}
 
     def to_dict(self) -> dict:
@@ -514,7 +504,7 @@ class SupplyChainReport:
 # Mock Registry HTTP Server
 # ---------------------------------------------------------------------------
 
-_REGISTRY_DATA: Dict[str, dict] = {}
+_REGISTRY_DATA: dict[str, dict] = {}
 _REGISTRY_LOCK = threading.Lock()
 
 
@@ -601,10 +591,10 @@ class MockRegistry:
 
     DEFAULT_PORT = 19200
 
-    def __init__(self, port: int = 0, initial_packages: Optional[Dict] = None):
+    def __init__(self, port: int = 0, initial_packages: dict | None = None):
         self.port = port  # 0 = OS assigns
-        self._server: Optional[http.server.HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: http.server.HTTPServer | None = None
+        self._thread: threading.Thread | None = None
         self._initial_packages = initial_packages or {}
 
     def start(self) -> int:
@@ -638,7 +628,7 @@ class MockRegistry:
         with _REGISTRY_LOCK:
             _REGISTRY_DATA[name.lower()] = data
 
-    def lookup(self, name: str) -> Optional[dict]:
+    def lookup(self, name: str) -> dict | None:
         with _REGISTRY_LOCK:
             return _REGISTRY_DATA.get(name.lower())
 
@@ -663,7 +653,7 @@ class RegistryPackageChecker:
     def __init__(self, registry: MockRegistry):
         self.registry = registry
 
-    def check(self, name: str) -> Tuple[bool, Optional[dict]]:
+    def check(self, name: str) -> tuple[bool, dict | None]:
         """Returns (found, metadata_or_None)."""
         url = f"{self.registry.base_url()}/packages/{name.lower()}"
         try:
@@ -674,7 +664,7 @@ class RegistryPackageChecker:
             pass
         return False, None
 
-    def check_all(self, names: List[str]) -> List[FindingRecord]:
+    def check_all(self, names: list[str]) -> list[FindingRecord]:
         # Gather all known names for typosquat detection
         with _REGISTRY_LOCK:
             known = set(_REGISTRY_DATA.keys())
@@ -691,7 +681,7 @@ class RegistryPackageChecker:
 # Convenience builder
 # ---------------------------------------------------------------------------
 
-def build_default_advisories() -> List[Advisory]:
+def build_default_advisories() -> list[Advisory]:
     """Return a small set of mock advisories for testing."""
     return [
         Advisory(
@@ -718,7 +708,7 @@ def build_default_advisories() -> List[Advisory]:
     ]
 
 
-def build_default_registry_packages() -> Dict[str, dict]:
+def build_default_registry_packages() -> dict[str, dict]:
     """Return a small registry for testing."""
     return {
         'requests': {
@@ -787,7 +777,7 @@ REJECT = "reject"
 
 # The frozen allowlist of known-good package names the admission gate trusts.
 # 'flask' is present so 'flas'/'flassk' (Levenshtein-1) read as typosquats.
-ALLOWED_PACKAGES: Set[str] = {"requests", "flask", "django", "numpy", "pytest"}
+ALLOWED_PACKAGES: set[str] = {"requests", "flask", "django", "numpy", "pytest"}
 
 # A frozen artifact + its real sha256, shared by the corpus. Computing the hash
 # here (not hand-transcribing 64 hex chars) keeps the fixture honest; the
@@ -810,7 +800,7 @@ class SupplyCase:
 # Cases chosen so the correct oracle yields every expected verdict AND each
 # planted mutant gets at least one WRONG. Verdicts are literals, NOT read from
 # the oracle, which is what keeps prove() non-circular.
-SUPPLY_CORPUS: Tuple[SupplyCase, ...] = (
+SUPPLY_CORPUS: tuple[SupplyCase, ...] = (
     # --- the fully clean package: pinned, hash matches, name allowlisted -----
     SupplyCase("clean_pinned_match", "requests", "==2.28.0", _GOOD_SHA, _GOOD_ARTIFACT,
                note="exact pin + matching hash + known name -> accept"),
@@ -845,7 +835,7 @@ SUPPLY_CORPUS: Tuple[SupplyCase, ...] = (
 
 # Literal expected verdicts, computed by hand from the admission contract --
 # NEVER read back from the oracle object, which keeps prove() non-circular.
-EXPECTED_VERDICTS: Dict[str, str] = {
+EXPECTED_VERDICTS: dict[str, str] = {
     "clean_pinned_match": ACCEPT,
     "tampered_hash_mismatch": REJECT,
     "floating_version": REJECT,
@@ -994,7 +984,7 @@ TEETH = Teeth(
 )
 
 
-def list_scenarios() -> List[str]:
+def list_scenarios() -> list[str]:
     """Names of the frozen admission corpus cases (the teeth scenarios)."""
     return [c.name for c in SUPPLY_CORPUS]
 
@@ -1040,7 +1030,7 @@ def _run_self_test(as_json: bool = False) -> int:
 # CLI — default action is the self-test (repo convention).
 # ---------------------------------------------------------------------------
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Supply-Chain / Build Reproducibility Test Harness")
     parser.add_argument("--self-test", action="store_true", help="run built-in checks")
     parser.add_argument("--json", action="store_true",

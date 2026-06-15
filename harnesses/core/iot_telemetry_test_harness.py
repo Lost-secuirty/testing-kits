@@ -25,11 +25,12 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
 
 # Make the shared teeth contract importable whether run as a module or a script.
 from pathlib import Path as _Path
+
 if str(_Path(__file__).resolve().parents[2]) not in sys.path:
     sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
@@ -94,7 +95,7 @@ class DeviceSession:
     device_id: str
     persistent: bool
     queued: tuple[Message, ...] = ()
-    will: Optional[Message] = None
+    will: Message | None = None
 
 
 @dataclass
@@ -113,7 +114,7 @@ class IotReport:
     def strictly_ordered(self) -> bool:
         return self.out_of_order_pairs == 0
 
-    def meets_invariants(self, config: "IotConfig") -> bool:
+    def meets_invariants(self, config: IotConfig) -> bool:
         return (self.strictly_ordered
                 and self.duplicates_delivered == 0
                 and self.qos2_dupes == 0)
@@ -530,7 +531,7 @@ def _mids(recs: tuple[Record, ...]) -> set[str]:
     return {r.mid for r in recs}
 
 
-def _find(result: IngestResult, mid: str) -> Optional[Record]:
+def _find(result: IngestResult, mid: str) -> Record | None:
     for r in result.accepted:
         if r.mid == mid:
             return r

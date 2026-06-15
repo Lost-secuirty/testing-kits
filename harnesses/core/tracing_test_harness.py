@@ -25,12 +25,13 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from dataclasses import dataclass
-from typing import Callable, Optional
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path as _Path
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Teeth  # noqa: E402
@@ -62,7 +63,7 @@ class TraceParent:
         return f"{self.version}-{self.trace_id}-{self.span_id}-{self.flags}"
 
     @classmethod
-    def parse(cls, header: str) -> "TraceParent":
+    def parse(cls, header: str) -> TraceParent:
         parts = header.split("-")
         if len(parts) != 4:
             raise ValueError(f"traceparent must have 4 fields, got {len(parts)}")
@@ -88,13 +89,13 @@ class Propagator:
     """Correctly injects/extracts the parent context as a traceparent header."""
 
     @staticmethod
-    def inject(span: "Span") -> dict[str, str]:
+    def inject(span: Span) -> dict[str, str]:
         flags = "01" if span.sampled else "00"
         tp = TraceParent("00", span.trace_id, span.span_id, flags)
         return {"traceparent": tp.format()}
 
     @staticmethod
-    def extract(headers: dict[str, str]) -> Optional[TraceParent]:
+    def extract(headers: dict[str, str]) -> TraceParent | None:
         raw = headers.get("traceparent")
         return TraceParent.parse(raw) if raw else None
 
@@ -103,7 +104,7 @@ class BuggyPropagator(Propagator):
     """Drops the span_id, so downstream parent resolution breaks (orphans)."""
 
     @staticmethod
-    def inject(span: "Span") -> dict[str, str]:
+    def inject(span: Span) -> dict[str, str]:
         return {}  # forgets to propagate context entirely
 
 
@@ -116,7 +117,7 @@ class BuggyPropagator(Propagator):
 class Span:
     trace_id: str
     span_id: str
-    parent_id: Optional[str]
+    parent_id: str | None
     name: str
     start_ns: int
     end_ns: int
@@ -209,7 +210,7 @@ def _count_cycle_members(spans: list[Span], by_id: dict[str, Span]) -> int:
     members = 0
     for s in spans:
         seen: set[str] = set()
-        cur: Optional[Span] = s
+        cur: Span | None = s
         while cur is not None and cur.parent_id is not None:
             if cur.span_id in seen:
                 members += 1
@@ -228,7 +229,7 @@ _TID2 = "00f067aa0ba902b7aaaaaaaaaaaaaaaa"
 _ATTRS = (("service.name", "checkout"), ("http.method", "GET"))
 
 
-def _span(span_id: str, parent: Optional[str], start: int, end: int,
+def _span(span_id: str, parent: str | None, start: int, end: int,
           sampled: bool = True, trace: str = _TID,
           attrs: tuple[tuple[str, str], ...] = _ATTRS, name: str = "op") -> Span:
     return Span(trace, span_id, parent, name, start, end, sampled, attrs)
@@ -300,7 +301,7 @@ BUGGY_TRACES: dict[str, tuple[Callable[[], list[Span]], str]] = {
 _TEETH_CORPUS: tuple[Span, ...] = tuple(valid_trace())
 
 
-def _prove(inject: Callable[["Span"], dict[str, str]]) -> bool:
+def _prove(inject: Callable[[Span], dict[str, str]]) -> bool:
     """True iff `inject` fails to round-trip span context for any corpus span."""
     for span in _TEETH_CORPUS:
         try:

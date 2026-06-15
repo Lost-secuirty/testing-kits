@@ -6,7 +6,6 @@ Pure stdlib, zero external dependencies.
 import base64
 import json
 import threading
-import time
 import unittest
 
 from harnesses._teeth import verify
@@ -27,7 +26,6 @@ from harnesses.core.pagination_test_harness import (
     make_records,
     populated_store,
 )
-
 
 # ===========================================================================
 # BackingStore tests (20 tests)

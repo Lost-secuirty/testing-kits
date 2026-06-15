@@ -28,8 +28,8 @@ import math
 import re
 import sys
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
 
 RESERVED_PORT = 19320  # documented; harness runs in-process
 
@@ -250,7 +250,7 @@ def _mean(xs: list[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
 
 
-SearchFn = Callable[[str, list[Doc], Optional[SearchConfig]], list[str]]
+SearchFn = Callable[[str, list[Doc], SearchConfig | None], list[str]]
 
 
 def evaluate(query_sets: list[QuerySet], docs: list[Doc],

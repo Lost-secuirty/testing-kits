@@ -5,9 +5,9 @@ import unittest
 from harnesses._teeth import verify
 from harnesses.ai import agent_memory_context_test_harness as harness
 from harnesses.ai.agent_memory_context_test_harness import (
-    TEETH,
     EXPECTED_RETRIEVED,
     MEMORY_CORPUS,
+    TEETH,
     MemoryQuery,
     oracle_retrieve,
     prove,

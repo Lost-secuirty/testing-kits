@@ -5,7 +5,6 @@ import unittest
 from harnesses.core.grpc_contract_test_harness import (
     ASYMMETRIC_RPC,
     CLOSED_ENUM,
-    INBOUND_MD,
     OPEN_ENUM,
     RPCS,
     SCENARIOS,
