@@ -29,6 +29,12 @@ import sys
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+# Make the shared teeth contract importable whether run as a module or a script.
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
+
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
@@ -360,6 +366,227 @@ def audit(*, clicker=robust_clicker, settle_strategy=oracle_settle,
 
 
 # ---------------------------------------------------------------------------
+# TEETH: a FROZEN corpus of (E2E scenario config -> the exact failure-count
+# vector a correct auditor MUST report).
+#
+# A browser/E2E harness only has teeth if its AUDITOR catches each flake class
+# (stale handle, premature assertion, out-of-order events, silent-404, hydration
+# mismatch, brittle selector) — and, crucially, does NOT cry wolf on a clean run.
+# The thing under test is therefore an *auditor*: a callable
+#
+#   auditor(initial, mutated, *, clicker, settle_strategy, emitter, fetch_impl,
+#           renderer, selector) -> Tuple[int, int, int, int, int, int]
+#
+# returning the six failure counts in this fixed order:
+#   (stale_clicks, premature_assertions, event_order_violations,
+#    unmocked_silent, hydration_mismatches, selector_breaks).
+#
+# Each corpus case pins one configuration of the six pluggable strategies to the
+# EXACT failure vector a correct auditor must emit. Those vectors are FROZEN
+# LITERALS, hand-derived from the per-dimension contract below — they are NEVER
+# read back from the oracle at runtime, so prove() is non-circular:
+#
+#   * clean config (all-oracle strategies) -> (0,0,0,0,0,0): a correct auditor
+#     must report a green run and must NOT flag anything.
+#   * one buggy strategy injected -> exactly one nonzero slot. The slot's value
+#     is the count a faithful detector produces:
+#       - stale handle re-render          -> stale_clicks = 1
+#       - eager assert (no settle)         -> premature_assertions = 1
+#       - click-before-change emitter      -> event_order_violations = 1
+#       - silent 404 on unmocked URL       -> unmocked_silent = 1
+#       - hydration-blind client render    -> hydration_mismatches = 6
+#         (dropping the <h1> heading shifts the pre-order traversal: the heading
+#          tag/role pair disappears and every following pair shifts, yielding a
+#          structural diff of 6 against the server tree — a hand-counted literal)
+#       - brittle absolute XPath           -> selector_breaks = 1
+#
+# prove(auditor) is True iff the auditor's vector diverges from ANY frozen
+# literal — i.e. it misses a real flake (a slot that should be nonzero comes back
+# 0) or cries wolf on the clean run (a slot that should be 0 comes back nonzero).
+#
+# Pure + deterministic: the DOM is immutable data, re-render is a pure tree
+# mutation, async work is a manually-drained FIFO, "network" is a dict lookup.
+# No real browser, socket, event loop, thread, clock, RNG, or filesystem.
+#
+# The two planted mutants model genuine real-world E2E auditor defects (per the
+# campaign hint — a matcher that matches too broadly, and a flow that reports
+# pass despite a failed assertion):
+#
+#   * broad_selector_auditor — judges the stale/brittle click by node-id presence
+#     ALONE, ignoring whether the resolved node is the intended target. A stale
+#     handle re-resolves to a still-present (but detached/wrong) node id, so the
+#     over-broad matcher reports stale_clicks=0 and the brittle XPath that lands
+#     on a SHIFTED node also slips through -> the stale-handle and brittle-XPath
+#     flakes go undetected (matcher matches too broadly).
+#   * green_flow_auditor — runs the flow but reports premature_assertions=0 and
+#     unmocked_silent=0 unconditionally: it declares the run green even though an
+#     assertion fired before async work settled and an unmocked request returned
+#     a silent 404 (a flow that reports pass despite a failed assertion).
+# ---------------------------------------------------------------------------
+
+
+# The fixed slot order of the failure vector a correct auditor reports.
+_VEC_SLOTS = ("stale_clicks", "premature_assertions", "event_order_violations",
+              "unmocked_silent", "hydration_mismatches", "selector_breaks")
+
+
+@dataclass(frozen=True)
+class E2ECase:
+    """One frozen E2E config with a literal, hand-derived expected failure vector."""
+    name: str
+    # which single strategy slot to make buggy ("" => the all-clean config)
+    buggy_slot: str
+    expected_vec: tuple[int, int, int, int, int, int]
+    note: str = ""
+
+
+# A correct auditor must reproduce every literal vector below. Each vector is
+# hand-derived from the per-dimension contract (NOT read from the oracle): a
+# clean run is all-zeros; each injected flake lights up exactly one slot.
+E2E_CORPUS: tuple[E2ECase, ...] = (
+    E2ECase("clean_run", "", (0, 0, 0, 0, 0, 0),
+            "all-oracle strategies: a correct auditor must report a green run"),
+    E2ECase("stale_handle", "clicker", (1, 0, 0, 0, 0, 0),
+            "cached pre-render handle clicks a detached node -> stale_clicks=1"),
+    E2ECase("eager_assert", "settle_strategy", (0, 1, 0, 0, 0, 0),
+            "assertion runs before async work settles -> premature_assertions=1"),
+    E2ECase("reordered_events", "emitter", (0, 0, 1, 0, 0, 0),
+            "click fires before change -> one event_order_violations"),
+    E2ECase("silent_404", "fetch_impl", (0, 0, 0, 1, 0, 0),
+            "unmocked URL returns a silent 404 instead of raising -> unmocked_silent=1"),
+    E2ECase("hydration_mismatch", "renderer", (0, 0, 0, 0, 6, 0),
+            "client render drops the <h1> -> pre-order diff of 6 vs the server tree"),
+    E2ECase("brittle_xpath", "selector", (0, 0, 0, 0, 0, 1),
+            "absolute XPath valid only pre-render -> selector_breaks=1"),
+)
+
+
+# The buggy strategy injected for each non-clean corpus slot. Reuses the
+# harness's own planted buggy implementations.
+_BUGGY_STRATEGY = {
+    "clicker": stale_clicker,
+    "settle_strategy": no_settle,
+    "emitter": event_emitter_reordered,
+    "fetch_impl": silent_404_fetch,
+    "renderer": hydration_blind_render,
+    "selector": brittle_xpath_selector,
+}
+
+
+def _config_for(case: E2ECase) -> dict:
+    """Build the six-strategy kwargs for a corpus case (clean except its one
+    injected buggy slot, if any)."""
+    cfg: dict = {}
+    if case.buggy_slot:
+        cfg[case.buggy_slot] = _BUGGY_STRATEGY[case.buggy_slot]
+    return cfg
+
+
+# --- ORACLE: reuse the harness's own correct `audit` as the auditor ----------
+
+def oracle_auditor(**strategies) -> tuple[int, int, int, int, int, int]:
+    """Correct E2E auditor: delegates to the harness's own ``audit`` and returns
+    the six failure counts as a fixed-order vector. A clean config yields all
+    zeros; each injected flake lights up exactly its own slot."""
+    rep = audit(**strategies)
+    return tuple(getattr(rep, slot) for slot in _VEC_SLOTS)  # type: ignore[return-value]
+
+
+# --- Planted buggy twins (each models a real E2E auditor defect) -------------
+
+def broad_selector_auditor(**strategies) -> tuple[int, int, int, int, int, int]:
+    """BUG: judges click/selector success by node-id PRESENCE alone, ignoring
+    whether the resolved node is the intended target — a matcher that matches too
+    broadly.
+
+    A stale handle re-resolves to a node id that is gone from the new tree OR (for
+    the brittle XPath) to a *different* still-present node; checking only "is some
+    id present / did resolution return anything" passes both, so the stale-handle
+    and brittle-XPath flakes are reported as clean (stale_clicks / selector_breaks
+    stay 0 when they should fire).
+    """
+    clicker = strategies.get("clicker", robust_clicker)
+    selector = strategies.get("selector", oracle_selector)
+    # over-broad: a click "succeeds" if the cached id is non-None (matches too
+    # broadly — never checks the id is still in the live tree / is the target)
+    nid = resolve(SUBMIT_SELECTOR, INITIAL_DOM) if clicker is stale_clicker \
+        else resolve(SUBMIT_SELECTOR, MUTATED_DOM)
+    stale_clicks = 0 if nid is not None else 1
+    # over-broad: a selector "works" if it resolves to ANY node, not the target
+    sel_nid = selector(MUTATED_DOM)
+    selector_breaks = 0 if sel_nid is not None else 1
+    return (
+        stale_clicks,
+        _check_premature(strategies.get("settle_strategy", oracle_settle)),
+        count_event_order_violations(strategies.get("emitter", event_emitter_oracle)()),
+        _check_unmocked(strategies.get("fetch_impl", oracle_fetch)),
+        hydration_diff(INITIAL_DOM, strategies.get("renderer", faithful_render)(INITIAL_DOM)),
+        selector_breaks,
+    )
+
+
+def green_flow_auditor(**strategies) -> tuple[int, int, int, int, int, int]:
+    """BUG: reports the run green on the timing/network dimensions no matter what —
+    a flow that declares pass despite a failed assertion.
+
+    It hard-codes premature_assertions=0 and unmocked_silent=0, so an assertion
+    that fired before async work settled and an unmocked request that returned a
+    silent 404 both slip through as a passing run.
+    """
+    rep = audit(**strategies)
+    return (
+        rep.stale_clicks,
+        0,  # BUG: always reports the assertion settled, even when it did not
+        rep.event_order_violations,
+        0,  # BUG: always reports the network was clean, even on a silent 404
+        rep.hydration_mismatches,
+        rep.selector_breaks,
+    )
+
+
+def prove(impl: Callable[..., tuple]) -> bool:
+    """True iff ``impl`` (an E2E auditor) MIS-JUDGES any frozen corpus case (i.e.
+    the bug is caught): its failure vector diverges from the hand-derived literal
+    — it misses a real flake (a slot that must fire comes back 0) or cries wolf on
+    the clean run (a slot that must be 0 comes back nonzero), or returns the wrong
+    shape / raises.
+
+    Non-circular + deterministic: every expectation is a literal baked into
+    E2E_CORPUS, never read from the oracle; immutable data + dict lookups only,
+    no RNG/clock/network/socket/event-loop/filesystem. An impl that raises on a
+    corpus case counts as caught.
+    """
+    for case in E2E_CORPUS:
+        try:
+            vec = tuple(impl(**_config_for(case)))
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if vec != case.expected_vec:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_auditor,
+    mutants=(
+        Mutant("broad_selector_auditor", broad_selector_auditor,
+               "judges click/selector success by node-id presence alone (matches "
+               "too broadly) -> stale-handle and brittle-XPath flakes go undetected"),
+        Mutant("green_flow_auditor", green_flow_auditor,
+               "hard-codes premature_assertions=0 and unmocked_silent=0 -> reports "
+               "the run green despite an eager assertion and a silent 404"),
+    ),
+    corpus_size=len(E2E_CORPUS),
+    kind="oracle_swap",
+    notes="an E2E auditor must catch every flake class (stale handle, premature "
+          "assertion, out-of-order events, silent 404, hydration mismatch, brittle "
+          "selector) without crying wolf on a clean run; expected failure vectors "
+          "are frozen literals, never read from the oracle",
+)
+
+
+# ---------------------------------------------------------------------------
 # Scenarios
 # ---------------------------------------------------------------------------
 
@@ -550,23 +777,39 @@ def list_scenarios() -> list[str]:
     return list(SCENARIOS.keys())
 
 
-def _run_self_test(verbose: bool = False) -> int:
-    results = [fn() for fn in SCENARIOS.values()]
-    failures = [r for r in results if not r.passed]
-    for r in results:
-        if verbose or not r.passed:
-            mark = "OK  " if r.passed else "FAIL"
-            print(f"  {mark}  {r.name:40s} {r.detail}")
-    if failures:
-        print(f"FAILED: {len(failures)}/{len(results)}", file=sys.stderr)
-        return 1
-    print(f"OK: {len(results)} scenarios passed.")
-    return 0
+def _run_self_test(verbose: bool = False, as_json: bool = False) -> int:
+    """Run every scenario AND the teeth swap-check through a fail-loud ``Report``.
+
+    Keeps all of the harness's meaningful per-dimension scenario checks, then
+    asserts the teeth (prove(oracle) is False and every planted auditor mutant is
+    caught). Returns 0 green / 1 on any failure."""
+    report = Report("core/browser_e2e")
+
+    # 1. Every existing scenario becomes a recorded check (preserved verbatim).
+    for name, fn in SCENARIOS.items():
+        chk = fn()
+        report.record(chk.name, chk.passed, detail=chk.detail)
+        if verbose and not as_json and chk.passed:
+            print(f"  OK    {chk.name:40s} {chk.detail}")
+
+    # 2. The correct oracle auditor reproduces every frozen failure vector and
+    #    does not cry wolf on the clean run.
+    for case in E2E_CORPUS:
+        vec = oracle_auditor(**_config_for(case))
+        report.add(f"oracle_vec:{case.name}", case.expected_vec, tuple(vec),
+                   detail=case.note)
+
+    # 3. Teeth: prove(oracle) is False AND every planted auditor mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Deterministic browser/E2E surrogate harness")
     p.add_argument("--self-test", action="store_true")
+    p.add_argument("--json", action="store_true",
+                   help="emit machine-readable findings (implies --self-test)")
     p.add_argument("--list-scenarios", action="store_true")
     p.add_argument("--verbose", action="store_true")
     return p
@@ -578,8 +821,8 @@ def main() -> int:
         for s in list_scenarios():
             print(s)
         return 0
-    if args.self_test:
-        return _run_self_test(verbose=args.verbose)
+    if args.self_test or args.json:
+        return _run_self_test(verbose=args.verbose, as_json=args.json)
     build_parser().print_help()
     return 0
 

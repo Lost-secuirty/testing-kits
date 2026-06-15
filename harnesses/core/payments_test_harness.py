@@ -30,6 +30,13 @@ from decimal import ROUND_FLOOR, ROUND_HALF_EVEN, Decimal
 from enum import Enum
 from typing import Callable, Optional
 
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Money
@@ -603,6 +610,248 @@ def s_challenge_is_success_processor_detected() -> PayCheck:
                 bug.state(cid) == PaymentState.CAPTURED and oracle_blocks, "")
 
 
+# ---------------------------------------------------------------------------
+# TEETH: a FROZEN corpus of payment-lifecycle probes -> the EXACT accounting
+# outcome a correct checkout processor MUST produce.
+#
+# A checkout/payments harness only has teeth if it CATCHES a processor that
+# loses or fabricates money over a transaction lifecycle. The money invariants
+# every correct processor must hold:
+#
+#   * Σcaptures must never exceed the authorized amount (no overcapture);
+#   * Σrefunds must never exceed the captured amount (no over-refund);
+#   * replaying an idempotency key with the SAME amount returns the SAME charge
+#     (one charge, one replay) — it must NEVER open a second charge;
+#   * a 3DS CHALLENGE_PENDING charge is unverified and MUST NOT be capturable.
+#
+# An ``impl`` is a zero-arg FACTORY returning a fresh ``PaymentProcessor``-shaped
+# object. ``prove`` drives each frozen probe sequence against the impl and judges
+# the observed outcome (charge count, replay count, cent totals, terminal state,
+# whether a forbidden operation was correctly REJECTED) against the corpus's
+# FROZEN LITERAL expectations — integer cents and literal state strings, hand-
+# computed from the invariants above and NEVER read back from the oracle at
+# runtime, so the check is non-circular. ``prove(impl)`` is True iff any probe
+# diverges from its frozen literal — i.e. the planted money bug is caught.
+#
+# Pure + deterministic: integer/Decimal arithmetic only, no RNG, no clock, no
+# network, no filesystem, no thread timing. The planted mutants reuse the
+# harness's own buggy processors plus one float-drift twin, each modelling a
+# genuine real-world checkout defect:
+#
+#   * overcapture_no_guard       — drops the Σcaptures<=authorized guard, so an
+#                                  overcapture probe is wrongly accepted;
+#   * double_refund_no_guard     — drops the Σrefunds<=captured guard, so an
+#                                  over-refund probe is wrongly accepted (money
+#                                  refunded that was never captured);
+#   * idempotency_miss_double_charge — ignores the idempotency key, so a retry
+#                                  opens a SECOND charge (the classic double
+#                                  charge on network-retry);
+#   * challenge_is_success       — treats a 3DS CHALLENGE_PENDING charge as
+#                                  capturable, banking an unverified payment;
+#   * float_drift_overcapture    — guards the overcapture limit on a binary-float
+#                                  accumulator instead of the exact Decimal ledger
+#                                  (the classic "money in float" mistake), so an
+#                                  overcapture the Decimal ledger would reject is
+#                                  admitted and banked.
+# ---------------------------------------------------------------------------
+
+
+# A "probe" names a forbidden operation and the literal outcome a correct
+# processor yields. Each expected_* field is a hand-computed constant, never
+# derived from the oracle at runtime.
+@dataclass(frozen=True)
+class PayProbe:
+    name: str
+    # outcome literals a CORRECT processor must produce on this probe
+    expected_charges: int            # number of distinct charges opened
+    expected_replays: int            # idempotent replays counted
+    expected_captured_cents: int     # Σ captured, in integer cents (USD)
+    expected_refunded_cents: int     # Σ refunded, in integer cents (USD)
+    expected_state: str              # terminal PaymentState.value
+    expected_forbidden_rejected: bool  # did the forbidden op get rejected?
+    note: str = ""
+
+
+# Every literal below is hand-computed from the money invariants, NOT read from
+# the oracle. $1.00 == 100 cents throughout (USD has 2 minor units).
+PAY_CORPUS: tuple[PayProbe, ...] = (
+    # Overcapture probe: authorize $1.00, capture $1.00 (ok), then capture an
+    # extra $0.20. A correct processor REJECTS the second capture, so captured
+    # stays 100 cents and state is CAPTURED. A no-guard processor banks 120.
+    PayProbe("overcapture_rejected", expected_charges=1, expected_replays=0,
+             expected_captured_cents=100, expected_refunded_cents=0,
+             expected_state="captured", expected_forbidden_rejected=True,
+             note="capturing more than authorized must be rejected"),
+    # Over-refund probe: authorize+capture $1.00, refund $0.70 (ok ->
+    # partially_refunded), then refund another $0.70. A correct processor
+    # REJECTS the second refund (140 > 100), so refunded stays 70 cents.
+    PayProbe("over_refund_rejected", expected_charges=1, expected_replays=0,
+             expected_captured_cents=100, expected_refunded_cents=70,
+             expected_state="partially_refunded", expected_forbidden_rejected=True,
+             note="refunding more than captured must be rejected"),
+    # Idempotent-replay probe: authorize $1.00 twice with the SAME key and SAME
+    # amount. A correct processor opens ONE charge and counts ONE replay.
+    PayProbe("idempotent_replay_one_charge", expected_charges=1, expected_replays=1,
+             expected_captured_cents=0, expected_refunded_cents=0,
+             expected_state="authorized", expected_forbidden_rejected=True,
+             note="same key + same amount must not open a second charge"),
+    # 3DS challenge probe: authorize $1.00, raise a 3DS challenge, then attempt
+    # to capture. A correct processor REJECTS capture of an unverified charge,
+    # so captured stays 0 and state is challenge_pending.
+    PayProbe("challenge_pending_blocks_capture", expected_charges=1, expected_replays=0,
+             expected_captured_cents=0, expected_refunded_cents=0,
+             expected_state="challenge_pending", expected_forbidden_rejected=True,
+             note="a 3DS-pending charge is unverified and must not be capturable"),
+)
+
+
+# --- ORACLE: the harness's own correct PaymentProcessor, as a factory. -------
+
+def oracle_processor() -> PaymentProcessor:
+    """The harness's own correct processor (the money-conserving oracle)."""
+    return PaymentProcessor()
+
+
+# --- One extra planted mutant: a float-drift processor adapted to the
+#     PaymentProcessor probe interface (the others reuse the buggy classes
+#     already defined above). --------------------------------------------------
+
+class FloatDriftProcessor(PaymentProcessor):
+    """BUG: shadows capture accounting with a binary-float accumulator and trusts
+    it for the overcapture guard instead of the exact Decimal ledger — the classic
+    "money in float" defect.
+
+    The correct Decimal overcapture guard is disabled (see ``_guard_capture``), so
+    an overcapture the Decimal ledger would reject is admitted and banked. The
+    float shadow total is accumulated with an explicit ``acc += x`` loop (plain
+    binary-float addition) rather than reconciling against the Decimal authority.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._float_captured: dict[str, float] = {}
+        self._float_authed: dict[str, float] = {}
+
+    def authorize(self, amount: Money, idempotency_key: Optional[str] = None) -> str:
+        cid = super().authorize(amount, idempotency_key=idempotency_key)
+        self._float_authed[cid] = float(amount.amount)
+        self._float_captured.setdefault(cid, 0.0)
+        return cid
+
+    def _guard_capture(self, new_captured: Money, authorized: Money) -> None:
+        return  # bug: the Decimal guard is replaced by the float one below
+
+    def capture(self, cid: str, amount: Money) -> None:
+        # BUG: accumulate the capture total in float and guard on THAT, so
+        # rounding drift hides an overcapture the Decimal ledger would catch.
+        acc = self._float_captured.get(cid, 0.0)
+        acc += float(amount.amount)            # explicit float drift (not sum())
+        self._float_captured[cid] = acc
+        super().capture(cid, amount)
+
+
+def _run_probe(factory: Callable[[], PaymentProcessor], probe: PayProbe) -> dict:
+    """Drive one frozen probe sequence against a processor built by ``factory``
+    and return the observed outcome as plain ints/strings/bools. Pure: no I/O,
+    no RNG, no clock — deterministic Decimal/integer arithmetic only."""
+    p = factory()
+    forbidden_rejected = True  # default True for probes whose "forbidden" op is a no-op
+    cents = lambda c: int((c.amount * 100).to_integral_value())
+
+    if probe.name == "overcapture_rejected":
+        cid = p.authorize(Money(1, USD))
+        p.capture(cid, Money(1, USD))
+        forbidden_rejected = _raises(lambda: p.capture(cid, Money("0.20", USD)), PaymentError)
+    elif probe.name == "over_refund_rejected":
+        cid = p.authorize(Money(1, USD))
+        p.capture(cid, Money(1, USD))
+        p.refund(cid, Money("0.70", USD))
+        forbidden_rejected = _raises(lambda: p.refund(cid, Money("0.70", USD)), PaymentError)
+    elif probe.name == "idempotent_replay_one_charge":
+        cid = p.authorize(Money(1, USD), idempotency_key="k1")
+        p.authorize(Money(1, USD), idempotency_key="k1")
+    elif probe.name == "challenge_pending_blocks_capture":
+        cid = p.authorize(Money(1, USD))
+        p.challenge_3ds(cid)
+        forbidden_rejected = _raises(lambda: p.capture(cid, Money(1, USD)), PaymentError)
+    else:  # pragma: no cover - guards against a typo'd corpus name
+        raise ValueError(f"unknown probe: {probe.name}")
+
+    led = p.ledger(cid)
+    return {
+        "charges": len(p.charges),
+        "replays": p.idempotent_replays,
+        "captured_cents": cents(led.captured),
+        "refunded_cents": cents(led.refunded),
+        "state": p.state(cid).value,
+        "forbidden_rejected": forbidden_rejected,
+    }
+
+
+def prove(factory: Callable[[], PaymentProcessor]) -> bool:
+    """True iff the processor built by ``factory`` MIS-ACCOUNTS any frozen probe
+    (i.e. the bug is caught): a forbidden operation is wrongly accepted, the
+    charge/replay counts are wrong, or the captured/refunded cents or terminal
+    state diverge from the frozen literal.
+
+    Non-circular + deterministic: every expectation is a literal baked into
+    PAY_CORPUS, never read from the oracle; integer/Decimal arithmetic only,
+    no RNG/clock/network/filesystem. A factory that raises while *setting up* a
+    probe (an op the oracle accepts) also counts as caught.
+    """
+    for probe in PAY_CORPUS:
+        try:
+            got = _run_probe(factory, probe)
+        except Exception:  # noqa: BLE001 — raising on a valid setup op counts as caught
+            return True
+        if got["forbidden_rejected"] != probe.expected_forbidden_rejected:
+            return True
+        if got["charges"] != probe.expected_charges:
+            return True
+        if got["replays"] != probe.expected_replays:
+            return True
+        if got["captured_cents"] != probe.expected_captured_cents:
+            return True
+        if got["refunded_cents"] != probe.expected_refunded_cents:
+            return True
+        if got["state"] != probe.expected_state:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_processor,
+    mutants=(
+        Mutant("overcapture_no_guard", OvercaptureProcessor,
+               "drops the Σcaptures<=authorized guard -> an overcapture probe is "
+               "wrongly accepted, banking more than was authorized"),
+        Mutant("double_refund_no_guard", DoubleRefundProcessor,
+               "drops the Σrefunds<=captured guard -> an over-refund probe is "
+               "wrongly accepted, refunding money that was never captured"),
+        Mutant("idempotency_miss_double_charge", ReplayChargesTwiceProcessor,
+               "ignores the idempotency key -> a same-key retry opens a SECOND "
+               "charge (the classic double charge on network retry)"),
+        Mutant("challenge_is_success", ChallengeIsSuccessProcessor,
+               "treats a 3DS CHALLENGE_PENDING charge as capturable -> banks an "
+               "unverified payment that should have been blocked"),
+        Mutant("float_drift_overcapture", FloatDriftProcessor,
+               "guards captures on a binary-float accumulator instead of the exact "
+               "Decimal ledger -> an overcapture the Decimal ledger would reject is banked"),
+    ),
+    corpus_size=len(PAY_CORPUS),
+    kind="oracle_swap",
+    notes="a checkout processor must conserve money: no overcapture, no over-refund, "
+          "no double charge on idempotent replay, and no capture of an unverified 3DS "
+          "challenge; judged against frozen integer-cent literals",
+)
+
+
+def teeth_scenarios() -> list[str]:
+    """Names of the frozen payment-lifecycle probe cases (the teeth scenarios)."""
+    return [p.name for p in PAY_CORPUS]
+
+
 SCENARIOS: dict[str, Callable[[], PayCheck]] = {
     f.__name__[2:]: f
     for f in [
@@ -641,23 +890,48 @@ def list_scenarios() -> list[str]:
     return list(SCENARIOS.keys())
 
 
-def _run_self_test(verbose: bool = False) -> int:
-    results = [fn() for fn in SCENARIOS.values()]
-    failures = [r for r in results if not r.passed]
-    for r in results:
-        if verbose or not r.passed:
-            mark = "OK  " if r.passed else "FAIL"
-            print(f"  {mark}  {r.name:48s} {r.detail}")
-    if failures:
-        print(f"FAILED: {len(failures)}/{len(results)}", file=sys.stderr)
-        return 1
-    print(f"OK: {len(results)} scenarios passed.")
-    return 0
+def _run_self_test(verbose: bool = False, as_json: bool = False) -> int:
+    """Run every behavioural scenario AND assert the teeth, reporting findings.
+
+    Keeps the harness's existing meaningful checks (all SCENARIOS) and adds the
+    universal teeth swap-check (prove(oracle) is False; every planted mutant is
+    caught). Returns the process exit code: 0 green, 1 on any failure.
+    """
+    report = Report("core/payments")
+
+    # 1. Existing behavioural scenarios — preserved as-is.
+    for fn in SCENARIOS.values():
+        chk = fn()
+        report.record(f"scenario:{chk.name}", chk.passed, detail=chk.detail)
+
+    # 2. The oracle reproduces every frozen probe outcome exactly (the literals
+    #    are non-circular constants the correct processor must match).
+    for probe in PAY_CORPUS:
+        got = _run_probe(oracle_processor, probe)
+        report.add(f"oracle_probe:{probe.name}",
+                   [probe.expected_charges, probe.expected_replays,
+                    probe.expected_captured_cents, probe.expected_refunded_cents,
+                    probe.expected_state, probe.expected_forbidden_rejected],
+                   [got["charges"], got["replays"], got["captured_cents"],
+                    got["refunded_cents"], got["state"], got["forbidden_rejected"]],
+                   detail=probe.note)
+
+    # 3. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    if verbose and not as_json:
+        for c in report.checks:
+            if c.passed:
+                print(f"  OK    {c.check}")
+
+    return report.emit(as_json=as_json)
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Payments/checkout accounting harness")
     p.add_argument("--self-test", action="store_true")
+    p.add_argument("--json", action="store_true",
+                   help="emit machine-readable findings (implies --self-test)")
     p.add_argument("--list-scenarios", action="store_true")
     p.add_argument("--verbose", action="store_true")
     return p
@@ -669,8 +943,8 @@ def main() -> int:
         for s in list_scenarios():
             print(s)
         return 0
-    if args.self_test:
-        return _run_self_test(verbose=args.verbose)
+    if args.self_test or args.json:
+        return _run_self_test(verbose=args.verbose, as_json=args.json)
     build_parser().print_help()
     return 0
 

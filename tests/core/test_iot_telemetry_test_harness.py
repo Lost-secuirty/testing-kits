@@ -1,11 +1,16 @@
 """Test suite for iot_telemetry_test_harness."""
 
+import dataclasses
 import unittest
 
+from harnesses._teeth import verify
 from harnesses.core.iot_telemetry_test_harness import (
+    AGG_EXPECTED,
+    READINGS,
     SCENARIOS,
     SESSIONS,
     STREAM,
+    TEETH,
     IotConfig,
     IotReport,
     Message,
@@ -14,6 +19,8 @@ from harnesses.core.iot_telemetry_test_harness import (
     list_scenarios,
     on_disconnect,
     on_disconnect_no_will,
+    oracle_aggregate,
+    prove,
     reconnect,
     reconnect_nonpersistent,
 )
@@ -124,6 +131,51 @@ class TestSelfTest(unittest.TestCase):
 
     def test_self_test_passes(self):
         self.assertEqual(_run_self_test(), 0)
+
+
+# ===========================================================================
+# Teeth — the harness must catch a real planted ingest bug
+# ===========================================================================
+
+class TestTeeth(unittest.TestCase):
+    """The harness must catch a real planted bug (the campaign teeth contract)."""
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct aggregator must NOT be flagged by prove.
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+        self.assertFalse(prove(oracle_aggregate))
+
+    def test_every_mutant_is_caught(self):
+        # Each planted defect must be individually caught.
+        self.assertEqual(len(TEETH.mutants), 4)
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
+
+    def test_oracle_matches_frozen_literal(self):
+        # The frozen expectation is a non-circular constant the oracle reproduces.
+        self.assertEqual(oracle_aggregate(STREAM, READINGS), AGG_EXPECTED)
+
+    def test_noncircular_corpus(self):
+        # Corrupt one frozen literal and confirm prove(oracle) flips False -> True.
+        # If it does not flip, the corpus is circular (read back from the oracle).
+        import harnesses.core.iot_telemetry_test_harness as mod
+        original = mod.AGG_EXPECTED
+        self.assertFalse(mod.prove(mod.oracle_aggregate))  # clean before
+        try:
+            mod.AGG_EXPECTED = dataclasses.replace(original, n_accepted=original.n_accepted + 1)
+            self.assertTrue(mod.prove(mod.oracle_aggregate),
+                            "prove did not flip on a corrupted literal -> corpus is circular")
+        finally:
+            mod.AGG_EXPECTED = original
+        self.assertFalse(mod.prove(mod.oracle_aggregate))  # clean after restore
 
 
 if __name__ == "__main__":

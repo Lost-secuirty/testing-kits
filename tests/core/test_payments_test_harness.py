@@ -1,12 +1,16 @@
 """Test suite for payments_test_harness."""
 
+import dataclasses
 import unittest
 from decimal import Decimal
 
+from harnesses._teeth import verify
 from harnesses.core.payments_test_harness import (
     CURRENCIES,
     DECLINE_TAXONOMY,
+    PAY_CORPUS,
     SCENARIOS,
+    TEETH,
     ChallengeIsSuccessProcessor,
     CurrencyMismatchError,
     DoubleRefundProcessor,
@@ -19,10 +23,13 @@ from harnesses.core.payments_test_harness import (
     PaymentProcessor,
     PaymentState,
     ReplayChargesTwiceProcessor,
+    _run_probe,
     _run_self_test,
     classify_decline,
     list_scenarios,
     money_sum,
+    oracle_processor,
+    prove,
 )
 
 USD = CURRENCIES["USD"]
@@ -197,6 +204,63 @@ class TestSelfTest(unittest.TestCase):
 
     def test_self_test_passes(self):
         self.assertEqual(_run_self_test(), 0)
+
+
+# ===========================================================================
+# Teeth — the harness must catch a real planted payment bug
+# ===========================================================================
+
+class TestTeeth(unittest.TestCase):
+    """The harness must catch a real planted bug (the campaign teeth contract)."""
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct processor must NOT be flagged by prove.
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+        self.assertFalse(prove(oracle_processor))
+
+    def test_every_mutant_is_caught(self):
+        # Each planted defect must be individually caught.
+        self.assertEqual(len(TEETH.mutants), 5)
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
+        self.assertEqual(TEETH.corpus_size, len(PAY_CORPUS))
+
+    def test_oracle_matches_frozen_literals(self):
+        # The frozen probe expectations are non-circular constants the oracle
+        # must reproduce exactly.
+        for probe in PAY_CORPUS:
+            got = _run_probe(oracle_processor, probe)
+            self.assertEqual(got["charges"], probe.expected_charges, probe.name)
+            self.assertEqual(got["replays"], probe.expected_replays, probe.name)
+            self.assertEqual(got["captured_cents"], probe.expected_captured_cents, probe.name)
+            self.assertEqual(got["refunded_cents"], probe.expected_refunded_cents, probe.name)
+            self.assertEqual(got["state"], probe.expected_state, probe.name)
+            self.assertEqual(got["forbidden_rejected"], probe.expected_forbidden_rejected,
+                             probe.name)
+
+    def test_noncircular_corpus(self):
+        # Corrupting one frozen literal must flip prove(oracle) False -> True,
+        # proving prove judges against the baked-in constants, not the oracle.
+        self.assertFalse(prove(oracle_processor))
+        import harnesses.core.payments_test_harness as h
+        original = h.PAY_CORPUS
+        try:
+            corrupt = dataclasses.replace(original[0], expected_captured_cents=999)
+            h.PAY_CORPUS = (corrupt,) + original[1:]
+            self.assertTrue(prove(oracle_processor),
+                            "prove(oracle) must flip True when a frozen literal is corrupted")
+        finally:
+            h.PAY_CORPUS = original
+        # Restored corpus: oracle is clean again.
+        self.assertFalse(prove(oracle_processor))
 
 
 if __name__ == "__main__":
