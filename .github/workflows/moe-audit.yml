@@ -1,0 +1,47 @@
+name: moe-audit
+
+# MoE learnings report: a deterministic expert panel (tools/moe_audit.py) runs when
+# a PR is moved OUT OF DRAFT and posts/updates a single learnings comment. Advisory —
+# never blocks a merge. Uses only the built-in GITHUB_TOKEN (no external secret).
+on:
+  pull_request:
+    types: [ready_for_review]
+
+concurrency:
+  group: moe-audit-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  moe-audit:
+    name: MoE learnings report
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Run MoE audit and post learnings report
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BASE_REF: ${{ github.base_ref }}
+          PR_NUMBER: ${{ github.event.number }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          python tools/moe_audit.py --base "origin/$BASE_REF" --out moe-report.md --post --pr "$PR_NUMBER"
+      - name: Upload learnings report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: moe-learnings-report
+          path: moe-report.md
+          if-no-files-found: ignore
