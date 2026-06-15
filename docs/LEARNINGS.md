@@ -142,3 +142,38 @@ Append-only log of gotchas, fixes, API surprises, tool behavior, and verificatio
 - Security harnesses got real teeth without a separate `test_*_proof.py`: the modern
   TEETH + paired `TestTeeth` + `assert_teeth` self-test supersedes the older proof-test
   convention.
+
+## 2026-06-15 - Batch 3: real TEETH for 10 quick-win near-GOLD harnesses (branch feat/batch3-teeth)
+
+- Flipped 10 more harnesses pending → required (gate now **39 required / 30 pending / 8
+  legacy / 0 failing**, full suite **4595 OK** + 53 subtests): core/{statistical_rng_oracle,
+  payments,canvas_scene_state,game_loop_simulation,iot_telemetry,browser_e2e,
+  lexical_date_canonicalization}, security/cwe_kev_regression, ai/{agent_eval,drift_detection}.
+  Built as two waves of 10 agents (wire, then adversarial verify) + my own independent
+  ground-truth re-run (gate + teeth_check + --self-test + paired unittest + a literal-corruption
+  non-circularity probe I ran myself on both AI harnesses).
+- **All three `kind`s exercised:** `statistical` for distribution oracles — statistical_rng_oracle
+  samples a SEEDED LcgRng and judges realized per-outcome proportions against a FROZEN literal
+  proportion table (NOT recomputed from `TABLE.weight`); drift_detection judges a PSI detector
+  against frozen drift/no-drift verdicts. `auditor` for finding-producers (cwe_kev, agent_eval).
+- **ai circularity trap held again, and was isolation-tested:** agent_eval prove() judges a
+  trajectory scorer against FROZEN verdict-string literals; a verifier monkeypatched the oracle
+  to RAISE on any call and prove() still returned the right answer — decisive proof the verdict
+  is driven by the frozen corpus, never a live oracle re-derivation. No model/LLM/embedding on
+  any prove path.
+- **Don't borrow the numeric/Neumaier framing where float drift isn't load-bearing.** The
+  payments `float_drift_overcapture` mutant's docstring claimed CPython 3.12+ `sum()` Neumaier-
+  compensation would mask the drift "so an explicit += loop is required" — but for its specific
+  3×$0.10 case `sum()` and the `+=` loop give the SAME 0.30000000000000004, and the mutant is
+  actually caught because it DISABLES the Decimal overcapture guard (banks 120 vs 100), not via
+  drift. Corrected the comment to describe it honestly as a "money-in-float guard" defect. (The
+  Neumaier trap is real and load-bearing in core/numeric — just not here.)
+- cwe_kev `overbroad_xss` mutant (flags any `<`/`>`) diverges BOTH ways: false-positive on
+  benign prose AND false-negative on an angle-bracket-free `onerror=` payload. Enriched the
+  docstring; teeth unaffected (still caught, non-circular).
+- **New flaky-test sibling observed:** under the full 4595-test run (high CPU contention) both
+  `test_api_test_harness::TestMockServerIntegration::test_update_nonexistent_404` and the
+  already-known `test_network_test_harness::test_post_echoes_path` failed on localhost
+  mock-server socket timeouts; BOTH pass cleanly in isolation. Same root cause as the documented
+  network flake (a short localhost timeout under load), neither in this batch's diff. The api one
+  is newly noted here; a readiness-wait/retry fix for the mock-server tests should cover both.
