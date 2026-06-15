@@ -103,28 +103,40 @@ def load_ratchet() -> dict:
 
 
 def check_ratchet(cards: list[dict], ratchet: dict) -> list[str]:
-    """Return drift violations (empty == clean): a live teeth status ranked BELOW its
-    pin, a pinned-but-vanished harness, a ratcheted-required missing its paired test, or
-    a required harness whose mutants are no longer all caught."""
+    """Return drift violations (empty == clean).
+
+    Flags: a live teeth status ranked BELOW its pin; a pinned-but-vanished harness;
+    an unrecognized pin value (a hand-edit typo that would otherwise silently disable
+    the ratchet); a ratcheted-required missing its paired test; and a required harness
+    that declares no mutants or no longer catches all of them.
+    """
     problems: list[str] = []
     live = {c["key"]: c for c in cards}
     for key, pinned in sorted(ratchet.items()):
+        if pinned not in _RANK:
+            problems.append(
+                f"{key}: invalid pin '{pinned}' (expected one of {sorted(_RANK)}) — "
+                "a typo here would silently disable the ratchet for this harness"
+            )
+            continue
         card = live.get(key)
         if card is None:
             problems.append(f"{key}: ratcheted '{pinned}' but the harness no longer exists")
             continue
         status = card["teeth_status"]
-        if _RANK.get(status, -1) < _RANK.get(pinned, 0):
+        if _RANK.get(status, -1) < _RANK[pinned]:
             problems.append(
                 f"{key}: teeth REGRESSED to '{status}' but is ratcheted at '{pinned}' "
                 "(a harness may not silently fall back below the status it earned)"
             )
         if pinned == "required" and not card["paired_test_exists"]:
             problems.append(f"{key}: ratcheted 'required' but its paired unittest is missing")
-        if status == "required" and card["mutants_total"] and card["mutants_caught"] < card["mutants_total"]:
-            problems.append(
-                f"{key}: required but only {card['mutants_caught']}/{card['mutants_total']} mutants caught"
-            )
+        if status == "required":
+            total, caught = card["mutants_total"], card["mutants_caught"]
+            if total == 0:
+                problems.append(f"{key}: required but declares no mutants (teeth has nothing to catch)")
+            elif caught < total:
+                problems.append(f"{key}: required but only {caught}/{total} mutants caught")
     return problems
 
 
@@ -150,6 +162,7 @@ def _render_md(cards: list[dict]) -> str:
         for card in sorted(by_cat[category], key=lambda c: c["key"]):
             mark = {"required": "✓ required", "pending": "… pending", "legacy": "— legacy"}[card["teeth_status"]]
             lines.append(f"### {card['key']} · {mark}")
+            lines.append("")
             if card["purpose"]:
                 lines.append(f"- **Is:** {card['purpose']}")
             if card["teeth_status"] == "required":

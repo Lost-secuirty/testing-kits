@@ -54,5 +54,10 @@ is a deliberate, reviewable edit to `teeth_ratchet.json`.
    ```
 3. Optionally regenerate `CARDS.md`/`cards.json` in `make report` so the committed cards stay fresh.
 
+> Perf note: `--check` re-runs the live teeth swap-check (a subprocess per non-legacy
+> harness), so running it right after `make proof` would duplicate that stage. A
+> perf-conscious wire-in should make it its own stage or have it consume the gate's
+> already-computed output (`STATUS.json`) instead of re-invoking the swap-check.
+
 Until then, `make test` already exercises `tests/tools/test_harness_card.py`, so the ratchet
 logic is covered; only the live `--check` gate is left un-wired by design.

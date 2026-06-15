@@ -48,6 +48,28 @@ class TeethRatchetTests(unittest.TestCase):
         problems = hc.check_ratchet([], ratchet)
         self.assertTrue(any("no longer exists" in p for p in problems), problems)
 
+    def test_invalid_pin_value_is_flagged(self) -> None:
+        # A hand-edit typo must be caught loudly, not silently disable the ratchet.
+        ratchet = {"core/x": "requried"}  # typo for "required"
+        cards = [{"key": "core/x", "teeth_status": "pending", "paired_test_exists": True,
+                  "mutants_total": 0, "mutants_caught": 0}]
+        problems = hc.check_ratchet(cards, ratchet)
+        self.assertTrue(any("invalid pin" in p for p in problems), problems)
+
+    def test_required_with_zero_mutants_is_flagged(self) -> None:
+        ratchet = {"core/x": "required"}
+        cards = [{"key": "core/x", "teeth_status": "required", "paired_test_exists": True,
+                  "mutants_total": 0, "mutants_caught": 0}]
+        problems = hc.check_ratchet(cards, ratchet)
+        self.assertTrue(any("no mutants" in p for p in problems), problems)
+
+    def test_required_with_uncaught_mutants_is_flagged(self) -> None:
+        ratchet = {"core/x": "required"}
+        cards = [{"key": "core/x", "teeth_status": "required", "paired_test_exists": True,
+                  "mutants_total": 3, "mutants_caught": 2}]
+        problems = hc.check_ratchet(cards, ratchet)
+        self.assertTrue(any("2/3 mutants caught" in p for p in problems), problems)
+
 
 if __name__ == "__main__":
     unittest.main()
