@@ -1,13 +1,17 @@
 """Test suite for browser_e2e_test_harness."""
 
+import dataclasses
 import unittest
 
+from harnesses._teeth import verify
 from harnesses.core.browser_e2e_test_harness import (
+    E2E_CORPUS,
     INITIAL_DOM,
     MUTATED_DOM,
     ROUTES,
     SCENARIOS,
     SUBMIT_SELECTOR,
+    TEETH,
     UNMOCKED_URL,
     Dom,
     E2EReport,
@@ -15,6 +19,7 @@ from harnesses.core.browser_e2e_test_harness import (
     PrematureAssertionError,
     Selector,
     UnmockedRequestError,
+    _config_for,
     _run_self_test,
     apply_mutation,
     assert_settled,
@@ -27,8 +32,10 @@ from harnesses.core.browser_e2e_test_harness import (
     hydration_diff,
     list_scenarios,
     no_settle,
+    oracle_auditor,
     oracle_fetch,
     oracle_selector,
+    prove,
     resolve,
     robust_clicker,
     silent_404_fetch,
@@ -142,6 +149,60 @@ class TestSelfTest(unittest.TestCase):
 
     def test_self_test_passes(self):
         self.assertEqual(_run_self_test(), 0)
+
+
+# ===========================================================================
+# Teeth — the harness must catch a real planted E2E auditor bug
+# ===========================================================================
+
+class TestTeeth(unittest.TestCase):
+    """The harness must catch a real planted bug (the campaign teeth contract)."""
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct auditor must NOT be flagged by prove.
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+        self.assertFalse(prove(oracle_auditor))
+
+    def test_every_mutant_is_caught(self):
+        # Each planted defect must be individually caught.
+        self.assertEqual(len(TEETH.mutants), 2)
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
+        self.assertEqual(TEETH.corpus_size, len(E2E_CORPUS))
+
+    def test_oracle_matches_frozen_literals(self):
+        # The frozen expectations are non-circular constants the oracle must
+        # reproduce exactly for every corpus config.
+        for case in E2E_CORPUS:
+            vec = tuple(oracle_auditor(**_config_for(case)))
+            self.assertEqual(vec, case.expected_vec, case.name)
+
+    def test_noncircular_corpus(self):
+        # Corrupt one frozen literal and confirm prove(oracle) flips False->True,
+        # proving prove judges against the baked-in corpus, not the live oracle.
+        self.assertFalse(prove(oracle_auditor))
+        import harnesses.core.browser_e2e_test_harness as mod
+        original = mod.E2E_CORPUS
+        try:
+            corrupted = []
+            for case in original:
+                if case.name == "silent_404":
+                    case = dataclasses.replace(case, expected_vec=(0, 0, 0, 0, 0, 0))
+                corrupted.append(case)
+            mod.E2E_CORPUS = tuple(corrupted)
+            self.assertTrue(prove(oracle_auditor),
+                            "corrupting a frozen literal must flip prove(oracle) to True")
+        finally:
+            mod.E2E_CORPUS = original
+        self.assertFalse(prove(oracle_auditor))
 
 
 if __name__ == "__main__":

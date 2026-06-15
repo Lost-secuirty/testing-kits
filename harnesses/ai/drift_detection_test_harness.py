@@ -30,6 +30,12 @@ import sys
 from dataclasses import dataclass
 from typing import Callable
 
+# Make the shared teeth contract importable whether run as a module or a script.
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
+
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
@@ -484,6 +490,161 @@ def s_drift_report_alert_flags_wired() -> Check:
                 and r.centroid_alert and r.cosine_alert and r.rank_alert and r.churn_alert)
 
 
+# ---------------------------------------------------------------------------
+# TEETH: a FROZEN corpus of (reference dist, live dist) -> expected drift verdict
+#
+# A drift detector only has teeth if it CATCHES a detector that is asleep at the
+# wheel — one that NEVER fires when the distribution has genuinely shifted, or one
+# that cries wolf on a distribution that has NOT moved. The contract every correct
+# PSI-based detector must hold:
+#
+#   * it ALERTS (verdict True) when the Population Stability Index exceeds the
+#     industry-standard PSI_ALERT = 0.25 threshold;
+#   * it stays SILENT (verdict False) on identical or jittered distributions whose
+#     PSI is below 0.25.
+#
+# An impl is a callable ``detector(base, cur) -> bool`` returning True iff it flags
+# drift. prove() judges each impl against the corpus's FROZEN LITERAL verdicts
+# (the True/False drift decisions below, hand-computed by evaluating PSI against
+# the 0.25 threshold OFFLINE and baked in as constants — NEVER re-derived from
+# psi() at runtime), so the check is non-circular. prove(impl) is True iff the
+# detector's verdict diverges from the frozen literal on ANY case — i.e. a planted
+# detector bug is caught.
+#
+# Pure + deterministic: closed-form float math over fixed vectors, no RNG, no
+# clock, no network, no filesystem, no threads. The three planted mutants model
+# genuine real-world drift-monitoring failures (per the campaign hint):
+#
+#   * never_fires_threshold — the alert threshold is set absurdly high (a common
+#     mis-tuning), so PSI never crosses it and real drift sails through undetected;
+#   * fires_on_identical — alerts on ANY non-degenerate comparison (threshold <= 0),
+#     so the monitor cries wolf even when the live distribution is identical to the
+#     reference (alert fatigue / the boy-who-cried-wolf failure);
+#   * psi_no_epsilon_floor — uses the PSI variant that skips empty bins instead of
+#     flooring them with epsilon, so a distribution that drains a bin to zero (a
+#     real, dangerous shift) is silently under-counted and missed.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DriftVerdictCase:
+    """One frozen (reference, live) distribution pair with a literal verdict."""
+    name: str
+    base_dist: tuple[float, ...]
+    cur_dist: tuple[float, ...]
+    expected_drift: bool   # the EXACT verdict a correct PSI@0.25 detector yields
+    note: str = ""
+
+
+# Verdicts are hand-computed by evaluating PSI (epsilon-floored) against the 0.25
+# alert threshold OFFLINE, then baked in as the True/False literals below. They are
+# constants — prove() never calls psi() to re-derive them, so the gate cannot be
+# fooled by a circular oracle comparison. (Reference PSI values, for the record:
+# reverse_drift~2.94, big_shift~2.46, empty_bin~0.76 => drift; stable_jitter~0.0009,
+# identical=0.0, mild_shift~0.016 => no drift.)
+DRIFT_VERDICT_CORPUS: tuple[DriftVerdictCase, ...] = (
+    DriftVerdictCase(
+        "reverse_drift",
+        (0.45, 0.30, 0.15, 0.07, 0.03), (0.03, 0.07, 0.15, 0.30, 0.45),
+        True, "mass fully reversed across bins -> PSI ~2.94, far above 0.25"),
+    DriftVerdictCase(
+        "big_shift",
+        (0.70, 0.20, 0.07, 0.03), (0.10, 0.20, 0.30, 0.40),
+        True, "dominant bin collapses, tail inflates -> PSI ~2.46, drift"),
+    DriftVerdictCase(
+        "empty_bin",
+        (0.22, 0.22, 0.20, 0.20, 0.10, 0.06), (0.255, 0.255, 0.23, 0.23, 0.03, 0.00),
+        True, "one bin drains to zero -> PSI ~0.76 WITH the epsilon floor; a "
+              "no-floor variant skips that bin and misses the drift"),
+    DriftVerdictCase(
+        "stable_jitter",
+        (0.45, 0.30, 0.15, 0.07, 0.03), (0.44, 0.30, 0.16, 0.07, 0.03),
+        False, "sub-percent measurement jitter -> PSI ~0.0009, no real drift"),
+    DriftVerdictCase(
+        "identical",
+        (0.25, 0.25, 0.25, 0.25), (0.25, 0.25, 0.25, 0.25),
+        False, "live distribution identical to reference -> PSI 0.0, no drift"),
+    DriftVerdictCase(
+        "mild_shift",
+        (0.40, 0.30, 0.20, 0.10), (0.35, 0.30, 0.22, 0.13),
+        False, "small benign reweighting -> PSI ~0.016, below the 0.25 alert"),
+)
+
+
+# --- ORACLE: reuse the harness's own correct epsilon-floored PSI + 0.25 threshold
+
+def oracle_drift_detector(base: tuple[float, ...], cur: tuple[float, ...]) -> bool:
+    """Correct drift verdict: the harness's own epsilon-floored ``psi`` compared
+    against the industry-standard ``PSI_ALERT`` (0.25) threshold."""
+    return psi(base, cur) > PSI_ALERT
+
+
+# --- Planted buggy twins (each models a real drift-monitoring failure) --------
+
+def never_fires_threshold(base: tuple[float, ...], cur: tuple[float, ...]) -> bool:
+    """BUG: the alert threshold is mis-tuned absurdly high (10.0), so even a fully
+    reversed distribution (PSI ~2.94) never crosses it. Real drift goes unflagged —
+    the most common "our monitor never alerts" production failure."""
+    return psi(base, cur) > 10.0
+
+
+def fires_on_identical(base: tuple[float, ...], cur: tuple[float, ...]) -> bool:
+    """BUG: alerts whenever PSI is >= 0 (always, since PSI is non-negative), so the
+    monitor flags drift even when the live distribution is byte-identical to the
+    reference. The boy-who-cried-wolf failure -> alert fatigue, ignored alarms."""
+    return psi(base, cur) >= 0.0
+
+
+def psi_no_epsilon_floor(base: tuple[float, ...], cur: tuple[float, ...]) -> bool:
+    """BUG: uses the no-epsilon-floor PSI variant (``psi_zero_floor``) that simply
+    skips bins where either side is zero. When a bin drains to zero — a real,
+    dangerous shift — its dominant divergence term is dropped, so PSI is
+    under-counted and the drift slips below the 0.25 alert and is missed."""
+    return psi_zero_floor(base, cur) > PSI_ALERT
+
+
+def prove(impl: Callable[[tuple, tuple], bool]) -> bool:
+    """True iff ``impl`` returns the WRONG drift verdict on ANY frozen corpus case
+    (i.e. the detector bug is caught): it stays silent where the frozen literal says
+    drift, or alerts where the literal says no-drift.
+
+    Non-circular + deterministic: every verdict is a literal baked into
+    DRIFT_VERDICT_CORPUS, never read back from ``psi``/the oracle at runtime; the
+    math is closed-form over fixed float vectors with no RNG/clock/network/
+    filesystem. An impl that raises on a corpus case counts as caught.
+    """
+    for case in DRIFT_VERDICT_CORPUS:
+        try:
+            verdict = impl(case.base_dist, case.cur_dist)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if bool(verdict) != case.expected_drift:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_drift_detector,
+    mutants=(
+        Mutant("never_fires_threshold", never_fires_threshold,
+               "alert threshold mis-tuned to 10.0 -> PSI never crosses it and "
+               "genuine distribution drift is never flagged"),
+        Mutant("fires_on_identical", fires_on_identical,
+               "alerts whenever PSI >= 0 (always) -> cries wolf even on an "
+               "identical distribution, causing alert fatigue"),
+        Mutant("psi_no_epsilon_floor", psi_no_epsilon_floor,
+               "drops empty bins instead of flooring them with epsilon -> a bin "
+               "that drains to zero is under-counted and the drift is missed"),
+    ),
+    corpus_size=len(DRIFT_VERDICT_CORPUS),
+    kind="statistical",
+    notes="a drift detector must alert iff PSI exceeds the 0.25 threshold: fire on "
+          "a genuinely shifted distribution, stay silent on an identical/jittered "
+          "one. Verdicts are frozen literals, never re-derived from psi() at runtime.",
+)
+
+
 SCENARIOS: dict[str, Callable[[], Check]] = {
     f.__name__[2:]: f
     for f in [
@@ -519,18 +680,26 @@ def list_scenarios() -> list[str]:
     return list(SCENARIOS.keys())
 
 
-def _run_self_test(verbose: bool = False) -> int:
-    results = [fn() for fn in SCENARIOS.values()]
-    failures = [r for r in results if not r.passed]
-    for r in results:
-        if verbose or not r.passed:
-            mark = "OK  " if r.passed else "FAIL"
-            print(f"  {mark}  {r.name:42s} {r.detail}")
-    if failures:
-        print(f"FAILED: {len(failures)}/{len(results)}", file=sys.stderr)
-        return 1
-    print(f"OK: {len(results)} scenarios passed.")
-    return 0
+def _run_self_test(verbose: bool = False, as_json: bool = False) -> int:
+    """Run every drift scenario, then assert the teeth: the correct PSI detector is
+    not flagged and every planted asleep-/trigger-happy detector is caught."""
+    report = Report("ai/drift_detection")
+
+    # 1. The harness's existing meaningful scenario checks (drift fires, stable
+    #    stays silent, each buggy detector is individually caught, etc.).
+    for fn in SCENARIOS.values():
+        chk = fn()
+        report.record(chk.name, chk.passed, detail=chk.detail)
+
+    # 2. Teeth: prove(oracle) is False AND every planted mutant is caught, judged
+    #    against the FROZEN literal drift verdicts (non-circular).
+    for case in DRIFT_VERDICT_CORPUS:
+        report.add(f"oracle_verdict:{case.name}", case.expected_drift,
+                   oracle_drift_detector(case.base_dist, case.cur_dist),
+                   detail=case.note)
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -538,6 +707,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--self-test", action="store_true")
     p.add_argument("--list-scenarios", action="store_true")
     p.add_argument("--verbose", action="store_true")
+    p.add_argument("--json", action="store_true",
+                   help="emit machine-readable findings (implies --self-test)")
     return p
 
 
@@ -547,8 +718,8 @@ def main() -> int:
         for s in list_scenarios():
             print(s)
         return 0
-    if args.self_test:
-        return _run_self_test(verbose=args.verbose)
+    if args.self_test or args.json:
+        return _run_self_test(verbose=args.verbose, as_json=args.json)
     build_parser().print_help()
     return 0
 

@@ -28,6 +28,12 @@ import sys
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+# Make the shared teeth contract importable whether run as a module or a script.
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
+
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
@@ -293,6 +299,218 @@ def on_disconnect_no_will(session: DeviceSession, abnormal: bool) -> tuple[Messa
 
 
 # ---------------------------------------------------------------------------
+# TEETH: a FROZEN corpus of (canonical stream + sensor readings) -> the exact
+# ingest fingerprint + rolled-up mean a correct telemetry ingester MUST produce.
+#
+# A telemetry ingest/rollup harness only has teeth if it CATCHES an ingester
+# that mis-windows, double-counts, scrambles ordering, or drifts on a float
+# rollup. The impl under test is an aggregator
+#
+#     agg(stream: list[Message], readings: tuple[float, ...]) -> AggResult
+#
+# that ingests the stream and rolls a mean over a frozen reading set. prove()
+# judges each impl ONLY against AGG_EXPECTED — a literal AggResult hand-computed
+# from the ingest contract (server time is canonical; QoS-1/QoS-2 retransmits are
+# deduped to exactly-once; out-of-order seq are re-sequenced; events older than
+# the watermark minus allowed-lateness are dropped; retained is latest-only) and
+# from the exact rational mean of READINGS. The literals are NEVER read back from
+# the oracle at runtime, so the check is non-circular. prove(impl) is True iff any
+# fingerprint field or the mean diverges from the frozen literal — i.e. the
+# planted ingest bug is caught.
+#
+# Pure + deterministic: a FakeClock supplies server-ingest time, integer/Fraction
+# arithmetic for the exact mean, no real threads, no wall-clock, no network, no
+# filesystem, no RNG. The four planted mutants model genuine MQTT-ingest defects:
+#
+#   * accept_late_window — disables the watermark, so an event past the
+#     allowed-lateness window (m17) is wrongly accepted -> late_dropped collapses
+#     to 0 and the accepted set grows (the classic late/out-of-order corruption);
+#   * no_resequence — never re-sequences a topic, so out-of-order arrivals
+#     (m03 seq 2 after m02 seq 3) stay scrambled -> out_of_order_pairs >= 1;
+#   * no_qos2_dedupe — a retried QoS-2 publish (m09 dup of m08) is ingested twice
+#     -> qos2_dupes >= 1 and the duplicate is double-counted (exactly-once broken);
+#   * float_mean_drift — rolls the reading mean with an explicit binary-float
+#     ``acc += x`` loop (NOT sum(), which CPython 3.12+ Neumaier-compensates),
+#     so the mean drifts off the exact rational value by a ULP.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AggResult:
+    """One ingest+rollup fingerprint: report counters, mid sets, and a float mean."""
+    n_accepted: int
+    qos2_dupes: int
+    duplicates_delivered: int
+    out_of_order_pairs: int
+    skew_flagged: int
+    skew_rejected: int
+    retained_kept: int
+    late_dropped: int
+    accepted_mids: tuple[str, ...]
+    rejected_mids: tuple[str, ...]
+    flagged_mids: tuple[str, ...]
+    late_mids: tuple[str, ...]
+    reading_mean: float
+
+
+# A frozen reading set chosen so an exact-arithmetic mean lands on a clean float
+# literal (0.19) while a naive ``acc += x`` float rollup drifts to a different
+# bit pattern (0.19000000000000003). Decimal-string fractions that float64 cannot
+# represent exactly are what make the drift visible.
+READINGS: tuple[float, ...] = (0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.1)
+
+
+# The ONE frozen literal expectation. Every field is hand-computed from the ingest
+# contract against the canonical STREAM (19 messages), NEVER read from the oracle:
+#
+#   n_accepted=14 : 19 in, minus m04/m05/m09 (QoS-1/2 dup retransmits), m11
+#                   (skew > 1h -> rejected), m17 (older than watermark -> late).
+#   qos2_dupes=0, duplicates_delivered=0 : every retransmit deduped to once.
+#   out_of_order_pairs=0 : orders/q re-sequenced to seq 1..6.
+#   skew_flagged=1 (m10, skew 200s), skew_rejected=1 (m11, skew 18899s).
+#   retained_kept=1 (config/r latest-only -> m14), late_dropped=1 (m17).
+#   reading_mean=0.19 : exact rational mean of READINGS (19/100) as a float.
+AGG_EXPECTED = AggResult(
+    n_accepted=14,
+    qos2_dupes=0,
+    duplicates_delivered=0,
+    out_of_order_pairs=0,
+    skew_flagged=1,
+    skew_rejected=1,
+    retained_kept=1,
+    late_dropped=1,
+    accepted_mids=("m01", "m02", "m03", "m06", "m07", "m08",
+                   "m10", "m12", "m13", "m14", "m15", "m16", "m18", "m19"),
+    rejected_mids=("m11",),
+    flagged_mids=("m10",),
+    late_mids=("m17",),
+    reading_mean=0.19,
+)
+
+
+def _exact_reading_mean(readings: tuple[float, ...]) -> float:
+    """Exact rational mean of the readings, returned as a float. Uses ``Fraction``
+    on the decimal *string* of each reading so no binary-float drift enters before
+    the final division — the correct rollup the drift mutant must miss."""
+    from fractions import Fraction
+    total = Fraction(0)
+    for x in readings:
+        total += Fraction(str(x))
+    return float(total / len(readings))
+
+
+def _fingerprint(res: IngestResult, mean: float) -> AggResult:
+    """Reduce a full IngestResult + rollup mean to the frozen-comparable fingerprint."""
+    r = res.report
+    return AggResult(
+        n_accepted=r.n_accepted,
+        qos2_dupes=r.qos2_dupes,
+        duplicates_delivered=r.duplicates_delivered,
+        out_of_order_pairs=r.out_of_order_pairs,
+        skew_flagged=r.skew_flagged,
+        skew_rejected=r.skew_rejected,
+        retained_kept=r.retained_kept,
+        late_dropped=r.late_dropped,
+        accepted_mids=tuple(sorted(rec.mid for rec in res.accepted)),
+        rejected_mids=tuple(res.rejected),
+        flagged_mids=tuple(res.flagged_skew),
+        late_mids=tuple(res.late_dropped),
+        reading_mean=mean,
+    )
+
+
+# --- ORACLE: reuse the harness's own correct ingest + an exact rollup mean ----
+
+def oracle_aggregate(stream: list[Message], readings: tuple[float, ...]) -> AggResult:
+    """Correct telemetry fingerprint, delegating to the harness's own ``ingest``
+    (server-time-canonical, dedupe, re-sequence, watermark, retained-latest) and
+    an exact-arithmetic reading mean."""
+    res = ingest(stream)
+    return _fingerprint(res, _exact_reading_mean(readings))
+
+
+# --- Planted buggy twins (each models a real MQTT-ingest defect) --------------
+
+def accept_late_window(stream: list[Message], readings: tuple[float, ...]) -> AggResult:
+    """BUG: disables the watermark, so a late event past the allowed-lateness
+    window (m17, device_ts 2005 < 2040-30) is wrongly accepted instead of dropped
+    — late/out-of-order data silently corrupts the windowed time series."""
+    res = ingest(stream, watermark=False)
+    return _fingerprint(res, _exact_reading_mean(readings))
+
+
+def no_resequence(stream: list[Message], readings: tuple[float, ...]) -> AggResult:
+    """BUG: never re-sequences a topic, so out-of-order arrivals (m03 seq 2 lands
+    after m02 seq 3) stay scrambled — the rollup reads a jumbled time series."""
+    res = ingest(stream, resequence=False)
+    return _fingerprint(res, _exact_reading_mean(readings))
+
+
+def no_qos2_dedupe(stream: list[Message], readings: tuple[float, ...]) -> AggResult:
+    """BUG: skips QoS-2 dedupe, so a retried exactly-once publish (m09 dup of m08)
+    is ingested twice — telemetry is double-counted (exactly-once violated)."""
+    res = ingest(stream, dedupe_qos2=False)
+    return _fingerprint(res, _exact_reading_mean(readings))
+
+
+def float_mean_drift(stream: list[Message], readings: tuple[float, ...]) -> AggResult:
+    """BUG: rolls the reading mean with an explicit binary-float ``acc += x`` loop
+    instead of exact arithmetic. float64 cannot represent the decimal-fraction
+    readings exactly, so the accumulator drifts and the mean lands a ULP off the
+    exact value. An explicit ``+=`` loop is used deliberately: CPython 3.12+
+    special-cases ``sum()`` of floats with Neumaier compensation, which would mask
+    this drift; plain accumulation is inexact on every supported CPython."""
+    res = ingest(stream)
+    acc = 0.0  # BUG: float accumulator drifts; never reconciled
+    for x in readings:
+        acc += x
+    return _fingerprint(res, acc / len(readings))
+
+
+def prove(impl: Callable[[list[Message], tuple[float, ...]], AggResult]) -> bool:
+    """True iff ``impl`` produces a fingerprint that DIVERGES from the frozen
+    literal ``AGG_EXPECTED`` (i.e. the bug is caught): any report counter, mid
+    set, or the rolled-up mean differs from the hand-computed expectation.
+
+    Non-circular + deterministic: every expectation is a literal baked into
+    AGG_EXPECTED, never read from the oracle; ingest runs against a FakeClock with
+    integer/Fraction arithmetic — no RNG/clock/network/filesystem/threads. An impl
+    that raises on the corpus counts as caught.
+    """
+    try:
+        got = impl(STREAM, READINGS)
+    except Exception:  # noqa: BLE001 — raising on the corpus counts as caught
+        return True
+    return got != AGG_EXPECTED
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_aggregate,
+    mutants=(
+        Mutant("accept_late_window", accept_late_window,
+               "disables the watermark so a late event past the allowed-lateness "
+               "window is wrongly accepted -> late_dropped collapses to 0 and the "
+               "windowed time series is corrupted by out-of-order/late data"),
+        Mutant("no_resequence", no_resequence,
+               "never re-sequences a topic, so out-of-order arrivals stay scrambled "
+               "-> out_of_order_pairs >= 1 and the rollup reads a jumbled series"),
+        Mutant("no_qos2_dedupe", no_qos2_dedupe,
+               "skips QoS-2 dedupe so a retried exactly-once publish is ingested "
+               "twice -> qos2_dupes >= 1, telemetry double-counted"),
+        Mutant("float_mean_drift", float_mean_drift,
+               "rolls the reading mean with an explicit float `acc += x` loop -> "
+               "binary-float drift puts the mean a ULP off the exact rational value"),
+    ),
+    corpus_size=len(STREAM),
+    kind="oracle_swap",
+    notes="a telemetry ingester must keep server time canonical, dedupe QoS-1/2 "
+          "retransmits to exactly-once, re-sequence out-of-order arrivals, drop "
+          "events past the watermark, and roll aggregates without float drift",
+)
+
+
+# ---------------------------------------------------------------------------
 # Scenarios
 # ---------------------------------------------------------------------------
 
@@ -500,18 +718,29 @@ def list_scenarios() -> list[str]:
     return list(SCENARIOS.keys())
 
 
-def _run_self_test(verbose: bool = False) -> int:
-    results = [fn() for fn in SCENARIOS.values()]
-    failures = [r for r in results if not r.passed]
-    for r in results:
-        if verbose or not r.passed:
-            mark = "OK  " if r.passed else "FAIL"
-            print(f"  {mark}  {r.name:38s} {r.detail}")
-    if failures:
-        print(f"FAILED: {len(failures)}/{len(results)}", file=sys.stderr)
-        return 1
-    print(f"OK: {len(results)} scenarios passed.")
-    return 0
+def _run_self_test(verbose: bool = False, as_json: bool = False) -> int:
+    """Run every scenario through a Report (fail-loud + structured findings), then
+    assert the teeth: the correct oracle is clean and every planted mutant caught."""
+    report = Report("core/iot_telemetry")
+
+    # 1. The harness's existing meaningful scenario checks (QoS, ordering, dedupe,
+    #    skew, watermark, retained, session lifecycle) — kept verbatim.
+    for fn in SCENARIOS.values():
+        chk = fn()
+        report.record(chk.name, chk.passed, detail=chk.detail)
+
+    # 2. The frozen aggregate fingerprint the correct oracle must reproduce, and
+    #    the exact rational reading mean (non-circular literals).
+    got = oracle_aggregate(STREAM, READINGS)
+    report.add("oracle_fingerprint_matches_frozen", AGG_EXPECTED, got,
+               detail="oracle ingest+rollup must equal the hand-computed literal")
+    report.add("oracle_reading_mean_exact", AGG_EXPECTED.reading_mean,
+               got.reading_mean, detail="exact rational mean, no float drift")
+
+    # 3. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -519,6 +748,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--self-test", action="store_true")
     p.add_argument("--list-scenarios", action="store_true")
     p.add_argument("--verbose", action="store_true")
+    p.add_argument("--json", action="store_true",
+                   help="emit machine-readable findings (implies --self-test)")
     return p
 
 
@@ -528,8 +759,8 @@ def main() -> int:
         for s in list_scenarios():
             print(s)
         return 0
-    if args.self_test:
-        return _run_self_test(verbose=args.verbose)
+    if args.self_test or args.json:
+        return _run_self_test(verbose=args.verbose, as_json=args.json)
     build_parser().print_help()
     return 0
 

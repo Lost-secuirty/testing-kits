@@ -1,8 +1,17 @@
+import dataclasses
 import subprocess
 import sys
 import unittest
+import unittest.mock
 
+from harnesses._teeth import verify
 from harnesses.core import lexical_date_canonicalization_test_harness as harness
+from harnesses.core.lexical_date_canonicalization_test_harness import (
+    CANONICALIZE_CORPUS,
+    TEETH,
+    canonicalize_iso,
+    prove,
+)
 
 
 class TestLexicalDateCanonicalizationHarness(unittest.TestCase):
@@ -56,6 +65,55 @@ class TestLexicalDateCanonicalizationHarness(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("noncanonical_diverges", proc.stdout)
+
+
+class TestTeeth(unittest.TestCase):
+    """The harness must catch a real planted canonicalization bug (teeth contract)."""
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct canonicalizer must NOT be flagged by prove.
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+        self.assertFalse(prove(canonicalize_iso))
+
+    def test_every_mutant_is_caught(self):
+        # Each planted defect must be individually caught.
+        self.assertEqual(len(TEETH.mutants), 3)
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
+        self.assertEqual(TEETH.corpus_size, len(CANONICALIZE_CORPUS))
+
+    def test_oracle_matches_frozen_literals(self):
+        # The frozen expectations are non-circular constants the oracle must
+        # reproduce exactly.
+        for case in CANONICALIZE_CORPUS:
+            self.assertEqual(canonicalize_iso(case.raw), case.expected, case.name)
+
+    def test_noncircular_corpus(self):
+        # Corrupting one frozen literal must make prove(oracle) flip False -> True.
+        # If it does not flip, the corpus is circular (re-derived from the oracle).
+        self.assertFalse(prove(canonicalize_iso))  # clean baseline
+        idx = next(i for i, c in enumerate(CANONICALIZE_CORPUS)
+                   if c.name == "us_slash_ambiguous")
+        original = CANONICALIZE_CORPUS[idx]
+        # 3/4/2026 -> the SWAPPED (wrong) literal April 3 instead of March 4.
+        corrupted = dataclasses.replace(original, expected="2026-04-03")
+        patched = tuple(
+            corrupted if i == idx else c for i, c in enumerate(CANONICALIZE_CORPUS)
+        )
+        with unittest.mock.patch.object(harness, "CANONICALIZE_CORPUS", patched):
+            self.assertTrue(prove(canonicalize_iso),
+                            "prove(oracle) did not flip when a literal was corrupted "
+                            "-> corpus is circular")
+        # Restored after the patch: the real corpus is clean again.
+        self.assertFalse(prove(canonicalize_iso))
 
 
 if __name__ == "__main__":

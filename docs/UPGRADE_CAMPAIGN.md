@@ -19,19 +19,22 @@ and **reports its findings** (structured). Gate + contract are documented in
   → `--self-test`/`--json` `Report` → pair unittest → (security/ai: proof test) →
   flip `pending → required` → draft PR (operator merges).
 
-## Status snapshot (Batch 2, 2026-06-15)
+## Status snapshot (Batch 3, 2026-06-15)
 
 | Scope | Count | Meaning |
 |---|---:|---|
-| required (teeth verified) | 29 | proven by the swap-check; gate blocks on these |
-| pending | 40 | in scope, no `TEETH` yet — counted, non-blocking |
+| required (teeth verified) | 39 | proven by the swap-check; gate blocks on these |
+| pending | 30 | in scope, no `TEETH` yet — counted, non-blocking |
 | legacy (pharmacy) | 8 | older soft gate, out of campaign |
 
 **required (29):** Batch 0 (9) core/{check_digit_identifier,feature_flag,graphql,
 grpc_contract,idempotency,queue,tracing}, security/{ci_workflow_hardening,diff_secret_gate}
 · Batch 1 (10) core/{api,cache,cli,config,contract,null_propagation,pagination,serialization,
 statemachine}, security/authz · Batch 2 (10) core/{db,scraper,fuzz,numeric,concurrency,
-error_path_leak,schema_evolution}, security/{supplychain,upload}, ai/agent_memory_context.
+error_path_leak,schema_evolution}, security/{supplychain,upload}, ai/agent_memory_context ·
+Batch 3 (10) core/{statistical_rng_oracle,payments,canvas_scene_state,game_loop_simulation,
+iot_telemetry,browser_e2e,lexical_date_canonicalization}, security/cwe_kev_regression,
+ai/{agent_eval,drift_detection}.
 
 ## Batch roadmap (provisional; exact membership ranked at each batch start)
 
@@ -50,12 +53,15 @@ error_path_leak,schema_evolution}, security/{supplychain,upload}, ai/agent_memor
   loop (sum() Neumaier-compensates on 3.12+); concurrency models the race via a
   deterministic interleaving (no real threads in prove); the ai harness judges against
   frozen retrieved-id literals (NOT a model/embedding — the AI-eval circularity trap).
-- **Batch 3+ — drain remaining pending → SILVER, then GOLD enrich.** Likely
-  quick-win "near-GOLD" candidates (already have an oracle/twin or planted-bad
-  fixtures — mostly a `TEETH` wiring + real `--self-test`): core/statistical_rng_oracle,
-  core/payments, core/canvas_scene_state, core/game_loop_simulation, core/iot_telemetry,
-  core/browser_e2e, core/lexical_date_canonicalization, security/cwe_kev_regression,
-  ai/agent_eval, ai/drift_detection, ai/prompt_injection.
+- **Batch 3 — DONE (2026-06-15):** real TEETH wired into 10 quick-win near-GOLD harnesses,
+  all flipped pending → required: core/{statistical_rng_oracle,payments,canvas_scene_state,
+  game_loop_simulation,iot_telemetry,browser_e2e,lexical_date_canonicalization},
+  security/cwe_kev_regression, ai/{agent_eval,drift_detection}. Kinds span `oracle_swap`,
+  `auditor` (cwe_kev, agent_eval), and `statistical` (statistical_rng_oracle, drift_detection).
+  **ai/prompt_injection deferred** to a later batch so it can absorb the per-tier
+  layer-isolated-eval research (arXiv:2606.11686) rather than a thin wire now.
+- **Batch 4+ — drain the remaining 30 pending → SILVER, then GOLD enrich**, plus the NEW
+  NOVEL_COMPOSITION candidates below.
 - **Candidate NEW harnesses (NOVEL_COMPOSITION; from the 2026-06-15 Gemini Deep Research
   docs — vet before building; keep pure-stdlib + a frozen-literal corpus + non-circular
   prove):**

@@ -48,6 +48,13 @@ import sys
 from dataclasses import dataclass
 from datetime import date, datetime
 
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Oracle: parsing, canonicalization, and the strict validator
@@ -214,11 +221,261 @@ SORT_CASES: tuple[SortCase, ...] = (
 
 
 # ---------------------------------------------------------------------------
+# TEETH: a FROZEN corpus of (raw date string -> canonical ISO literal) that a
+# correct canonicalizer MUST produce.
+#
+# A date-canonicalization harness only has teeth if it CATCHES a parser that
+# silently produces the WRONG canonical date. The three real-world defects this
+# domain is famous for (per the campaign hint):
+#
+#   * MM/DD swap — a slash date like "5/9/2026" is US month-first (May 9) but a
+#     day-first (DD/MM) reader yields "2026-09-05" (September 5): a different,
+#     real day, the classic locale-confusion bug;
+#   * 2-digit-year century mishandling — "5/9/26" must pivot to 2026, not 1926;
+#     dropping the pivot (always 19xx) is the Y2K-era off-by-a-century defect;
+#   * timezone drop — "...T07:30:00Z" must keep its offset; silently discarding
+#     the timezone shifts the wall-clock instant and corrupts ordering.
+#
+# An impl is a callable ``canonicalize(raw: str) -> str``. prove() judges each
+# impl against the FROZEN LITERAL expected canonical strings baked into
+# CANONICALIZE_CORPUS (hand-written ISO constants, NEVER read back from the
+# oracle at runtime), so the check is non-circular. prove(impl) is True iff any
+# output diverges from the frozen literal (or the impl raises) — i.e. the planted
+# bug is caught.
+#
+# Pure + deterministic: string parsing + fixed calendar arithmetic only, no RNG,
+# no datetime.now / clock, no network, no filesystem, no threads. The century
+# pivot is a FIXED rule (00-68 -> 2000s, 69-99 -> 1900s, the POSIX/strptime
+# convention) — it does NOT depend on the current year, so the corpus stays
+# deterministic forever.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CanonicalizeCase:
+    """One raw date string and the literal canonical ISO a correct parser yields."""
+    name: str
+    raw: str
+    expected: str
+    note: str = ""
+
+
+# Fixed two-digit-year pivot (the POSIX / C strptime / RFC convention): years
+# 00-68 map to 2000-2068, 69-99 map to 1969-1999. A CONSTANT rule, independent of
+# the wall clock, so the frozen corpus below never drifts.
+_YEAR_PIVOT = 69
+
+
+def _expand_two_digit_year(year: int, raw_field: str) -> int:
+    """Expand a (possibly two-digit) year using the fixed POSIX pivot."""
+    if len(raw_field) <= 2:
+        return 2000 + year if year < _YEAR_PIVOT else 1900 + year
+    return year
+
+
+def _normalize_offset(tz: str) -> str:
+    """Normalize a non-Z timezone suffix to a zero-padded ``+HH:MM`` / ``-HH:MM``."""
+    sign, off = tz[0], tz[1:]
+    if ":" in off:
+        oh, om = off.split(":")
+    else:
+        oh, om = off[:2], (off[2:] or "00")
+    return f"{sign}{int(oh):02d}:{int(om):02d}"
+
+
+def canonicalize_iso(raw: str) -> str:
+    """ORACLE: canonicalize a raw date / datetime string to canonical ISO.
+
+    Reuses the harness's own ``canonicalize`` / ``parse_date`` for the bare ISO
+    date path and extends it (without changing that public behavior) to the two
+    other shapes this domain must get right:
+
+      * US slash dates ``M/D/Y`` / ``M/D/YY``  -> zero-padded ``YYYY-MM-DD``
+        (month-first, with the fixed 2-digit-year pivot);
+      * ISO datetimes ``YYYY-M-DTHH:MM[:SS][Z|+HH:MM|-HH:MM]`` -> zero-padded
+        ``YYYY-MM-DDTHH:MM:SS`` with the timezone offset PRESERVED.
+
+    Raises ``ValueError`` on input it cannot parse.
+    """
+    s = raw.strip()
+    if "/" in s:
+        parts = s.split("/")
+        if len(parts) != 3:
+            raise ValueError(f"unparseable slash date: {raw!r}")
+        mm, dd, yy = parts
+        month, day, year = int(mm), int(dd), int(yy)
+        year = _expand_two_digit_year(year, yy)
+        return date(year, month, day).strftime(_FORMAT)
+    if "T" in s or " " in s:
+        datepart, timepart = (s.split("T", 1) if "T" in s else s.split(" ", 1))
+        d = parse_date(datepart)  # tolerant of non-zero-padded fields
+        tz, body = "", timepart
+        if body.endswith("Z"):
+            tz, body = "Z", body[:-1]
+        elif "+" in body:
+            body, off = body.rsplit("+", 1)
+            tz = "+" + off
+        elif body.rfind("-") > body.find(":"):  # negative offset after the time
+            idx = body.rfind("-")
+            tz, body = body[idx:], body[:idx]
+        tparts = body.split(":")
+        hh = int(tparts[0])
+        mn = int(tparts[1]) if len(tparts) > 1 else 0
+        ss = int(tparts[2]) if len(tparts) > 2 else 0
+        if tz and tz != "Z":
+            tz = _normalize_offset(tz)
+        return f"{d.strftime(_FORMAT)}T{hh:02d}:{mn:02d}:{ss:02d}{tz}"
+    return canonicalize(s)
+
+
+# --- Planted buggy twins (each models a real date-canonicalization defect) ---
+
+def mutant_mmdd_swap(raw: str) -> str:
+    """BUG: reads slash dates as DAY-first (DD/MM/Y) instead of US month-first.
+
+    "5/9/2026" becomes 2026-09-05 (Sep 5) instead of 2026-05-09 (May 9) — the
+    classic US/EU locale MM/DD swap that silently maps to a different real day.
+    """
+    s = raw.strip()
+    if "/" in s:
+        parts = s.split("/")
+        if len(parts) != 3:
+            raise ValueError(f"unparseable slash date: {raw!r}")
+        dd, mm, yy = parts  # BUG: day-first
+        month, day, year = int(mm), int(dd), int(yy)
+        year = _expand_two_digit_year(year, yy)
+        return date(year, month, day).strftime(_FORMAT)
+    return canonicalize_iso(raw)
+
+
+def mutant_two_digit_year_no_pivot(raw: str) -> str:
+    """BUG: maps every 2-digit year into the 1900s with no pivot.
+
+    "5/9/26" becomes 1926-05-09 instead of 2026-05-09 — the Y2K-era off-by-a-
+    century defect that mis-files near-future dates a hundred years in the past.
+    """
+    s = raw.strip()
+    if "/" in s:
+        parts = s.split("/")
+        if len(parts) != 3:
+            raise ValueError(f"unparseable slash date: {raw!r}")
+        mm, dd, yy = parts
+        month, day, year = int(mm), int(dd), int(yy)
+        if len(yy) <= 2:
+            year = 1900 + year  # BUG: no pivot, always 19xx
+        return date(year, month, day).strftime(_FORMAT)
+    return canonicalize_iso(raw)
+
+
+def mutant_drop_timezone(raw: str) -> str:
+    """BUG: discards the timezone suffix when canonicalizing a datetime.
+
+    "2026-5-9T07:30:00Z" becomes 2026-05-09T07:30:00 (offset gone) — dropping the
+    zone re-interprets the instant as naive local time, silently shifting it and
+    corrupting any later range/ORDER BY comparison.
+    """
+    s = raw.strip()
+    if "/" in s:
+        return canonicalize_iso(raw)
+    if "T" in s or " " in s:
+        datepart, timepart = (s.split("T", 1) if "T" in s else s.split(" ", 1))
+        d = parse_date(datepart)
+        body = timepart
+        # BUG: strip the timezone and never re-emit it
+        if body.endswith("Z"):
+            body = body[:-1]
+        elif "+" in body:
+            body = body.rsplit("+", 1)[0]
+        elif body.rfind("-") > body.find(":"):
+            body = body[:body.rfind("-")]
+        tparts = body.split(":")
+        hh = int(tparts[0])
+        mn = int(tparts[1]) if len(tparts) > 1 else 0
+        ss = int(tparts[2]) if len(tparts) > 2 else 0
+        return f"{d.strftime(_FORMAT)}T{hh:02d}:{mn:02d}:{ss:02d}"  # tz dropped
+    return canonicalize(s)
+
+
+# Every ``expected`` value is a hand-written canonical-ISO literal — a constant,
+# never derived from the oracle at runtime — chosen so the correct oracle matches
+# all of them AND each planted mutant gets at least one wrong. The 2-digit-year
+# cases use the FIXED pivot, so they are clock-independent.
+CANONICALIZE_CORPUS: tuple[CanonicalizeCase, ...] = (
+    CanonicalizeCase("padded_iso", "2026-05-09", "2026-05-09",
+                     "already canonical ISO date"),
+    CanonicalizeCase("unpadded_iso", "2026-5-9", "2026-05-09",
+                     "non-zero-padded month and day (the lexical-sort trap)"),
+    CanonicalizeCase("unpadded_month", "2026-5-09", "2026-05-09",
+                     "only the month is unpadded"),
+    CanonicalizeCase("us_slash_four_digit_year", "5/9/2026", "2026-05-09",
+                     "US M/D/YYYY: month-first, not day-first"),
+    CanonicalizeCase("us_slash_ambiguous", "3/4/2026", "2026-03-04",
+                     "ambiguous 3/4: US month-first = March 4, NOT April 3"),
+    CanonicalizeCase("us_slash_two_digit_year_low", "5/9/26", "2026-05-09",
+                     "two-digit year 26 pivots to 2026 (POSIX pivot)"),
+    CanonicalizeCase("us_slash_two_digit_year_high", "5/9/99", "1999-05-09",
+                     "two-digit year 99 pivots to 1999 (POSIX pivot)"),
+    CanonicalizeCase("iso_datetime_utc", "2026-5-9T07:30:00Z", "2026-05-09T07:30:00Z",
+                     "datetime with UTC 'Z': the zone must be preserved"),
+    CanonicalizeCase("iso_datetime_offset", "2026-10-01T9:5:0+5:30",
+                     "2026-10-01T09:05:00+05:30",
+                     "datetime with +HH:MM offset: pad time AND keep the offset"),
+    CanonicalizeCase("iso_datetime_naive", "2026-1-2T3:4:5", "2026-01-02T03:04:05",
+                     "naive datetime: zero-pad every field, no spurious zone"),
+)
+
+
+def prove(impl) -> bool:
+    """True iff ``impl`` MIS-CANONICALIZES any frozen corpus case (the bug is
+    caught): the output diverges from the hand-written canonical literal, or the
+    impl raises on a case the oracle handles.
+
+    Non-circular + deterministic: every expectation is a literal baked into
+    CANONICALIZE_CORPUS, never read from the oracle; string + fixed calendar
+    arithmetic only, no RNG/clock/network/filesystem. An impl that raises on a
+    corpus case counts as caught.
+    """
+    for case in CANONICALIZE_CORPUS:
+        try:
+            got = impl(case.raw)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if got != case.expected:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=canonicalize_iso,
+    mutants=(
+        Mutant("mmdd_swap", mutant_mmdd_swap,
+               "reads slash dates day-first (DD/MM) instead of US month-first -> "
+               "'5/9/2026' canonicalizes to 2026-09-05, a different real day"),
+        Mutant("two_digit_year_no_pivot", mutant_two_digit_year_no_pivot,
+               "maps every 2-digit year into the 1900s with no pivot -> "
+               "'5/9/26' becomes 1926-05-09 instead of 2026-05-09"),
+        Mutant("drop_timezone", mutant_drop_timezone,
+               "discards the timezone suffix -> '...T07:30:00Z' loses its offset, "
+               "silently shifting the instant and corrupting ORDER BY"),
+    ),
+    corpus_size=len(CANONICALIZE_CORPUS),
+    kind="oracle_swap",
+    notes="a date canonicalizer must zero-pad, read US slash dates month-first, "
+          "pivot 2-digit years (00-68 -> 2000s), and preserve the timezone",
+)
+
+
+# ---------------------------------------------------------------------------
 # Runners
 # ---------------------------------------------------------------------------
 
 def list_scenarios() -> list[str]:
-    return [c.name for c in CANON_CASES] + [c.name for c in SORT_CASES]
+    return (
+        [c.name for c in CANON_CASES]
+        + [c.name for c in SORT_CASES]
+        + [c.name for c in CANONICALIZE_CORPUS]
+    )
 
 
 def run_canon_case(case: CanonCase) -> CaseResult:
@@ -251,59 +508,69 @@ def run_all() -> list[CaseResult]:
     return results
 
 
-def _run_self_test() -> int:
-    results = run_all()
-    failures = [r for r in results if not r.ok]
-    if failures:
-        for r in failures:
-            print(f"FAIL {r.name}: {r.detail}", file=sys.stderr)
-        return 1
+def _run_self_test(as_json: bool = False) -> int:
+    """Exercise the canonicalization / lexical-sort controls this harness exists
+    to guard, then assert the teeth: the correct oracle is clean and every
+    planted MM/DD-swap / 2-digit-year / timezone-drop mutant is caught.
 
-    # Headline proof: the lenient (buggy) validator accepts a non-canonical date
-    # that the strict oracle rejects.
+    Returns the process exit code (0 green / 1 on any failure). Emits a
+    machine-readable Report when ``as_json`` is set.
+    """
+    report = Report("core/lexical_date_canonicalization")
+
+    # 1. Every catalog case must match the oracle (canonical-ness + validity).
+    for r in run_canon_case_results():
+        report.record(f"canon_case:{r.name}", r.ok, detail=r.detail)
+    for r in (run_sort_case(c) for c in SORT_CASES):
+        report.record(f"sort_case:{r.name}", r.ok, detail=r.detail)
+
+    # 2. Headline proof: the lenient (buggy) validator accepts a non-canonical
+    #    date that the strict oracle rejects.
     trap = "2026-5-9"
-    if not lenient_is_valid(trap):
-        print("FAIL: lenient validator should accept the non-canonical trap date", file=sys.stderr)
-        return 1
-    if strict_is_valid(trap):
-        print("FAIL: strict validator should reject the non-canonical trap date", file=sys.stderr)
-        return 1
+    report.record("lenient_accepts_trap", lenient_is_valid(trap),
+                  detail="lenient validator must accept the non-canonical trap date")
+    report.record("strict_rejects_trap", not strict_is_valid(trap),
+                  detail="strict validator must reject the non-canonical trap date")
 
-    # Headline proof: the divergent dataset sorts wrong lexically but right after
-    # canonicalization.
-    if lexical_matches_chronological(DIVERGENT_DATES):
-        print("FAIL: divergent dataset should NOT agree lexically", file=sys.stderr)
-        return 1
+    # 3. Headline proof: the divergent dataset sorts wrong lexically but right
+    #    after canonicalization.
+    report.record("divergent_lexical_wrong",
+                  not lexical_matches_chronological(DIVERGENT_DATES),
+                  detail="non-canonical dataset must NOT agree lexically")
     canon_sorted = canonical_then_lexical_sort(DIVERGENT_DATES)
     chrono_sorted = [canonicalize(d) for d in chronological_sort(DIVERGENT_DATES)]
-    if canon_sorted != chrono_sorted:
-        print("FAIL: canonicalizing did not restore chronological order", file=sys.stderr)
-        return 1
+    report.add("canonicalize_restores_order", chrono_sorted, canon_sorted,
+               detail="canonicalizing must restore chronological ORDER BY")
 
-    print(
-        f"OK: {len(results)} canonicalization/sort controls passed; "
-        f"lenient validator caught accepting '{trap}', strict rejects it, "
-        f"and canonicalization restores chronological ORDER BY."
-    )
-    return 0
+    # 4. The correct oracle reproduces every frozen canonical literal exactly.
+    for case in CANONICALIZE_CORPUS:
+        report.add(f"oracle_canon:{case.name}", case.expected,
+                   canonicalize_iso(case.raw), detail=case.note)
+
+    # 5. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
+
+
+def run_canon_case_results() -> list[CaseResult]:
+    """Run every single-date catalog case against the oracle."""
+    return [run_canon_case(c) for c in CANON_CASES]
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run lexical date canonicalization controls")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--list-scenarios", action="store_true")
-    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
     args = parser.parse_args(argv)
 
     if args.list_scenarios:
         print("\n".join(list_scenarios()))
         return 0
-    if args.json:
-        print(json.dumps([r.__dict__ for r in run_all()], indent=2))
-        return 0
-    if args.self_test:
-        return _run_self_test()
-    return _run_self_test()
+    # Default action is the self-test (repo convention); --json implies it.
+    return _run_self_test(as_json=args.json)
 
 
 if __name__ == "__main__":

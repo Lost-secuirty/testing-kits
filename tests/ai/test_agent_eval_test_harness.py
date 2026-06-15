@@ -1,12 +1,16 @@
 """Test suite for agent_eval_test_harness."""
 
+import dataclasses
 import unittest
 
+from harnesses._teeth import verify
 from harnesses.ai.agent_eval_test_harness import (
     BAD_TRANSCRIPTS,
     GOOD_TRANSCRIPTS,
     SCENARIOS,
+    TEETH,
     TOOLS,
+    VERDICT_CORPUS,
     AgentEvalConfig,
     AgentEvalReport,
     ToolCall,
@@ -26,6 +30,8 @@ from harnesses.ai.agent_eval_test_harness import (
     _validity_no_hallucination_check,
     evaluate,
     list_scenarios,
+    oracle_score,
+    prove,
 )
 
 
@@ -171,6 +177,63 @@ class TestSelfTest(unittest.TestCase):
 
     def test_self_test_passes(self):
         self.assertEqual(_run_self_test(), 0)
+
+
+class TestTeeth(unittest.TestCase):
+    """The harness must catch a scorer that blesses a known-bad trajectory
+    (the campaign teeth contract)."""
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct trajectory scorer must NOT be flagged by prove.
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+        self.assertFalse(prove(oracle_score))
+
+    def test_every_mutant_is_caught(self):
+        # Each planted mis-scoring scorer must be individually caught.
+        self.assertEqual(len(TEETH.mutants), 3)
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl),
+                            f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
+        self.assertEqual(TEETH.corpus_size, len(VERDICT_CORPUS))
+
+    def test_oracle_matches_frozen_literals(self):
+        # The frozen verdicts are non-circular constants the oracle reproduces.
+        for case in VERDICT_CORPUS:
+            self.assertEqual(oracle_score(case.transcript), case.expected, case.name)
+
+    def test_noncircular_corpus(self):
+        """Corrupt one frozen literal and assert prove(oracle) flips to True.
+
+        If the baseline were circular (re-derived from the oracle at runtime),
+        corrupting a literal would have no effect and prove(oracle) would stay
+        False. Flipping proves the frozen corpus is the real arbiter.
+        """
+        import harnesses.ai.agent_eval_test_harness as mod
+        self.assertFalse(prove(oracle_score))  # clean against the true literals
+        original = mod.VERDICT_CORPUS
+        target = "bad_premature_claim"
+        corrupted = tuple(
+            dataclasses.replace(c, expected="pass") if c.name == target else c
+            for c in original
+        )
+        # sanity: the corruption actually changed a literal
+        self.assertNotEqual(corrupted, original)
+        mod.VERDICT_CORPUS = corrupted
+        try:
+            self.assertTrue(prove(oracle_score),
+                            "prove(oracle) must flip to True when a frozen "
+                            "literal is corrupted (non-circular corpus)")
+        finally:
+            mod.VERDICT_CORPUS = original
+        self.assertFalse(prove(oracle_score))  # restored
 
 
 if __name__ == "__main__":
