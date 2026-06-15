@@ -29,6 +29,13 @@ import sys
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Teeth  # noqa: E402
+
 RESERVED_PORT = 19310
 
 
@@ -412,6 +419,50 @@ def audit(schema: Schema, resolvers: set[tuple[str, str]], query_srcs: list[str]
         fragment_cycles=fragment_cycles(fragments),
         rejected_queries=rejected,
     )
+
+
+# ---------------------------------------------------------------------------
+# Teeth: the oracle (enforce_limits) accepts every in-budget query and rejects
+# every abusive one; the naive (no-limit) executor waves the abusive queries
+# through and is caught. Corpus = the frozen VALID_QUERIES / ABUSIVE_QUERIES.
+# ---------------------------------------------------------------------------
+# Each case: (query source, must_reject). enforce_limits/naive_execute share the
+# (node, schema, config) signature; "caught" means the impl disagrees with the
+# expected accept/reject verdict (or raises an unexpected exception).
+_TEETH_CASES: tuple[tuple[str, bool], ...] = (
+    tuple((src, False) for src in VALID_QUERIES.values())
+    + tuple((src, True) for src in ABUSIVE_QUERIES.values())
+)
+
+
+def _prove(impl: Callable[..., object]) -> bool:
+    """True iff `impl` disagrees with the frozen corpus on any case (i.e. caught)."""
+    cfg = GraphQLConfig()
+    for src, must_reject in _TEETH_CASES:
+        node = parse_query(src)
+        try:
+            impl(node, SCHEMA, cfg)
+            rejected = False
+        except (QueryTooDeep, QueryTooCostly):
+            rejected = True
+        except Exception:  # noqa: BLE001 — an unexpected raise counts as caught
+            return True
+        if rejected != must_reject:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=_prove,
+    oracle=enforce_limits,
+    mutants=(
+        Mutant("no_limit_executor", naive_execute,
+               "executor runs without any depth/cost guard, accepting abusive queries"),
+    ),
+    corpus_size=len(_TEETH_CASES),
+    kind="oracle_swap",
+    notes="an over-depth or over-cost query must be rejected, not executed",
+)
 
 
 # ---------------------------------------------------------------------------

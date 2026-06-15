@@ -25,6 +25,13 @@ from enum import Enum
 from typing import Any, Dict, Optional, Callable
 from dataclasses import dataclass, field
 
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Teeth  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Enums and Data Types
@@ -482,6 +489,69 @@ class ResponsePersistenceTester:
             "correct_store_works": correct_result == response,
             "buggy_store_fails": buggy_result is None,
         }
+
+
+# ---------------------------------------------------------------------------
+# Teeth: the response-persistence invariant.
+#
+# The core retry-safety invariant is that after start(key)+complete(key, resp),
+# a replay must return the ORIGINAL response. IdempotencyStore satisfies this;
+# StateOnlyStore is the planted defect that records state but drops the response,
+# so a replayed request can never return the cached result.
+#
+# `prove(store_factory)` is pure and deterministic: it builds a fresh store from
+# the supplied zero-arg factory and round-trips each case in a frozen, in-memory
+# corpus (no clock/network/filesystem; the store classes' own time.time() default
+# is never compared, only the persisted response value). It returns True iff the
+# store fails to return the original response on ANY case (i.e. the defect is
+# caught). Retrieval is interface-adaptive: the buggy store exposes get_response,
+# the correct store exposes get(...).response.
+# ---------------------------------------------------------------------------
+# Frozen corpus of (key, response) cases the persisted response must survive.
+_TEETH_CASES: tuple[tuple[str, Any], ...] = (
+    ("teeth-k1", {"amount": 100, "currency": "USD"}),
+    ("teeth-k2", {"txn": "abc", "v": 1}),
+    ("teeth-k3", "plain-string-response"),
+    ("teeth-k4", [1, 2, 3]),
+    ("teeth-k5", {"nested": {"ok": True}, "items": [9, 8, 7]}),
+)
+
+
+def _persisted_response(store: Any, key: str) -> Any:
+    """Retrieve the response a store kept for ``key``, across both interfaces."""
+    if hasattr(store, "get_response"):
+        return store.get_response(key)
+    entry = store.get(key)
+    return entry.response if entry is not None else None
+
+
+def _prove(store_factory: Callable[[], Any]) -> bool:
+    """True iff a fresh store from ``store_factory`` fails to round-trip the
+    original response on any frozen case (the response-persistence defect)."""
+    for key, response in _TEETH_CASES:
+        try:
+            store = store_factory()
+            store.start(key)
+            store.complete(key, response)
+            if _persisted_response(store, key) != response:
+                return True
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=_prove,
+    oracle=IdempotencyStore,
+    mutants=(
+        Mutant("response_not_persisted", StateOnlyStore,
+               "state-only store records COMPLETED but drops the response, so a "
+               "replayed request can never return the cached result"),
+    ),
+    corpus_size=len(_TEETH_CASES),
+    kind="oracle_swap",
+    notes="after start()+complete(), a replay must return the original response",
+)
 
 
 # ---------------------------------------------------------------------------

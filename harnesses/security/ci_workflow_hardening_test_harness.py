@@ -49,6 +49,13 @@ import sys
 from dataclasses import dataclass
 from typing import Any
 
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Teeth  # noqa: E402
+
 
 # ACTION uses-string regex, ported from the source control_audit.py.
 ACTION = re.compile(r"^(?P<owner>[^/]+)/(?P<repo>[^/@]+)(?:/[^@]+)?@(?P<ref>.+)$")
@@ -522,6 +529,46 @@ def run_case(case: WorkflowCase) -> AuditResult:
 
 def run_all() -> list[AuditResult]:
     return [run_case(case) for case in CASES]
+
+
+# ---------------------------------------------------------------------------
+# Teeth: the correct auditor reproduces every fixture's expected finding set;
+# the naive auditor (which skips the action-pin SHA check) disagrees on at
+# least one case and is therefore caught.
+# ---------------------------------------------------------------------------
+def _prove(impl: Any) -> bool:
+    """True iff `impl` disagrees with the frozen corpus on any case (caught).
+
+    For each WorkflowCase, run the candidate auditor and apply the harness's
+    own pass/fail rule: a should_pass fixture must yield zero findings; an
+    unsafe fixture must yield EXACTLY its expected finding codes. Any deviation
+    (or an exception) means the auditor is caught.
+    """
+    for case in CASES:
+        try:
+            codes = {finding.code for finding in impl(case.build_workflow())}
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if case.should_pass:
+            if codes:
+                return True
+        elif codes != set(case.expected_findings):
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=_prove,
+    oracle=audit_workflow,
+    mutants=(
+        Mutant("action_pin_skipped", audit_workflow_naive,
+               "naive auditor skips the action-pin SHA check and waves through "
+               "an action pinned to a mutable tag"),
+    ),
+    corpus_size=len(CASES),
+    kind="auditor",
+    notes="an action pinned to a mutable ref instead of a 40-hex SHA must be flagged",
+)
 
 
 def _run_self_test() -> int:

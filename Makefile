@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-core test-security test-ai test-pharmacy selftest proof report lint clean help
+.PHONY: test test-fast test-core test-security test-ai test-pharmacy selftest teeth proof mutmut report lint clean help
 
 PY ?= python3
 
@@ -11,7 +11,9 @@ help:
 	@echo "  test-ai        Run ai/ tests only"
 	@echo "  test-pharmacy  Same as test-fast"
 	@echo "  selftest       Run --self-test for every harness"
-	@echo "  proof          Run proof audit plus harness self-tests"
+	@echo "  teeth          Run the TEETH swap-check gate (cross-platform, mandatory)"
+	@echo "  proof          Run proof audit (teeth + self-tests)"
+	@echo "  mutmut         Advisory mutation lane (Linux/WSL only; never blocks)"
 	@echo "  report         Regenerate STATUS.md"
 	@echo "  lint           py_compile + ruff if installed"
 	@echo "  clean          Remove __pycache__ and *.pyc"
@@ -27,15 +29,27 @@ test-core test-security test-ai test-pharmacy:
 selftest:
 	$(PY) tools/generate_report.py --check
 
+teeth:
+	$(PY) tools/proof_audit.py
+
 proof:
 	$(PY) tools/proof_audit.py --run-selftests
+
+mutmut:
+	$(PY) tools/mutmut_lane.py
 
 report:
 	$(PY) tools/generate_report.py
 
 lint:
 	$(PY) -m compileall -q harnesses tests tools
-	@command -v ruff >/dev/null && ruff check harnesses tests tools || echo "ruff not installed; skipping ruff check"
+	@if command -v uv >/dev/null 2>&1; then \
+		uv run ruff check harnesses tests tools; \
+	elif command -v ruff >/dev/null 2>&1; then \
+		ruff check harnesses tests tools; \
+	else \
+		echo "ruff not installed; skipping ruff check"; \
+	fi
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

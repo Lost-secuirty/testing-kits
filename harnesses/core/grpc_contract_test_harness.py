@@ -30,6 +30,11 @@ import sys
 from dataclasses import dataclass
 from typing import Callable
 
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Teeth  # noqa: E402
+
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
@@ -353,6 +358,76 @@ def audit(*, evolved_desc: MessageDescriptor = V2_GOOD,
         idempotency_breaches=idem_bad,
         wire_type_changes=wire,
     )
+
+
+# ---------------------------------------------------------------------------
+# Teeth: each buggy twin, wired into its audit slot, must raise that slot's
+# violation count above zero; the matching oracle leaves the contract clean.
+# ---------------------------------------------------------------------------
+
+
+# Map each swappable callable to (audit keyword, violation field) for its slot.
+# Every buggy twin is judged only in its own slot against the frozen fixture
+# corpus baked into audit(); a defect is "caught" when it pushes that slot's
+# count above zero, while the matching oracle leaves the contract clean.
+_TEETH_SLOT_FOR: dict[Callable[..., object], tuple[str, str]] = {
+    enum_accessor_oracle: ("enum_accessor", "enum_mishandled"),
+    enum_accessor_buggy: ("enum_accessor", "enum_mishandled"),
+    propagate_deadline_oracle: ("deadline_propagator", "deadline_violations"),
+    propagate_deadline_ignoring: ("deadline_propagator", "deadline_violations"),
+    stream_handler_oracle: ("stream_handler", "stream_overruns"),
+    stream_handler_non_cancelling: ("stream_handler", "stream_overruns"),
+    status_service_oracle: ("status_service", "status_misuses"),
+    status_service_misuse: ("status_service", "status_misuses"),
+    metadata_hop_oracle: ("metadata_hop", "metadata_drops"),
+    metadata_hop_dropping: ("metadata_hop", "metadata_drops"),
+    idempotency_handler_oracle: ("idempotency_handler", "idempotency_breaches"),
+    idempotency_handler_ignoring: ("idempotency_handler", "idempotency_breaches"),
+}
+
+
+def _prove(impl: Callable[..., object]) -> bool:
+    """True iff `impl` is caught when judged against the frozen fixture corpus.
+
+    The impl is wired into its own audit slot and run over audit()'s baked-in
+    corpus; it is caught if that slot reports a violation (or raises). A correct
+    oracle leaves its slot clean, so this returns False for it.
+    """
+    slot = _TEETH_SLOT_FOR.get(impl)
+    if slot is None:
+        # An unknown impl that fits no slot is treated as caught, never silently
+        # clean.
+        return True
+    keyword, field_name = slot
+    try:
+        report = audit(**{keyword: impl})
+    except Exception:
+        # Any failure on a corpus case counts as caught.
+        return True
+    return getattr(report, field_name) >= 1
+
+
+TEETH = Teeth(
+    prove=_prove,
+    oracle=enum_accessor_oracle,
+    mutants=(
+        Mutant("enum_treated_as_open", enum_accessor_buggy,
+               "closed enum read like an open one: unknown value mistaken for real"),
+        Mutant("deadline_not_decremented", propagate_deadline_ignoring,
+               "forwards the original deadline downstream instead of time remaining"),
+        Mutant("stream_ignores_halfclose", stream_handler_non_cancelling,
+               "streaming handler keeps emitting after the client half-closes"),
+        Mutant("quota_as_permission_denied", status_service_misuse,
+               "quota error reported as PERMISSION_DENIED, not RESOURCE_EXHAUSTED"),
+        Mutant("metadata_dropped_across_hop", metadata_hop_dropping,
+               "tracing metadata (x-request-id) dropped across a service hop"),
+        Mutant("idempotency_key_ignored", idempotency_handler_ignoring,
+               "retried unary call applies its side effect twice"),
+    ),
+    corpus_size=len(RPCS),
+    kind="auditor",
+    notes="each contract-breaking twin must raise its audit violation count above zero",
+)
 
 
 # ---------------------------------------------------------------------------

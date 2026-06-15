@@ -29,6 +29,13 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Optional
 
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Teeth  # noqa: E402
+
 
 class Delivery(Enum):
     AT_LEAST_ONCE = "at_least_once"
@@ -302,6 +309,98 @@ def build_report(broker: InMemoryBroker, processed: list[Message]) -> DeliveryRe
         ordering_violations=violations,
         max_in_flight_observed=broker.max_in_flight_observed,
     )
+
+
+# ---------------------------------------------------------------------------
+# Teeth: a frozen corpus of delivery-contract cases parametrized by broker
+# CLASS. The oracle (InMemoryBroker) satisfies every case; each broken broker
+# violates exactly one guarantee, so the corpus catches every planted mutant.
+# `prove(impl)` is pure/deterministic (injected Clock, no I/O, no RNG).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _ContractCase:
+    """One delivery-contract expectation, judged against a broker class."""
+
+    name: str
+    # check(broker_cls) -> bool : True iff the broker HONORS this guarantee.
+    check: Callable[[type], bool]
+    expected: bool
+
+
+def _c_message_not_lost_on_crash(broker_cls: type) -> bool:
+    b = broker_cls(QueueConfig(), Clock())
+    b.publish(Message("m1", "k"))
+    proc = consume_all(b, crash_once=("m1",))
+    return "m1" in {m.id for m in proc}
+
+
+def _c_exactly_once_no_duplicates(broker_cls: type) -> bool:
+    b = broker_cls(QueueConfig(delivery=Delivery.EXACTLY_ONCE), Clock())
+    b.publish(Message("m1", "k"))
+    proc = consume_all(b, lose_ack_once=("m1",))
+    return build_report(b, proc).duplicates == 0
+
+
+def _c_head_of_key_blocks_second(broker_cls: type) -> bool:
+    b = broker_cls(QueueConfig(), Clock())
+    b.publish(Message("m0", "K"))
+    b.publish(Message("m1", "K"))
+    b.poll()                 # m0 in flight
+    second = b.poll()        # head-of-key: m1 must NOT be deliverable yet
+    return second is None
+
+
+def _c_poison_routes_to_dlq(broker_cls: type) -> bool:
+    b = broker_cls(QueueConfig(max_deliveries=3), Clock())
+    b.publish(Message("poison", "k"))
+    consume_all(b, nack_always=("poison",))
+    return [m.id for m in b.dlq] == ["poison"]
+
+
+_CONTRACT_CASES: tuple[_ContractCase, ...] = (
+    _ContractCase("message_not_lost_on_crash", _c_message_not_lost_on_crash, True),
+    _ContractCase("exactly_once_no_duplicates", _c_exactly_once_no_duplicates, True),
+    _ContractCase("head_of_key_blocks_second", _c_head_of_key_blocks_second, True),
+    _ContractCase("poison_routes_to_dlq", _c_poison_routes_to_dlq, True),
+)
+
+
+def _prove(impl: type) -> bool:
+    """True iff broker class `impl` violates the delivery contract on any case.
+
+    Returns True (caught) when an observed guarantee disagrees with the frozen
+    corpus expectation, or when driving the broker raises.
+    """
+    for case in _CONTRACT_CASES:
+        try:
+            observed = case.check(impl)
+        except Exception:  # noqa: BLE001 — a broker that crashes on a case is caught
+            return True
+        if observed != case.expected:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=_prove,
+    oracle=InMemoryBroker,
+    mutants=(
+        Mutant("acks_on_poll_loses_on_crash", NaiveBroker,
+               "acks at delivery time; a crash before processing loses the message"),
+        Mutant("exactly_once_never_dedups", LossyExactlyOnce,
+               "EXACTLY_ONCE configured but redelivery double-processes (no seen-set)"),
+        Mutant("no_per_key_serialization", OrderBreakingRebalance,
+               "delivers non-head-of-key messages → same-key work runs out of order"),
+        Mutant("never_routes_to_dlq", NoDlqBroker,
+               "poison messages redeliver forever instead of going to the DLQ"),
+    ),
+    corpus_size=len(_CONTRACT_CASES),
+    kind="oracle_swap",
+    notes="reference broker honors at-least/exactly-once, head-of-key order, and DLQ; "
+          "each planted broker violates exactly one of those guarantees",
+)
 
 
 # ---------------------------------------------------------------------------

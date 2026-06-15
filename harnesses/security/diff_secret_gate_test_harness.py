@@ -39,6 +39,13 @@ import re
 import sys
 from dataclasses import dataclass
 
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Teeth  # noqa: E402
+
 
 # ----------------------------------------------------------------------------
 # Secret patterns — ported verbatim from tools/scan_staged.py (SECRETS ONLY).
@@ -329,6 +336,39 @@ def run_case(case: DiffCase) -> DiffResult:
 
 def run_all() -> list[DiffResult]:
     return [run_case(case) for case in CASES]
+
+
+# ----------------------------------------------------------------------------
+# Teeth: the direction-aware oracle reproduces every fixture's expected finding
+# set; the naive scanner disagrees on at least one (it flags removed secrets).
+# ----------------------------------------------------------------------------
+def _prove(impl) -> bool:
+    """True iff `impl` disagrees with the frozen CASES corpus on any case.
+
+    Each case's diff is scanned and the produced findings compared to the
+    case's expected finding set; any mismatch (or an exception) counts as the
+    implementation being caught.
+    """
+    for case in CASES:
+        try:
+            if tuple(impl(case.diff)) != case.expected:
+                return True
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=_prove,
+    oracle=scan_diff,
+    mutants=(
+        Mutant("direction_blind", scan_diff_naive,
+               "naive scanner flags secrets on removed lines, blocking remediation diffs"),
+    ),
+    corpus_size=len(CASES),
+    kind="auditor",
+    notes="a secret on a removed ('-') line must not be reported as a finding",
+)
 
 
 def _run_self_test() -> int:

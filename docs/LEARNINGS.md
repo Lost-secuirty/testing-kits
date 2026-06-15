@@ -42,3 +42,49 @@ Append-only log of gotchas, fixes, API surprises, tool behavior, and verificatio
   (and Journal-and-findings) WARN on PII; the public repos BLOCK it. The
   variants are policy, not drift - read the module docstring before unifying.
   testing-kits is the de-facto upstream of the family.
+
+## 2026-06-14 - Batch 0: teeth campaign foundation (branch feat/batch0-teeth-foundation)
+
+- The old `proof_audit.py` "77/77 proven" was largely **keyword-based**: a harness
+  counted as proven if its source merely contained markers like "safe"/"bad"/"buggy"
+  (`embedded_controls`). That is string presence, not evidence a bug is caught.
+  Hardened the gate: proven now requires a verified `TEETH` swap-check (correct
+  oracle not flagged + every planted mutant caught + non-empty corpus), a paired
+  unittest, and a green self-test. Scopes: `required` (declares `TEETH`), `pending`
+  (no `TEETH` yet — counted, non-blocking), `legacy` (pharmacy, old soft gate). The
+  `pending→required` design lets the gate be honest-strong without red-locking `main`.
+- **Declaring `TEETH` is the opt-in to `required`** — there is no separate allowlist
+  file to drift. New shared contract is `harnesses/_teeth.py` (pure stdlib, one level
+  up so discovery's `harnesses/*/*.py` glob never treats it as a harness).
+- **Direct-script execution gotcha:** harnesses run as `python harnesses/<cat>/x.py`,
+  so `sys.path[0]` is the script dir, not repo root — a plain `from harnesses._teeth
+  import ...` crashes. Every TEETH harness needs the `parents[2]` sys.path bootstrap
+  (see `template/harness_template.py`). Verified empirically.
+- **"All 77 self-test OK" was partly hollow:** several harnesses (e.g.
+  core/idempotency) have no argparse/main, so `--self-test` is silently ignored and
+  exits 0 as a no-op. The TEETH swap-check, not the self-test exit code, is the real
+  signal. Each upgrade must add a genuine `Report`-based `--self-test`.
+- **Grep for buggy twins over-counts GOLD:** core/datetime matched a "naive/buggy"
+  string but has no oracle/twin/corpus and no real self-test — it is a class library
+  needing a full upgrade, not a TEETH add. The anchoring agent correctly STOPPED and
+  made zero edits rather than fabricate teeth.
+- Anchored 9 GOLD harnesses with verified TEETH (additions-only, 479 insertions, 0
+  deletions): check_digit_identifier, feature_flag, graphql, grpc_contract,
+  idempotency, queue, tracing, ci_workflow_hardening, diff_secret_gate. `kind` is
+  `oracle_swap` for predicate harnesses and `auditor` for finding-producers
+  (feature_flag, grpc_contract, ci_workflow_hardening, diff_secret_gate).
+- mutmut is **Linux/WSL-only** (boxed/mutmut#397 — confirmed: native Windows refuses).
+  So the mandatory cross-platform gate is the stdlib swap-check (`make teeth` /
+  `python tools/proof_audit.py`); `tools/mutmut_lane.py` + the CI `mutation-advisory`
+  job (`continue-on-error`) are advisory and never block. The lane skip path and
+  `--list` are verified on Windows; the live mutmut run is CI-validated-pending.
+- Tooling installed via `uv` (PEP 735 `[dependency-groups] dev`, `uv.lock` committed,
+  `.venv` gitignored): ruff 0.15.17, pytest 9.1.0, hypothesis, mutmut 3.6.0, deptry,
+  zizmor 1.25.2. CI keeps its existing per-tool `pip install` pattern (the required
+  path is pure-stdlib); migrating CI to uv is deferred. `[tool.mutmut]` uses the
+  renamed `source_paths` key (3.6+), not `paths_to_mutate`.
+- Verified this pass: `python tools/proof_audit.py --run-selftests` → 9 required (all
+  teeth-verified), 60 pending, 8 legacy, **0 failing, exit 0**; full unittest suite
+  **4420 tests OK** (153s). The proof_audit tool's own tests were rewritten in lockstep
+  (the 3 keyword-era tests moved to the legacy path; added swap-check + real-repo
+  required-path coverage).
