@@ -56,6 +56,25 @@ error_path_leak,schema_evolution}, security/{supplychain,upload}, ai/agent_memor
   core/payments, core/canvas_scene_state, core/game_loop_simulation, core/iot_telemetry,
   core/browser_e2e, core/lexical_date_canonicalization, security/cwe_kev_regression,
   ai/agent_eval, ai/drift_detection, ai/prompt_injection.
+- **Candidate NEW harnesses (NOVEL_COMPOSITION; from the 2026-06-15 Gemini Deep Research
+  docs — vet before building; keep pure-stdlib + a frozen-literal corpus + non-circular
+  prove):**
+  1. **gherkin_spec_determinism** — enforce constrained-Gherkin rules (declarative-not-
+     imperative, single `Feature`, strict Given/When/Then order, no XPath/DB-schema leak);
+     mutant = an imperative / multi-behavior / mechanic-leaking scenario that slips through.
+  2. **spec_gaming_guard** (hidden-test-split) — prove an impl GENERALIZES rather than
+     overfitting the visible tests; mutant = an impl that passes the visible split but fails
+     the withheld one. Most on-theme — a direct anti-vacuous-green oracle.
+  3. **context_compaction** (Sawtooth) — prove a compaction drops only irrelevant items and
+     keeps every required one; mutant = a compaction that evicts a required item.
+  4. **doc_freshness** — deterministic code↔doc divergence/staleness score; mutant = a stale
+     doc the scorer fails to flag.
+  5. **prompt_cache_prefix_stability** — dynamic content (timestamp / live query) in the
+     cached prefix must force a cache miss; mutant = a prefix layout that silently
+     invalidates yet still reports a cache hit.
+  6. **automation_analytics_metrics** — compute Defect-Escape / Stability / Pass-Rate over a
+     frozen test-run corpus; mutant = a calc that counts a flaky test as a pass.
+  Provenance + the doc fact-check corrections live in memory `project_gemini_doc_idea_backlog`.
 
 ## Per-tier research to apply (verified 2026-06-14; act at the batch)
 - **security/jwt** — CVE-2026-48526 (public JWK string accepted as HMAC secret →
