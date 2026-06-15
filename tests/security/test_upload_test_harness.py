@@ -18,6 +18,7 @@ import zipfile
 # Ensure parent dir is importable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from harnesses._teeth import verify
 from harnesses.security.upload_test_harness import (
     MultipartParser,
     DecompressionBombChecker,
@@ -34,6 +35,9 @@ from harnesses.security.upload_test_harness import (
     build_multipart_body,
     UploadValidator,
     DEFAULT_ALLOWED_TYPES,
+    TEETH,
+    prove,
+    oracle_validate,
 )
 
 
@@ -1087,6 +1091,31 @@ class TestBuildMultipartBody(unittest.TestCase):
         body = build_multipart_body(parts)
         for i in range(3):
             self.assertIn(f"data{i}".encode(), body)
+
+
+# ===========================================================================
+# 11. TEETH Tests — the harness catches real upload bugs
+# ===========================================================================
+
+class TestTeeth(unittest.TestCase):
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct upload validator must NOT be flagged by prove.
+        self.assertFalse(prove(oracle_validate))
+        self.assertFalse(prove(TEETH.oracle))
+
+    def test_every_mutant_is_caught(self):
+        # Each planted upload defect must be individually caught.
+        self.assertEqual(len(TEETH.mutants), 3)
+        for mutant in TEETH.mutants:
+            self.assertTrue(prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
 
 
 if __name__ == "__main__":

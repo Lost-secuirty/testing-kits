@@ -3,22 +3,25 @@ File Upload / Decompression-Bomb Test Harness (harness 35 of 36)
 Pure stdlib, zero external dependencies.
 """
 
+import argparse
 import gzip
-import hashlib
 import io
-import ipaddress
 import os
 import re
-import socket
-import struct
+import sys
 import threading
-import time
 import zlib
 import zipfile
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Dict, List, Optional, Tuple
-from urllib.parse import parse_qs
+from typing import Callable, Dict, List, Optional, Tuple
+
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -779,3 +782,355 @@ class UploadValidator:
                 return result
 
         return result
+
+
+# ---------------------------------------------------------------------------
+# TEETH: a FROZEN corpus of upload fixtures -> expected accept|reject verdict.
+#
+# An upload-validation harness only has teeth if it CATCHES a validator that
+# lets a dangerous file through. The networked MockUploadServer above is wired
+# up by the paired unittest over a real socket; the teeth, by contrast, drive a
+# PURE in-process upload-validation pipeline (the harness's own UploadValidator)
+# so the gate can verify "this harness catches a real upload bug" with zero
+# clock/network/filesystem I/O and full determinism.
+#
+# A *validator* maps a frozen UploadFixture to a literal verdict "accept"|"reject".
+# The oracle validator reuses the harness's correct UploadValidator pipeline under
+# a fixed policy: server-side magic-byte sniffing over the trusted bytes, an
+# extension/type allow-list, an absolute size cap, and a path-traversal-safe
+# filename check. Each Mutant is a faithful real-world upload defect.
+#
+# prove() judges a validator against the corpus's FROZEN expected verdicts --
+# never against the oracle object -- so the check is non-circular and seeds no RNG.
+# ---------------------------------------------------------------------------
+
+ACCEPT = "accept"
+REJECT = "reject"
+
+# The fixed validation policy the oracle and every mutant share. A tight cap so a
+# small in-corpus payload can exceed it deterministically, and an allow-list that
+# excludes executables/scripts.
+_TEETH_MAX_FILE_SIZE = 64  # bytes
+_TEETH_ALLOWED_TYPES = {
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "application/pdf",
+    "text/plain",
+}
+
+# Reusable magic-byte prefixes so fixtures are explicit about what the server
+# would actually sniff from the trusted bytes (independent of the declared type).
+_PNG_MAGIC = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+_JPEG_MAGIC = bytes([0xFF, 0xD8, 0xFF, 0xE0])
+_ZIP_MAGIC = bytes([0x50, 0x4B, 0x03, 0x04])
+
+
+@dataclass(frozen=True)
+class UploadFixture:
+    """A frozen upload fixture: filename, declared type, raw bytes (magic-bearing),
+    and the size of the payload. The corpus pairs each with an expected verdict."""
+    name: str
+    filename: Optional[str]
+    declared_type: str
+    data: bytes
+    note: str = ""
+
+    def part(self) -> UploadPart:
+        return UploadPart(
+            name="file",
+            filename=self.filename,
+            content_type=self.declared_type,
+            data=self.data,
+        )
+
+
+def _make_validator() -> UploadValidator:
+    return UploadValidator(
+        max_file_size=_TEETH_MAX_FILE_SIZE,
+        allowed_types=set(_TEETH_ALLOWED_TYPES),
+    )
+
+
+def oracle_validate(fixture: UploadFixture) -> str:
+    """Correct upload verdict — the contract UploadValidator implements.
+
+    Sniffs magic bytes over the trusted server-side bytes (rejecting a declared
+    type that disagrees with what the bytes actually are), enforces the type
+    allow-list, the absolute size cap, and a path-traversal-safe filename.
+    """
+    validator = _make_validator()
+    result = validator.validate_part(fixture.part())
+    return REJECT if result.rejected else ACCEPT
+
+
+# --- Planted buggy validators (each models a real, common upload defect) -----
+
+class _TrustDeclaredTypeValidator(UploadValidator):
+    """BUG: trusts the client-supplied Content-Type instead of sniffing the bytes.
+
+    The single most common file-upload vulnerability: the server believes the
+    declared MIME type and never sniffs the actual content. An attacker uploads a
+    script/executable (or an HTML/SVG-with-script polyglot, or a .php) and simply
+    labels it ``image/png``; because the declared type is on the allow-list and
+    the bytes are never inspected, the masquerading file sails through and is
+    later served/executed. Here the content-sniff step is dropped entirely.
+    """
+
+    def validate_part(self, part: UploadPart) -> UploadResult:  # type: ignore[override]
+        result = UploadResult(parts=[part])
+        if part.filename:
+            safe, reason, _ = self.filename_sanitizer.sanitize(part.filename)
+            if not safe:
+                result.rejected = True
+                result.rejection_reason = reason
+                result.errors.append(reason)
+                return result
+        bytes_read, limit_hit = self.size_checker.check_bytes(part.data)
+        if limit_hit:
+            msg = f"File exceeds size limit ({self.size_checker.limit} bytes)"
+            result.rejected = True
+            result.rejection_reason = msg
+            result.errors.append(msg)
+            return result
+        # BUG: only the DECLARED type is checked against the allow-list; the bytes
+        # are never sniffed, so a declared/actual mismatch is invisible.
+        if part.filename and not self.sniffer.is_allowed(part.content_type):
+            msg = "Content-Type not in allow-list"
+            result.rejected = True
+            result.rejection_reason = msg
+            result.errors.append(msg)
+        return result
+
+
+class _TraversalBlindValidator(UploadValidator):
+    """BUG: the filename check is skipped, so a path-traversal name is accepted.
+
+    A validator that forgot to sanitize the upload filename: ``../../etc/passwd``
+    (or ``..\\windows\\system32\\...``) flows straight to the storage layer, so an
+    attacker can write outside the upload directory (arbitrary file write / overwrite).
+    Models the classic 'we trusted the multipart filename' directory-traversal bug.
+    """
+
+    def validate_part(self, part: UploadPart) -> UploadResult:  # type: ignore[override]
+        result = UploadResult(parts=[part])
+        # BUG: no filename sanitization at all.
+        bytes_read, limit_hit = self.size_checker.check_bytes(part.data)
+        if limit_hit:
+            msg = f"File exceeds size limit ({self.size_checker.limit} bytes)"
+            result.rejected = True
+            result.rejection_reason = msg
+            result.errors.append(msg)
+            return result
+        if part.filename:
+            valid, msg = self.sniffer.validate(part.data, part.content_type)
+            if not valid:
+                result.rejected = True
+                result.rejection_reason = msg
+                result.errors.append(msg)
+        return result
+
+
+class _NoSizeCapValidator(UploadValidator):
+    """BUG: the size cap is never enforced, so an over-limit upload is accepted.
+
+    The size-limit step was dropped (or the limit is treated as advisory), so a
+    file far larger than the configured cap is accepted — a resource-exhaustion /
+    storage-abuse vector and a precursor to decompression-bomb amplification.
+    """
+
+    def validate_part(self, part: UploadPart) -> UploadResult:  # type: ignore[override]
+        result = UploadResult(parts=[part])
+        if part.filename:
+            safe, reason, _ = self.filename_sanitizer.sanitize(part.filename)
+            if not safe:
+                result.rejected = True
+                result.rejection_reason = reason
+                result.errors.append(reason)
+                return result
+        # BUG: no size check — the cap is silently skipped.
+        if part.filename:
+            valid, msg = self.sniffer.validate(part.data, part.content_type)
+            if not valid:
+                result.rejected = True
+                result.rejection_reason = msg
+                result.errors.append(msg)
+        return result
+
+
+def _validator_for(validator_cls: type) -> Callable[[UploadFixture], str]:
+    """Build a validator closure over an UploadValidator subclass under the shared
+    teeth policy. Used to mint the planted-mutant validators."""
+
+    def validate(fixture: UploadFixture) -> str:
+        validator = validator_cls(
+            max_file_size=_TEETH_MAX_FILE_SIZE,
+            allowed_types=set(_TEETH_ALLOWED_TYPES),
+        )
+        result = validator.validate_part(fixture.part())
+        return REJECT if result.rejected else ACCEPT
+
+    return validate
+
+
+mutant_trust_declared_type = _validator_for(_TrustDeclaredTypeValidator)
+mutant_traversal_blind = _validator_for(_TraversalBlindValidator)
+mutant_no_size_cap = _validator_for(_NoSizeCapValidator)
+
+
+# --- Frozen corpus: upload fixture -> expected verdict ----------------------
+
+UPLOAD_CORPUS: Tuple[UploadFixture, ...] = (
+    # --- content-type masquerade: declared image, bytes are something else ---
+    # (catches _TrustDeclaredTypeValidator, which never sniffs the bytes).
+    UploadFixture("png_declared_but_jpeg_bytes", "avatar.png", "image/png",
+                  _JPEG_MAGIC + b"jpeg",
+                  note="declared image/png but the bytes sniff as image/jpeg -> reject"),
+    UploadFixture("png_declared_but_zip_bytes", "logo.png", "image/png",
+                  _ZIP_MAGIC + b"PK..",
+                  note="declared image/png but the bytes are a ZIP archive -> reject"),
+    UploadFixture("pdf_declared_but_png_bytes", "report.pdf", "application/pdf",
+                  _PNG_MAGIC + b"rest",
+                  note="declared application/pdf but the bytes sniff as image/png -> reject"),
+    # --- path traversal: a traversal filename must be rejected --------------
+    # (catches _TraversalBlindValidator, which skips filename sanitization).
+    UploadFixture("traversal_unix", "../../etc/passwd", "image/png",
+                  _PNG_MAGIC + b"rest",
+                  note="../../etc/passwd is a path-traversal filename -> reject"),
+    UploadFixture("traversal_windows", "..\\..\\windows\\system32\\evil.png", "image/png",
+                  _PNG_MAGIC + b"rest",
+                  note="..\\..\\ is a path-traversal filename -> reject"),
+    # --- size cap: an over-limit upload must be rejected --------------------
+    # (catches _NoSizeCapValidator, which skips the size check). 65 > 64-byte cap.
+    UploadFixture("over_size_cap", "big.png", "image/png",
+                  _PNG_MAGIC + b"A" * 57,  # 8 magic + 57 = 65 bytes > 64 cap
+                  note="payload of 65 bytes exceeds the 64-byte cap -> reject"),
+    # --- disallowed declared type (every impl must reject) ------------------
+    UploadFixture("disallowed_executable", "malware.exe", "application/x-msdownload",
+                  b"MZ\x90\x00",
+                  note="application/x-msdownload is not on the allow-list -> reject"),
+    # --- baseline accepts the oracle MUST honour (so reject-everything caught) -
+    UploadFixture("valid_png", "photo.png", "image/png",
+                  _PNG_MAGIC + b"rest",
+                  note="declared png, bytes sniff as png, safe name, under cap -> accept"),
+    UploadFixture("valid_jpeg", "photo.jpg", "image/jpeg",
+                  _JPEG_MAGIC + b"jpg",
+                  note="declared jpeg, bytes sniff as jpeg, safe name, under cap -> accept"),
+    UploadFixture("valid_text_no_magic", "notes.txt", "text/plain",
+                  b"plain text under the cap",
+                  note="text/plain has no magic; allowed type, safe name, under cap -> accept"),
+)
+
+# Literal expected verdicts, computed by hand from the upload contract — NEVER
+# read back from the oracle object, which is what keeps prove() non-circular.
+EXPECTED_VERDICTS: Dict[str, str] = {
+    "png_declared_but_jpeg_bytes": REJECT,
+    "png_declared_but_zip_bytes": REJECT,
+    "pdf_declared_but_png_bytes": REJECT,
+    "traversal_unix": REJECT,
+    "traversal_windows": REJECT,
+    "over_size_cap": REJECT,
+    "disallowed_executable": REJECT,
+    "valid_png": ACCEPT,
+    "valid_jpeg": ACCEPT,
+    "valid_text_no_magic": ACCEPT,
+}
+
+
+def prove(validator: Callable[[UploadFixture], str]) -> bool:
+    """True iff ``validator`` MISVALIDATES any frozen corpus case (i.e. caught).
+
+    Non-circular and deterministic: each verdict is compared against the literal
+    EXPECTED_VERDICTS constant, never against the oracle object. No clock, network,
+    filesystem I/O, or RNG. A validator that raises on a corpus case counts as caught.
+    """
+    for fixture in UPLOAD_CORPUS:
+        expected = EXPECTED_VERDICTS[fixture.name]
+        try:
+            actual = validator(fixture)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if actual != expected:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_validate,
+    mutants=(
+        Mutant("trusts_declared_content_type", mutant_trust_declared_type,
+               "trusts the client Content-Type instead of sniffing the bytes: a "
+               "script/executable labelled image/png is accepted (masquerade)"),
+        Mutant("path_traversal_filename", mutant_traversal_blind,
+               "filename never sanitized: ../../etc/passwd is accepted -> "
+               "arbitrary file write outside the upload directory"),
+        Mutant("skips_size_cap", mutant_no_size_cap,
+               "size cap never enforced: an over-limit upload is accepted -> "
+               "resource exhaustion / storage abuse"),
+    ),
+    corpus_size=len(UPLOAD_CORPUS),
+    kind="oracle_swap",
+    notes="sniff magic bytes over trusted server-side bytes, enforce the type "
+          "allow-list, the absolute size cap, and a path-traversal-safe filename",
+)
+
+
+def list_scenarios() -> List[str]:
+    """Names of the frozen corpus fixtures (the teeth scenarios)."""
+    return [f.name for f in UPLOAD_CORPUS]
+
+
+# ---------------------------------------------------------------------------
+# Report-based self-test — fails loud, reports findings, asserts the teeth.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(as_json: bool = False) -> int:
+    report = Report("security/upload")
+
+    # 1. The correct oracle validator must match every frozen expected verdict.
+    for fixture in UPLOAD_CORPUS:
+        expected = EXPECTED_VERDICTS[fixture.name]
+        actual = oracle_validate(fixture)
+        report.add(f"oracle_case:{fixture.name}", expected, actual, detail=fixture.note)
+
+    # 2. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    # 3. Harness-specific invariants exercised directly against the components.
+    sniffer = ContentTypeSniffer(set(_TEETH_ALLOWED_TYPES))
+    valid, _ = sniffer.validate(_JPEG_MAGIC + b"x", "image/png")
+    report.record("sniff_catches_mismatch", not valid,
+                  detail="declared png but jpeg bytes must be rejected by the sniffer")
+    san = FilenameSanitizer()
+    report.record("traversal_filename_unsafe", not san.is_safe("../../etc/passwd"),
+                  detail="a path-traversal filename must be flagged unsafe")
+    n, hit = SizeLimitChecker(_TEETH_MAX_FILE_SIZE).check_bytes(b"A" * (_TEETH_MAX_FILE_SIZE + 1))
+    report.record("size_cap_enforced", hit,
+                  detail="a payload over the cap must trip the size checker")
+
+    return report.emit(as_json=as_json)
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point — default action is the self-test (repo convention).
+# ---------------------------------------------------------------------------
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="File Upload / Decompression-Bomb Test Harness")
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true",
+                        help="list the frozen upload corpus fixture names")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
+    return _run_self_test(as_json=args.json)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

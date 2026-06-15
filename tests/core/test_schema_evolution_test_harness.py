@@ -3,15 +3,20 @@
 import sqlite3
 import unittest
 
+from harnesses._teeth import verify
 from harnesses.core.schema_evolution_test_harness import (
+    MIGRATION_CORPUS,
     SCENARIOS,
     SCHEMAS,
+    TEETH,
+    Field,
     Reader,
     Writer,
     _fresh_db,
     _normalize,
     _run_self_test,
     apply_migration,
+    is_breaking,
     list_scenarios,
 )
 
@@ -108,6 +113,70 @@ class TestScenarios(unittest.TestCase):
 
     def test_self_test_passes(self):
         self.assertEqual(_run_self_test(), 0)
+
+
+class TestCompatibilityOracle(unittest.TestCase):
+    """The backward-compatibility checker that backs the teeth corpus."""
+
+    def test_oracle_matches_every_corpus_verdict(self):
+        for case in MIGRATION_CORPUS:
+            with self.subTest(case=case.name):
+                self.assertEqual(
+                    is_breaking(case.old, case.new),
+                    case.expected_breaking,
+                    f"{case.name}: {case.note}",
+                )
+
+    def test_add_optional_is_compatible(self):
+        old = {"id": Field("INTEGER", required=True)}
+        new = {"id": Field("INTEGER", required=True), "tag": Field("TEXT")}
+        self.assertFalse(is_breaking(old, new))
+
+    def test_drop_is_breaking(self):
+        old = {"id": Field("INTEGER", required=True), "x": Field("TEXT")}
+        new = {"id": Field("INTEGER", required=True)}
+        self.assertTrue(is_breaking(old, new))
+
+    def test_narrow_is_breaking(self):
+        old = {"x": Field("TEXT")}
+        new = {"x": Field("INTEGER")}
+        self.assertTrue(is_breaking(old, new))
+
+    def test_widen_is_compatible(self):
+        old = {"x": Field("INTEGER")}
+        new = {"x": Field("TEXT")}
+        self.assertFalse(is_breaking(old, new))
+
+    def test_new_required_no_default_is_breaking(self):
+        old = {"id": Field("INTEGER", required=True)}
+        new = {"id": Field("INTEGER", required=True),
+               "t": Field("INTEGER", required=True)}
+        self.assertTrue(is_breaking(old, new))
+
+    def test_new_required_with_default_is_compatible(self):
+        old = {"id": Field("INTEGER", required=True)}
+        new = {"id": Field("INTEGER", required=True),
+               "t": Field("TEXT", required=True, default="x")}
+        self.assertFalse(is_breaking(old, new))
+
+
+class TestTeeth(unittest.TestCase):
+    """The harness must catch a real planted schema-compatibility bug."""
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+
+    def test_every_mutant_is_caught(self):
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
 
 
 if __name__ == "__main__":

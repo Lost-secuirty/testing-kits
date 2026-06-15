@@ -11,6 +11,7 @@ import unittest
 import urllib.request
 import json
 
+from harnesses._teeth import verify
 from harnesses.core.concurrency_test_harness import (
     SharedCounter,
     UnsafeCounter,
@@ -33,6 +34,12 @@ from harnesses.core.concurrency_test_harness import (
     MockServer,
     ConcurrentHTTPTest,
     ConcurrencyTestHarness,
+    TEETH,
+    prove,
+    oracle_impl,
+    simulate,
+    SCENARIOS,
+    _final_state,
 )
 
 
@@ -605,6 +612,52 @@ class TestConcurrencyTestHarness(unittest.TestCase):
         self.assertIn("passed", summary)
         self.assertIn("failed", summary)
         self.assertIn("details", summary)
+
+
+# ---------------------------------------------------------------------------
+# Teeth — the deterministic interleaving model must catch a real concurrency bug
+# (the campaign teeth contract). These tests are pure + reproducible: no real
+# thread timing, so they never flake.
+# ---------------------------------------------------------------------------
+
+class TestTeeth(unittest.TestCase):
+    """The harness must catch a real planted concurrency bug deterministically."""
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct lock/atomic control must NOT be flagged by prove.
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+        self.assertFalse(prove(oracle_impl))
+
+    def test_every_mutant_is_caught(self):
+        # Each planted defect (lost update / dropped lock / overdraft) is caught.
+        self.assertEqual(len(TEETH.mutants), 3)
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
+
+    def test_oracle_matches_every_frozen_expectation(self):
+        # The literal corpus expectations are reproduced by the correct oracle.
+        for scenario in SCENARIOS:
+            self.assertEqual(_final_state(oracle_impl, scenario), scenario.expected,
+                             f"oracle diverged on {scenario.name}")
+
+    def test_prove_is_deterministic(self):
+        # Same impl -> same verdict across repeated runs (no real thread timing).
+        self.assertEqual([prove(oracle_impl) for _ in range(5)], [False] * 5)
+        first = TEETH.mutants[0].impl
+        self.assertEqual([prove(first) for _ in range(5)], [True] * 5)
+
+    def test_simulator_locked_increment_loses_nothing(self):
+        # Two locked +1 increments from 0 reach 2 under the lost-update schedule.
+        sc = SCENARIOS[0]
+        self.assertEqual(_final_state(oracle_impl, sc), 2)
 
 
 if __name__ == "__main__":

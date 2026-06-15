@@ -10,7 +10,9 @@ import unittest
 import urllib.request
 from typing import Dict, List, Set
 
+from harnesses._teeth import verify
 from harnesses.security.supplychain_test_harness import (
+    TEETH,
     Advisory,
     FindingRecord,
     IntegrityChecker,
@@ -30,6 +32,8 @@ from harnesses.security.supplychain_test_harness import (
     _version_tuple,
     build_default_advisories,
     build_default_registry_packages,
+    oracle_admit,
+    prove,
 )
 
 
@@ -1289,6 +1293,32 @@ class TestIntegration(unittest.TestCase):
         _, findings = tc.resolve(['a'], graph, {'a', 'b'})  # 'c' missing
         report.add(findings)
         self.assertTrue(report.has_errors())
+
+
+# ---------------------------------------------------------------------------
+# Teeth tests — the universal swap-check is wired into the paired test.
+# ---------------------------------------------------------------------------
+
+class TestTeeth(unittest.TestCase):
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct admission decider must NOT be flagged by prove.
+        self.assertFalse(prove(oracle_admit))
+        self.assertFalse(prove(TEETH.oracle))
+
+    def test_every_mutant_is_caught(self):
+        # Each planted supply-chain defect must be individually caught.
+        self.assertEqual(len(TEETH.mutants), 3)
+        for mutant in TEETH.mutants:
+            self.assertTrue(prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
 
 
 if __name__ == '__main__':

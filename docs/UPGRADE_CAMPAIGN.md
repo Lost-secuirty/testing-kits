@@ -19,19 +19,19 @@ and **reports its findings** (structured). Gate + contract are documented in
   → `--self-test`/`--json` `Report` → pair unittest → (security/ai: proof test) →
   flip `pending → required` → draft PR (operator merges).
 
-## Status snapshot (Batch 1, 2026-06-15)
+## Status snapshot (Batch 2, 2026-06-15)
 
 | Scope | Count | Meaning |
 |---|---:|---|
-| required (teeth verified) | 19 | proven by the swap-check; gate blocks on these |
-| pending | 50 | in scope, no `TEETH` yet — counted, non-blocking |
+| required (teeth verified) | 29 | proven by the swap-check; gate blocks on these |
+| pending | 40 | in scope, no `TEETH` yet — counted, non-blocking |
 | legacy (pharmacy) | 8 | older soft gate, out of campaign |
 
-**required (19):** core/check_digit_identifier, core/feature_flag, core/graphql,
-core/grpc_contract, core/idempotency, core/queue, core/tracing,
-security/ci_workflow_hardening, security/diff_secret_gate · **+Batch 1:** core/api,
-core/cache, core/cli, core/config, core/contract, core/null_propagation,
-core/pagination, core/serialization, core/statemachine, security/authz.
+**required (29):** Batch 0 (9) core/{check_digit_identifier,feature_flag,graphql,
+grpc_contract,idempotency,queue,tracing}, security/{ci_workflow_hardening,diff_secret_gate}
+· Batch 1 (10) core/{api,cache,cli,config,contract,null_propagation,pagination,serialization,
+statemachine}, security/authz · Batch 2 (10) core/{db,scraper,fuzz,numeric,concurrency,
+error_path_leak,schema_evolution}, security/{supplychain,upload}, ai/agent_memory_context.
 
 ## Batch roadmap (provisional; exact membership ranked at each batch start)
 
@@ -43,9 +43,13 @@ core/pagination, core/serialization, core/statemachine, security/authz.
   core/cli, core/serialization, core/pagination, core/statemachine, core/null_propagation.
   Pattern: frozen literal corpus + reused-correct-logic oracle + faithful planted
   mutant(s) + Report `--self-test` + paired `TestTeeth`; adversarially verified non-circular.
-- **Batch 2 — BRONZE heavy rewrites:** core/db, core/scraper, core/fuzz, core/numeric,
+- **Batch 2 — DONE (2026-06-15):** real TEETH wired into 10 heavy-rewrite harnesses, all
+  flipped pending → required: core/db, core/scraper, core/fuzz, core/numeric,
   core/concurrency, core/error_path_leak, core/schema_evolution, security/supplychain,
-  security/upload, ai/agent_memory_context.
+  security/upload, ai/agent_memory_context. Notable: numeric mutants use an explicit `+=`
+  loop (sum() Neumaier-compensates on 3.12+); concurrency models the race via a
+  deterministic interleaving (no real threads in prove); the ai harness judges against
+  frozen retrieved-id literals (NOT a model/embedding — the AI-eval circularity trap).
 - **Batch 3+ — drain remaining pending → SILVER, then GOLD enrich.** Likely
   quick-win "near-GOLD" candidates (already have an oracle/twin or planted-bad
   fixtures — mostly a `TEETH` wiring + real `--self-test`): core/statistical_rng_oracle,
@@ -77,19 +81,19 @@ core/pagination, core/serialization, core/statemachine, security/authz.
 ## Full in-scope status
 Legend: `R` required · `P` pending · (pharmacy = legacy, omitted).
 
-**core (52):** R api, cache, check_digit_identifier, cli, config, contract, feature_flag,
-graphql, grpc_contract, idempotency, null_propagation, pagination, queue, serialization,
+**core (52):** R api, cache, check_digit_identifier, cli, concurrency, config, contract,
+db, error_path_leak, feature_flag, fuzz, graphql, grpc_contract, idempotency,
+null_propagation, numeric, pagination, queue, schema_evolution, scraper, serialization,
 statemachine, tracing · P a11y, browser_e2e, canvas_scene_state, cardinality, chaos,
-circuitbreaker, clock_skew, complexity, concurrency, datetime, db, dormant_code,
-error_path_leak, errorpath, fuzz, game_loop_simulation, hermeticity, i18n, iot_telemetry,
-lexical_date_canonicalization, logging, memory, mutation, network, numeric, payments,
-pipeline, property, ratelimit, regression_snapshot, schema_evolution, scraper,
-search_relevance, statistical_rng_oracle, stress, webhook
+circuitbreaker, clock_skew, complexity, datetime, dormant_code, errorpath,
+game_loop_simulation, hermeticity, i18n, iot_telemetry, lexical_date_canonicalization,
+logging, memory, mutation, network, payments, pipeline, property, ratelimit,
+regression_snapshot, search_relevance, statistical_rng_oracle, stress, webhook
 
-**security (10):** R authz, ci_workflow_hardening, diff_secret_gate · P appsec,
-cwe_kev_regression, jwt, pii_redaction, security, supplychain, upload
+**security (10):** R authz, ci_workflow_hardening, diff_secret_gate, supplychain, upload
+· P appsec, cwe_kev_regression, jwt, pii_redaction, security
 
-**ai (7):** P agent_eval, agent_memory_context, agentic, drift_detection, llm_eval,
+**ai (7):** R agent_memory_context · P agent_eval, agentic, drift_detection, llm_eval,
 prompt_injection, rag_eval
 
 > `core/stress` also still uses the non-standard `stress_harness.py` filename

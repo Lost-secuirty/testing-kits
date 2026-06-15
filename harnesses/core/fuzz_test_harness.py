@@ -5,6 +5,7 @@ Pure stdlib, zero external dependencies.
 Mock HTTP server on dynamic port (default 18960).
 """
 
+import argparse
 import random
 import sys
 import math
@@ -12,15 +13,19 @@ import traceback
 import hashlib
 import threading
 import time
-import json
 import socket
-import io
-import struct
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from collections import defaultdict
+
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 
 # ─── Constants ────────────────────────────────────────────────────────────────
@@ -1192,9 +1197,262 @@ def explore_boundaries(
     return explorer.probe_function(target, input_type=input_type)
 
 
-# ─── Main (demo) ──────────────────────────────────────────────────────────────
+# ─── TEETH ──────────────────────────────────────────────────────────────────
+#
+# This harness IS a fuzzer / crash finder. It has teeth only if it CATCHES a
+# target that crashes on an adversarial input while NOT flagging a robust target
+# that survives the same corpus. The teeth here exercise the harness's own
+# deterministic crash-detection path — ``FuzzRunner.fuzz_with_inputs`` — over a
+# FROZEN literal corpus of inputs that a real, naive implementation would mishandle.
+#
+# An "impl" under test is a single-argument target callable. prove(impl) is True
+# iff the harness's runner records >=1 crash for ``impl`` over the frozen corpus.
+#
+# Non-circularity: prove() never compares ``impl``'s output to the oracle's. It
+# asks the harness "does this target crash on any frozen input?" and judges that
+# against the corpus's frozen per-input expectations (``oracle_survives`` for
+# every case is True, and each planted mutant has at least one case where it must
+# crash). The oracle is the harness's correct robust target; each Mutant models a
+# genuine real-world bug that crashes on a specific adversarial input the corpus
+# pins down. Determinism: ``fuzz_with_inputs`` replays a FIXED input list with no
+# RNG, and the corpus uses no clock / network / filesystem / thread timing.
 
-if __name__ == "__main__":
+# Each frozen input also pins how a fixed-width parser should treat it, so the
+# corpus expectations are literal and hand-computed rather than read from the
+# oracle. ``_TEETH_SEED`` keeps every internal RNG seeded for reproducibility.
+_TEETH_SEED = 1234
+
+# A 32-bit signed range used by the "overflow" mutant — the classic real-world
+# bug where code assumes values fit a fixed-width register.
+_INT32_MIN = -(2 ** 31)
+_INT32_MAX = 2 ** 31 - 1
+
+# The pipe delimiter the "unescaped delimiter" mutant naively splits on. A real
+# CSV/log parser that splits on a raw delimiter corrupts (or, when it then indexes
+# a fixed column, crashes on) any field that itself contains the delimiter.
+_DELIM = "|"
+
+
+@dataclass(frozen=True)
+class FuzzCase:
+    """One frozen fuzz input plus the literal expectation that the correct,
+    robust oracle survives it (no exception). The mutants each crash on at least
+    one of these inputs; the oracle crashes on none."""
+    name: str
+    value: Any
+    oracle_survives: bool  # always True here: the robust oracle handles every case
+    note: str = ""
+
+
+# The frozen corpus: a hand-picked set of adversarial inputs covering the bug
+# classes in the hint (huge int, fixed-width overflow, unescaped delimiter,
+# empty/None handling, off-by-one on an empty sequence). Every value is a literal;
+# nothing is generated at prove() time.
+_FUZZ_CORPUS: Tuple[FuzzCase, ...] = (
+    FuzzCase("empty_string", "", True,
+             "empty input: a robust parser returns a default, a naive one indexes [0]"),
+    FuzzCase("none_value", None, True,
+             "None: a robust target type-checks first; a naive one calls a method on None"),
+    FuzzCase("zero_int", 0, True,
+             "0: divide-by-zero bait for an unguarded reciprocal"),
+    FuzzCase("int32_overflow", _INT32_MAX + 1, True,
+             "2**31: overflows a fixed-width 32-bit field a naive impl asserts on"),
+    FuzzCase("huge_int", 2 ** 70, True,
+             "a value far beyond any fixed-width register"),
+    FuzzCase("field_with_delimiter", f"user{_DELIM}id{_DELIM}x", True,
+             "a value containing the delimiter: naive split() yields too many columns"),
+    FuzzCase("plain_field", "alice", True,
+             "an ordinary delimiter-free field both impls accept"),
+    FuzzCase("empty_list", [], True,
+             "empty sequence: off-by-one bait for an impl that reads element [0]"),
+)
+
+
+# --- ORACLE: a robust target that survives every frozen adversarial input ----
+
+def oracle_target(value: Any) -> str:
+    """Correct, defensive target: validates types and bounds, never crashes on
+    any frozen corpus input. This is the robust reference the harness must NOT
+    flag. It models a correctly-written record parser:
+
+      * None / empty are handled explicitly,
+      * integers are range-checked instead of stuffed into a fixed-width field,
+      * delimited strings are split with a column cap so an embedded delimiter
+        cannot blow up downstream indexing,
+      * empty sequences are handled before any element access.
+    """
+    if value is None:
+        return "none"
+    if isinstance(value, bool):  # bool before int (bool is a subclass of int)
+        return f"bool:{value}"
+    if isinstance(value, int):
+        # Range-check instead of asserting a fixed-width fit; arbitrary precision.
+        return f"int:{'big' if not (_INT32_MIN <= value <= _INT32_MAX) else 'ok'}"
+    if isinstance(value, str):
+        if value == "":
+            return "empty"
+        # maxsplit caps the column count, so an embedded delimiter is harmless.
+        first = value.split(_DELIM, 1)[0]
+        return f"str:{first}"
+    if isinstance(value, (list, tuple)):
+        return f"seq:{len(value)}"  # length first; never indexes a maybe-empty seq
+    return f"other:{type(value).__name__}"
+
+
+# --- Planted buggy twins (each crashes on a specific frozen adversarial input) ---
+
+def overflow_target(value: Any) -> str:
+    """BUG: assumes every integer fits a signed 32-bit register and ASSERTS the
+    fit — the classic fixed-width overflow defect (think a C int, a database
+    INTEGER column, or a protobuf int32). Crashes (AssertionError) on the frozen
+    ``int32_overflow`` and ``huge_int`` cases; survives small ints and non-ints.
+    """
+    if value is None:
+        return "none"
+    if isinstance(value, bool):
+        return f"bool:{value}"
+    if isinstance(value, int):
+        assert _INT32_MIN <= value <= _INT32_MAX, "int32 overflow"  # BUG
+        return f"int:ok"
+    if isinstance(value, str):
+        return "empty" if value == "" else f"str:{value.split(_DELIM, 1)[0]}"
+    if isinstance(value, (list, tuple)):
+        return f"seq:{len(value)}"
+    return f"other:{type(value).__name__}"
+
+
+def unescaped_delimiter_target(value: Any) -> str:
+    """BUG: splits a delimited field on the RAW delimiter with no maxsplit, then
+    indexes a fixed column count — a real CSV/log-parsing defect. A value that
+    itself contains the delimiter yields extra columns and the fixed index
+    (``parts[1]`` expecting exactly two columns) is wrong / raises. Here it
+    asserts the exact column count and crashes on ``field_with_delimiter``.
+    """
+    if value is None:
+        return "none"
+    if isinstance(value, bool):
+        return f"bool:{value}"
+    if isinstance(value, int):
+        return f"int:{'big' if not (_INT32_MIN <= value <= _INT32_MAX) else 'ok'}"
+    if isinstance(value, str):
+        if value == "":
+            return "empty"
+        parts = value.split(_DELIM)  # BUG: no maxsplit cap
+        # naive code expects at most 2 columns ("name|value") and asserts it
+        assert len(parts) <= 2, "unexpected extra delimiter columns"  # BUG
+        return f"str:{parts[0]}"
+    if isinstance(value, (list, tuple)):
+        return f"seq:{len(value)}"
+    return f"other:{type(value).__name__}"
+
+
+def off_by_one_target(value: Any) -> str:
+    """BUG: reads element [0] of a sequence / first char of a string before
+    checking it is non-empty, and calls a method on None — the classic
+    empty/None off-by-one and null-deref family. Crashes on the frozen
+    ``empty_string`` (IndexError), ``empty_list`` (IndexError), and
+    ``none_value`` (AttributeError) cases.
+    """
+    if value is None:
+        return value.upper()  # BUG: null deref before the None guard
+    if isinstance(value, bool):
+        return f"bool:{value}"
+    if isinstance(value, int):
+        return f"int:{'big' if not (_INT32_MIN <= value <= _INT32_MAX) else 'ok'}"
+    if isinstance(value, str):
+        return f"str:{value[0]}"  # BUG: indexes [0] without an empty-string guard
+    if isinstance(value, (list, tuple)):
+        return f"seq:{value[0]}"  # BUG: indexes [0] without an empty-sequence guard
+    return f"other:{type(value).__name__}"
+
+
+def _frozen_inputs() -> List[Any]:
+    """The frozen corpus input values, in order — the deterministic replay list."""
+    return [case.value for case in _FUZZ_CORPUS]
+
+
+def prove(impl: Callable[[Any], Any]) -> bool:
+    """True iff the harness flags ``impl`` — i.e. ``FuzzRunner.fuzz_with_inputs``
+    records at least one crash when ``impl`` is replayed over the FROZEN corpus.
+
+    Deterministic + non-circular: ``fuzz_with_inputs`` replays a fixed input list
+    with no RNG (the seed only labels the report), and the verdict is the harness's
+    own crash count — never a comparison of ``impl``'s output to the oracle's. The
+    corpus's frozen expectation is that the robust oracle survives every input, so
+    a clean impl yields zero crashes (prove False) and any impl that crashes on a
+    pinned adversarial input yields >=1 crash (prove True). No clock/network/
+    filesystem/thread-timing is consulted.
+    """
+    runner = FuzzRunner(seed=_TEETH_SEED, max_iterations=len(_FUZZ_CORPUS))
+    report = runner.fuzz_with_inputs(impl, _frozen_inputs())
+    return report.crashed_runs >= 1
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_target,
+    mutants=(
+        Mutant("int32_overflow", overflow_target,
+               "asserts every int fits a signed 32-bit field -> crashes on 2**31 "
+               "and 2**70 (fixed-width register / INT column overflow)"),
+        Mutant("unescaped_delimiter", unescaped_delimiter_target,
+               "splits a field on the raw delimiter with no maxsplit and asserts "
+               "the column count -> crashes when a value contains the delimiter"),
+        Mutant("empty_off_by_one", off_by_one_target,
+               "indexes [0] of an empty string/list and derefs None before guarding "
+               "-> IndexError/AttributeError on empty and None inputs"),
+    ),
+    corpus_size=len(_FUZZ_CORPUS),
+    kind="oracle_swap",
+    notes="a robust target must survive every frozen adversarial input; the fuzzer "
+          "must flag a target that crashes on int32 overflow, an unescaped "
+          "delimiter, or an empty/None off-by-one",
+)
+
+
+def list_scenarios() -> List[str]:
+    """Names of the frozen fuzz-corpus cases (the teeth scenarios)."""
+    return [c.name for c in _FUZZ_CORPUS]
+
+
+# ─── Report-based self-test — fails loud, reports findings, asserts the teeth ──
+
+def _run_self_test(as_json: bool = False) -> int:
+    report = Report("core/fuzz")
+
+    # 1. The correct oracle survives every frozen adversarial input (no crash).
+    runner = FuzzRunner(seed=_TEETH_SEED, max_iterations=len(_FUZZ_CORPUS))
+    oracle_run = runner.fuzz_with_inputs(oracle_target, _frozen_inputs())
+    report.add("oracle_no_crashes", 0, oracle_run.crashed_runs,
+               detail="the robust oracle must survive the whole frozen corpus")
+    report.add("oracle_all_iterations", len(_FUZZ_CORPUS), oracle_run.total_iterations,
+               detail="every frozen input is replayed exactly once")
+
+    # 2. Each planted mutant crashes on at least one frozen input (harness flags it).
+    for mutant in TEETH.mutants:
+        m_run = FuzzRunner(
+            seed=_TEETH_SEED, max_iterations=len(_FUZZ_CORPUS)
+        ).fuzz_with_inputs(mutant.impl, _frozen_inputs())
+        report.record(f"mutant_crashes:{mutant.name}", m_run.crashed_runs >= 1,
+                      detail=mutant.note)
+
+    # 3. The runner is deterministic: replaying the corpus twice is identical.
+    run_a = FuzzRunner(seed=_TEETH_SEED, max_iterations=len(_FUZZ_CORPUS))
+    run_b = FuzzRunner(seed=_TEETH_SEED, max_iterations=len(_FUZZ_CORPUS))
+    crashes_a = run_a.fuzz_with_inputs(off_by_one_target, _frozen_inputs()).crashed_runs
+    crashes_b = run_b.fuzz_with_inputs(off_by_one_target, _frozen_inputs()).crashed_runs
+    report.add("runner_deterministic", crashes_a, crashes_b,
+               detail="fuzz_with_inputs replays a fixed list -> identical crash count")
+
+    # 4. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
+
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
+
+def _run_demo() -> int:
     print("=== Fuzz Test Harness Demo ===\n")
 
     # Demo 1: Fuzz a simple division function
@@ -1224,3 +1482,27 @@ if __name__ == "__main__":
     print()
 
     print("Demo complete.")
+    return 0
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Fuzz / crash-finding controls")
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true",
+                        help="list the frozen fuzz-corpus case names")
+    parser.add_argument("--demo", action="store_true",
+                        help="run the original interactive demo")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
+    if args.demo:
+        return _run_demo()
+    return _run_self_test(as_json=args.json)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

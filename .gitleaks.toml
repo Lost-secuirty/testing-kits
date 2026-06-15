@@ -4,3 +4,7 @@ useDefault = true
 [[allowlists]]
 description = "Synthetic secret fixtures used to self-test the repository scanner"
 paths = ['''^tools/scan_staged\.py$''']
+
+[[allowlists]]
+description = "Synthetic fake API key in the error-path-leak harness corpus — an intentional fixture proving the sanitizing handler redacts a realistic key (not a real credential)"
+paths = ['''^harnesses/core/error_path_leak_test_harness\.py$''']

@@ -2,7 +2,10 @@
 
 import unittest
 
+from harnesses._teeth import verify
 from harnesses.core.error_path_leak_test_harness import (
+    LEAK_CORPUS,
+    TEETH,
     LeakProbeConfig,
     LeakProbeResult,
     LeakRunner,
@@ -15,7 +18,11 @@ from harnesses.core.error_path_leak_test_harness import (
     _make_leaky_fd,
     _make_leaky_pool,
     _run_self_test,
+    leak_raw_exception,
+    list_leak_scenarios,
     list_scenarios,
+    oracle_handle,
+    prove,
 )
 
 
@@ -129,6 +136,52 @@ class TestLeakProbeResult(unittest.TestCase):
                             final_live=2, high_water=5, leaked=True)
         self.assertTrue(r.leaked)
         self.assertEqual(r.high_water, 5)
+
+
+# ---------------------------------------------------------------------------
+# Teeth: the harness must catch a real planted error-path information leak.
+# ---------------------------------------------------------------------------
+
+class TestTeeth(unittest.TestCase):
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct sanitizing handler must NOT be flagged by prove.
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+        self.assertFalse(prove(oracle_handle))
+
+    def test_every_mutant_is_caught(self):
+        self.assertGreaterEqual(len(TEETH.mutants), 1)
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl),
+                            f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
+        self.assertEqual(TEETH.corpus_size, len(LEAK_CORPUS))
+
+    def test_oracle_leaks_nothing(self):
+        # On every frozen scenario the oracle returns the exact public message
+        # and contains none of the forbidden tokens.
+        for sc in LEAK_CORPUS:
+            out = oracle_handle(sc)
+            self.assertEqual(out, sc.public_message)
+            for token in sc.forbidden:
+                self.assertNotIn(token, out, f"{sc.name}: leaked {token!r}")
+
+    def test_raw_exception_mutant_leaks_secret(self):
+        # The DSN-password scenario must actually surface the secret via the
+        # raw-exception-echo mutant, proving the corpus has real teeth.
+        db = next(s for s in LEAK_CORPUS if s.name == "db_connect_dsn_password")
+        self.assertIn(db.secret, leak_raw_exception(db))
+
+    def test_list_leak_scenarios(self):
+        names = list_leak_scenarios()
+        self.assertEqual(len(names), len(LEAK_CORPUS))
+        self.assertIn("db_connect_dsn_password", names)
 
 
 if __name__ == "__main__":

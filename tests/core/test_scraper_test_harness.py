@@ -8,7 +8,9 @@ import time
 import unittest
 import urllib.parse
 
+from harnesses._teeth import verify
 from harnesses.core.scraper_test_harness import (
+    TEETH,
     ErrorRecoveryFetcher,
     MockScraperHandler,
     PaginationTester,
@@ -20,6 +22,8 @@ from harnesses.core.scraper_test_harness import (
     _http_get,
     _http_get_no_follow,
     find_free_port,
+    oracle_scrape,
+    prove,
     start_mock_server,
 )
 
@@ -475,6 +479,32 @@ class TestScraperTestRunner(unittest.TestCase):
         for result in runner.results:
             self.assertIn('name', result)
             self.assertIn('passed', result)
+
+
+# ---------------------------------------------------------------------------
+# Teeth contract tests (the campaign teeth contract)
+# ---------------------------------------------------------------------------
+
+class TestTeeth(unittest.TestCase):
+    """The harness must catch a real planted scraper bug (the teeth contract)."""
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct scraper behaviour must NOT be flagged by prove.
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+        self.assertFalse(prove(oracle_scrape))
+
+    def test_every_mutant_is_caught(self):
+        self.assertEqual(len(TEETH.mutants), 3)
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
 
 
 if __name__ == '__main__':

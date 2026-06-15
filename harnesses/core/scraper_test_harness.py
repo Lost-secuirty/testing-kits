@@ -7,7 +7,6 @@ Default mock server port: 18910
 
 import argparse
 import html
-import http.server
 import re
 import socket
 import sys
@@ -16,8 +15,16 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +275,6 @@ class PaginationTester:
         links = parser.get_links(base_url=current_url)
         for link in links:
             text = link.get('text', '')
-            rel = SimpleHTMLParser._get_attr(link.get('_raw', ''), 'rel') or ''
             # Check link text
             for pat in self.NEXT_PATTERNS:
                 if re.search(pat, text):
@@ -493,7 +499,7 @@ def _http_get(url: str, timeout: int = 10, follow_redirects: bool = True,
                 'redirect_chain': redirect_chain,
                 'error': str(e),
             }
-        except urllib.error.URLError as e:
+        except urllib.error.URLError:
             # May be a redirect that urllib didn't follow (shouldn't happen normally)
             raise
 
@@ -691,7 +697,6 @@ class MockScraperHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
-        query = urllib.parse.parse_qs(parsed.query)
 
         # Route requests
         if path == '/robots.txt':
@@ -1056,11 +1061,255 @@ class ScraperTestRunner:
 
 
 # ---------------------------------------------------------------------------
-# CLI entry point
+# TEETH: a FROZEN, in-process corpus of scrape tasks -> hand-computed literal
+# expected outcomes, judged WITHOUT any real network.
+#
+# A scraper harness only has teeth if it CATCHES a scraper that:
+#   * extracts the WRONG field (grabs the wrong column / drops a header row);
+#   * IGNORES robots.txt Disallow (politeness violation — fetches a banned path);
+#   * loops UNBOUNDED on a next-page cycle (a "next" link that points back into a
+#     visited page, so a naive crawler never terminates).
+#
+# The harness's own correct logic (SimpleHTMLParser.get_tables for extraction,
+# RobotsTxtParser.is_allowed for politeness, and a visited-set bounded crawl over a
+# frozen page graph for pagination) is reused as the ORACLE. Each Mutant below is a
+# faithful in-process model of one of those real-world defects.
+#
+# An impl is a callable ``scrape(task: ScrapeTask) -> Any`` whose return shape
+# depends on task.kind:
+#   "extract"  -> List[List[str]]          (rows of the first table)
+#   "robots"   -> bool                      (is the path allowed for the agent?)
+#   "paginate" -> List[str]                 (ordered list of page keys visited)
+# prove() judges each impl against the corpus's FROZEN literal expectations and is
+# NON-CIRCULAR: expectations are hand-computed constants, never read back from the
+# oracle object. It is PURE + DETERMINISTIC: no clock/network/filesystem I/O and no
+# RNG (the page graph is an in-memory dict, the crawl bound is a fixed constant, so
+# an unbounded-loop bug is caught by a cap rather than by hanging). prove(impl) is
+# True iff the impl diverges from any frozen expectation (i.e. the bug is CAUGHT).
 # ---------------------------------------------------------------------------
 
-def _self_test(port: int = 18910) -> bool:
-    """Run all tests against the built-in mock server."""
+# Hard cap on pages a crawl may visit before prove() declares it unbounded. The
+# correct crawl over the frozen graph visits 3 pages; an impl that exceeds this many
+# is treated as looping (caught) instead of being allowed to hang the test.
+_CRAWL_BOUND = 12
+
+# A frozen product table (same shape as the live /table fixture) plus its robots
+# policy and a deliberately CYCLIC page graph (pa -> pb -> pc -> pb ...).
+_FROZEN_TABLE_HTML = (
+    "<html><body><table id=\"products\">"
+    "<tr><th>Name</th><th>Price</th><th>Stock</th></tr>"
+    "<tr><td>Widget A</td><td>$10.00</td><td>50</td></tr>"
+    "<tr><td>Widget B</td><td>$20.00</td><td>30</td></tr>"
+    "</table></body></html>"
+)
+
+_FROZEN_ROBOTS_TXT = (
+    "User-agent: *\n"
+    "Disallow: /private/\n"
+    "Disallow: /admin/\n"
+    "Allow: /public/\n"
+)
+
+# Cyclic page graph: each key maps to its next-page key (or None to terminate).
+# pa -> pb -> pc -> pb forms a back-edge cycle; a correct crawl visits each page
+# at most once and stops, a naive crawler revisits pb/pc forever.
+_FROZEN_PAGE_GRAPH: Dict[str, Optional[str]] = {
+    "pa": "pb",
+    "pb": "pc",
+    "pc": "pb",  # back-edge -> cycle
+}
+
+
+@dataclass(frozen=True)
+class ScrapeTask:
+    """One frozen scrape task with a literal, hand-computed expected outcome."""
+    name: str
+    kind: str            # "extract" | "robots" | "paginate"
+    arg: Any             # path (robots) / start-key (paginate); ignored for extract
+    expected: Any        # the literal expected result for this task
+    note: str = ""
+
+
+# Hand-computed expectations. The extract rows preserve the header AND both data
+# rows in document order; the robots verdicts follow the frozen policy; the crawl
+# visits exactly the reachable distinct pages once, in order, then stops.
+TEETH_CORPUS: Tuple[ScrapeTask, ...] = (
+    # --- field extraction: the full table, header first, in document order -----
+    ScrapeTask("extract_full_table", "extract", None,
+               [["Name", "Price", "Stock"],
+                ["Widget A", "$10.00", "50"],
+                ["Widget B", "$20.00", "30"]],
+               note="extract every row incl. the header, in document order"),
+    # --- robots politeness: a Disallowed path must be refused -------------------
+    ScrapeTask("robots_disallow_private", "robots", "/private/secret", False,
+               note="robots.txt disallows /private/ -> a polite scraper refuses"),
+    ScrapeTask("robots_disallow_admin", "robots", "/admin/users", False,
+               note="robots.txt disallows /admin/ -> refused"),
+    ScrapeTask("robots_allow_public", "robots", "/public/info", True,
+               note="/public/ is explicitly allowed"),
+    ScrapeTask("robots_allow_unlisted", "robots", "/products", True,
+               note="a path with no matching rule is allowed by default"),
+    # --- bounded pagination: terminate on a next-page cycle ---------------------
+    ScrapeTask("paginate_bounded_cycle", "paginate", "pa", ["pa", "pb", "pc"],
+               note="cyclic next-links (pc->pb) must terminate after visiting "
+                    "each reachable page exactly once"),
+)
+
+
+# --- ORACLE: reuse the harness's own correct extraction / robots / crawl logic ---
+
+def _bounded_crawl(start: str, next_of: Callable[[str], Optional[str]]) -> List[str]:
+    """Follow next-page links from ``start`` with a visited-set guard.
+
+    Mirrors PaginationTester.crawl's cycle protection: a page already visited
+    terminates the walk, so a cyclic graph cannot loop forever. The _CRAWL_BOUND
+    is a belt-and-braces cap so a buggy ``next_of`` still cannot hang prove().
+    """
+    visited: List[str] = []
+    seen = set()
+    key: Optional[str] = start
+    while key is not None and len(visited) < _CRAWL_BOUND:
+        if key in seen:
+            break
+        seen.add(key)
+        visited.append(key)
+        key = next_of(key)
+    return visited
+
+
+def oracle_scrape(task: ScrapeTask) -> Any:
+    """Correct scraper behaviour, delegating to the harness's tested components."""
+    if task.kind == "extract":
+        tables = SimpleHTMLParser(_FROZEN_TABLE_HTML).get_tables()
+        return tables[0] if tables else []
+    if task.kind == "robots":
+        rp = RobotsTxtParser(_FROZEN_ROBOTS_TXT)
+        return rp.is_allowed(task.arg)
+    if task.kind == "paginate":
+        return _bounded_crawl(task.arg, lambda k: _FROZEN_PAGE_GRAPH.get(k))
+    raise ValueError(f"unknown task kind: {task.kind!r}")  # pragma: no cover
+
+
+# --- Planted buggy twins (each models a genuine real-world scraper defect) -------
+
+def wrong_field_scrape(task: ScrapeTask) -> Any:
+    """BUG: extraction silently DROPS the header row (treats row 0 as decoration).
+
+    A startlingly common scraping mistake: code that assumes the first <tr> is
+    always a throwaway header and slices it off, so a table whose first row is real
+    data loses a record — and a header-less table is mis-aligned. Here it returns
+    only the data rows, omitting the ["Name","Price","Stock"] header the corpus
+    expects, so the extracted field set is WRONG.
+    """
+    if task.kind == "extract":
+        tables = SimpleHTMLParser(_FROZEN_TABLE_HTML).get_tables()
+        rows = tables[0] if tables else []
+        return rows[1:]  # BUG: drop the header row unconditionally
+    return oracle_scrape(task)
+
+
+def ignore_robots_scrape(task: ScrapeTask) -> Any:
+    """BUG: the politeness check ignores Disallow and treats everything as allowed.
+
+    Models a scraper that never consults (or mis-parses) robots.txt and crawls
+    banned paths anyway — the canonical scraping-etiquette violation. Every path,
+    including /private/ and /admin/, is reported allowed.
+    """
+    if task.kind == "robots":
+        return True  # BUG: always allowed, Disallow rules ignored
+    return oracle_scrape(task)
+
+
+def unbounded_crawl_scrape(task: ScrapeTask) -> Any:
+    """BUG: pagination follows next-links with NO visited-set, so a cyclic
+    "next" link loops forever.
+
+    Models the classic crawler defect of trusting next-page links without de-dup:
+    pc -> pb forms a cycle, so the walk re-visits pb/pc indefinitely. The missing
+    guard is the bug; prove() observes it via the _CRAWL_BOUND cap (the visited
+    list overruns the expected 3 pages) rather than by hanging.
+    """
+    if task.kind == "paginate":
+        visited: List[str] = []
+        key: Optional[str] = task.arg
+        # BUG: no `seen` set — a back-edge in the graph never terminates.
+        while key is not None and len(visited) < _CRAWL_BOUND:
+            visited.append(key)
+            key = _FROZEN_PAGE_GRAPH.get(key)
+        return visited
+    return oracle_scrape(task)
+
+
+def prove(impl: Callable[[ScrapeTask], Any]) -> bool:
+    """True iff ``impl`` diverges from the frozen expected outcome on any task
+    (i.e. the planted bug is CAUGHT).
+
+    Non-circular + deterministic: every expectation is a literal baked into
+    TEETH_CORPUS, never read from the oracle; there is no RNG, clock, network, or
+    filesystem access. An impl that raises on a corpus task counts as caught.
+    """
+    for task in TEETH_CORPUS:
+        try:
+            actual = impl(task)
+        except Exception:  # noqa: BLE001 — raising on a corpus task counts as caught
+            return True
+        if actual != task.expected:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_scrape,
+    mutants=(
+        Mutant("drops_header_row", wrong_field_scrape,
+               "extraction unconditionally slices off row 0 -> the header field "
+               "row is silently dropped, so the extracted fields are wrong"),
+        Mutant("ignores_robots_disallow", ignore_robots_scrape,
+               "politeness check never honours Disallow -> the scraper fetches "
+               "/private/ and /admin/ it was told to stay out of"),
+        Mutant("unbounded_next_page_cycle", unbounded_crawl_scrape,
+               "pagination follows next-links with no visited-set -> a cyclic "
+               "next link (pc->pb) loops forever instead of terminating"),
+    ),
+    corpus_size=len(TEETH_CORPUS),
+    kind="oracle_swap",
+    notes="a scraper must extract the right fields (header included), honour "
+          "robots.txt Disallow, and terminate on a cyclic next-page link",
+)
+
+
+def list_scenarios() -> List[str]:
+    """Names of the frozen corpus tasks (the teeth scenarios)."""
+    return [t.name for t in TEETH_CORPUS]
+
+
+# ---------------------------------------------------------------------------
+# Report-based self-test — fails loud, reports findings, asserts the teeth.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(as_json: bool = False) -> int:
+    report = Report("core/scraper")
+
+    # 1. The correct oracle must reproduce every frozen corpus expectation. This
+    #    exercises the harness's REAL get_tables / is_allowed / bounded-crawl logic
+    #    against hand-computed literals (no network).
+    for task in TEETH_CORPUS:
+        report.add(f"oracle:{task.name}", task.expected, oracle_scrape(task),
+                   detail=task.note)
+
+    # 2. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
+
+
+# ---------------------------------------------------------------------------
+# Networked self-test (legacy) — runs the full suite against the mock server.
+# ---------------------------------------------------------------------------
+
+def _network_self_test(port: int = 18910) -> bool:
+    """Run all tests against the built-in mock server (binds a real port)."""
     try:
         server, base_url = start_mock_server(port)
     except OSError:
@@ -1076,24 +1325,36 @@ def _self_test(port: int = 18910) -> bool:
         server.server_close()
 
 
-def main():
+# ---------------------------------------------------------------------------
+# CLI — default action is the (network-free) teeth self-test (repo convention).
+# ---------------------------------------------------------------------------
+
+def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description='Web Scraper Test Harness')
     parser.add_argument('--self-test', action='store_true',
-                        help='Run built-in self-test suite against mock server')
+                        help='run built-in (network-free) teeth checks')
+    parser.add_argument('--json', action='store_true',
+                        help='emit machine-readable findings (implies --self-test)')
+    parser.add_argument('--list-scenarios', action='store_true',
+                        help='list the frozen corpus task names')
+    parser.add_argument('--network-self-test', action='store_true',
+                        help='run the full legacy suite against the mock HTTP server')
     parser.add_argument('--port', type=int, default=18910,
-                        help='Mock server port (default: 18910)')
+                        help='Mock server port for --network-self-test (default: 18910)')
     parser.add_argument('--url', type=str, default='',
-                        help='Run tests against a custom base URL instead of mock server')
-    args = parser.parse_args()
+                        help='run the legacy suite against a custom base URL')
+    args = parser.parse_args(argv)
 
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
     if args.url:
         runner = ScraperTestRunner(args.url)
-        success = runner.run_all()
-    else:
-        success = _self_test(args.port)
-
-    sys.exit(0 if success else 1)
+        return 0 if runner.run_all() else 1
+    if args.network_self_test:
+        return 0 if _network_self_test(args.port) else 1
+    return _run_self_test(as_json=args.json)
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
