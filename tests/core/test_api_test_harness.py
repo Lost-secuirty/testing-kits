@@ -7,7 +7,9 @@ import unittest
 import urllib.error
 import urllib.request
 
+from harnesses._teeth import verify
 from harnesses.core.api_test_harness import (
+    TEETH,
     ApiTestCase,
     ApiTestResult,
     ApiTestSuite,
@@ -17,6 +19,8 @@ from harnesses.core.api_test_harness import (
     ResponseValidator,
     SchemaChecker,
     SchemaError,
+    oracle_handle,
+    prove,
     reset_server_state,
     start_mock_server,
 )
@@ -673,6 +677,32 @@ class TestMockServerIntegration(unittest.TestCase):
         report = bad_suite.run()
         self.assertEqual(report.failed, 1)
         self.assertIn("exception", report.results[0].error)
+
+
+# ---------------------------------------------------------------------------
+# Teeth: the harness must catch a real planted API bug.
+# ---------------------------------------------------------------------------
+
+class TestTeeth(unittest.TestCase):
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"],
+                        f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct handler must NOT be flagged by prove.
+        self.assertFalse(prove(oracle_handle))
+
+    def test_every_mutant_is_caught(self):
+        # Each planted defect must be individually caught.
+        self.assertEqual(len(TEETH.mutants), 3)
+        for mutant in TEETH.mutants:
+            self.assertTrue(prove(mutant.impl),
+                            f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
 
 
 if __name__ == "__main__":

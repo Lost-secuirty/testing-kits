@@ -5,7 +5,9 @@ import unittest
 from dataclasses import dataclass
 from typing import Optional
 
+from harnesses._teeth import verify
 from harnesses.core.null_propagation_test_harness import (
+    TEETH,
     MUTATORS,
     NullProbeConfig,
     NullProbeRunner,
@@ -206,6 +208,25 @@ class TestProbeResult(unittest.TestCase):
         r = ProbeResult("t", "p", "none", Outcome.HANDLED, "ok")
         self.assertEqual(r.target, "t")
         self.assertEqual(r.mutation, "none")
+
+
+class TestTeeth(unittest.TestCase):
+    """The harness must catch a real planted bug (the campaign teeth contract)."""
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+
+    def test_every_mutant_is_caught(self):
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
 
 
 if __name__ == "__main__":
