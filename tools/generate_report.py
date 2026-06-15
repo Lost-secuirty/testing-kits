@@ -74,15 +74,22 @@ def write_status(rows: list[dict], total_duration: float, proof_result: dict) ->
         f"({proof_summary['header']}).**"
     )
     lines.append("")
-    lines.append("| Harness | Paired unittest | Proof source | Self-test |")
-    lines.append("|---|---|---|---|")
+    lines.append("| Harness | Scope | Teeth | Paired unittest | Proof source | Self-test |")
+    lines.append("|---|---|---|---|---|---|")
     proof_by_key = {row["key"]: row for row in proof_result["per_harness"]}
     for row in sorted(rows, key=lambda row: (row["category"], row["name"])):
         key = f"{row['category']}/{row['name']}"
         proof = proof_by_key.get(key, {})
         paired = "yes" if proof.get("paired_test_exists") else "no"
         sources = ", ".join(proof.get("proof_sources", [])) or "-"
-        lines.append(f"| {key} | {paired} | {sources} | {row['status']} |")
+        scope = proof.get("scope", "-")
+        if proof.get("teeth_present"):
+            teeth = "verified" if proof.get("teeth_verified") else "BROKEN"
+        elif scope == "legacy":
+            teeth = "legacy"
+        else:
+            teeth = "pending"
+        lines.append(f"| {key} | {scope} | {teeth} | {paired} | {sources} | {row['status']} |")
 
     lines.append("")
     lines.append("## Per harness")

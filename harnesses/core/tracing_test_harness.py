@@ -28,6 +28,13 @@ import sys
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Teeth  # noqa: E402
+
 _HEX = re.compile(r"\A[0-9a-f]+\Z")
 _ZERO_TRACE = "0" * 32
 _ZERO_SPAN = "0" * 16
@@ -281,6 +288,45 @@ BUGGY_TRACES: dict[str, tuple[Callable[[], list[Span]], str]] = {
     "unsampled_parent": (_trace_unsampled_parent, "sampling_inconsistencies"),
     "missing_attr": (_trace_missing_attr, "missing_attr_spans"),
 }
+
+
+# ---------------------------------------------------------------------------
+# Teeth: the propagator must preserve span context across an inject->extract
+# round-trip for every span in the frozen corpus. The correct Propagator does;
+# the BuggyPropagator drops the context entirely (extract -> None), so a span's
+# trace_id/span_id/sampled flag cannot be recovered downstream and the trace
+# orphans. `prove` returns True iff an inject impl loses that context.
+# ---------------------------------------------------------------------------
+_TEETH_CORPUS: tuple[Span, ...] = tuple(valid_trace())
+
+
+def _prove(inject: Callable[["Span"], dict[str, str]]) -> bool:
+    """True iff `inject` fails to round-trip span context for any corpus span."""
+    for span in _TEETH_CORPUS:
+        try:
+            tp = Propagator.extract(inject(span))
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if tp is None:
+            return True
+        if (tp.trace_id != span.trace_id
+                or tp.span_id != span.span_id
+                or tp.sampled != span.sampled):
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=_prove,
+    oracle=Propagator.inject,
+    mutants=(
+        Mutant("propagator_drops_context", BuggyPropagator.inject,
+               "propagator that forgets to emit a traceparent orphans every child span"),
+    ),
+    corpus_size=len(_TEETH_CORPUS),
+    kind="oracle_swap",
+    notes="inject->extract must preserve trace_id/span_id/sampled for every span",
+)
 
 
 # ---------------------------------------------------------------------------

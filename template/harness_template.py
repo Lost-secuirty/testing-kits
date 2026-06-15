@@ -1,159 +1,136 @@
 #!/usr/bin/env python3
 """
-<NAME>_test_harness.py — One-line purpose of this harness.
-============================================================
+<name>_test_harness.py — One-line purpose of this harness.
+==========================================================
 
-Pure-stdlib. Zero external dependencies.
+Pure-stdlib. Zero external dependencies (the shared ``harnesses._teeth`` contract
+is itself pure stdlib).
 
-Replace this docstring with: what the harness validates, what bug class it
-catches, and a one-liner self-test command. Example:
+GOLD shape — every in-scope harness must satisfy the hardened gate
+(``tools/proof_audit.py``). Required pieces:
 
+  - a frozen ``@dataclass`` fixture CORPUS with explicit expectations;
+  - a correct ORACLE and >=1 intentionally BUGGY twin (a realistic planted defect);
+  - ``prove(impl) -> bool``: True iff ``impl`` is *caught* against the corpus
+    (pure + deterministic — no clock/network/filesystem I/O; seed any RNG);
+  - a module-level ``TEETH = Teeth(...)`` so the gate verifies real teeth
+    (declaring TEETH promotes the harness from `pending` to `required`);
+  - ``_run_self_test()`` builds a ``Report``, asserts the fixtures and the teeth,
+    and returns ``report.emit(...)`` as the exit code (0 green / 1 failed loud);
+  - argparse: ``--self-test`` / ``--json`` / ``--list-scenarios``.
+
+Networked harnesses keep ``serve_forever`` under ``main`` only (never at import)
+and still expose ``TEETH`` over the in-process oracle — never by binding a port.
+
+Run:
   python harnesses/<cat>/<name>_test_harness.py --self-test
+  python harnesses/<cat>/<name>_test_harness.py --json
   python harnesses/<cat>/<name>_test_harness.py --list-scenarios
-  python harnesses/<cat>/<name>_test_harness.py --port 19999
-
-Pattern (see CLAUDE.md):
-  - @dataclass configs for tunables.
-  - argparse CLI with --self-test / --list-scenarios / --port / --verbose.
-  - _run_self_test() returns a process exit code.
-  - Optional ThreadingHTTPServer for networked harnesses.
-  - if __name__ == "__main__": sys.exit(main())
 """
 
 from __future__ import annotations
 
 import argparse
-import http.server
-import json
-import socketserver
 import sys
-import threading
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
+from typing import Callable
+
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- #
+# Fixture corpus — frozen, explicit, includes cases the buggy twin gets WRONG.
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class Case:
+    name: str
+    value: str
+    expected_valid: bool
+    note: str = ""
 
 
-@dataclass
-class HarnessConfig:
-    """Tunables for the harness. Keep this small and explicit."""
-
-    port: int = 19999  # CHANGE: pick a free port from CLAUDE.md port table
-    scenarios: list[str] = field(default_factory=list)
-    verbose: bool = False
-
-
-# ---------------------------------------------------------------------------
-# Core engine — replace with your harness logic
-# ---------------------------------------------------------------------------
+CASES: tuple[Case, ...] = (
+    Case("palindrome", "abccba", True, "a true palindrome — both impls accept"),
+    # The case that gives the harness teeth: endpoints match but it is NOT a
+    # palindrome, so the correct oracle rejects it and the buggy twin wrongly
+    # accepts it. Without a case like this the planted bug would go uncaught.
+    Case("endpoints_match_only", "abca", False, "buggy endpoint-only check wrongly accepts"),
+    Case("too_short", "a", False, "single char is not a valid pair"),
+)
 
 
-def run_scenario(name: str, config: HarnessConfig) -> dict[str, Any]:
-    """Run one scenario. Replace this with the real logic."""
-    # CHANGE: real scenario implementation.
-    return {"name": name, "ok": True}
+# --------------------------------------------------------------------------- #
+# Oracle (correct) and the intentionally buggy twin.
+# --------------------------------------------------------------------------- #
+def oracle(value: str) -> bool:
+    """CHANGE: the correct invariant under test (here: even-length palindrome)."""
+    return len(value) >= 2 and value == value[::-1]
 
 
-def list_scenarios(config: HarnessConfig) -> list[str]:
-    """Return the catalog of scenarios this harness can run."""
-    # CHANGE: enumerate built-in scenarios.
-    return ["scenario_one", "scenario_two"]
+def buggy(value: str) -> bool:
+    """CHANGE: a realistic defect (here: checks only the first/last character)."""
+    return len(value) >= 2 and value[0] == value[-1]
 
 
-# ---------------------------------------------------------------------------
-# Mock HTTP server (delete this section if the harness is in-process)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- #
+# Scenarios + teeth.
+# --------------------------------------------------------------------------- #
+def list_scenarios() -> list[str]:
+    return [c.name for c in CASES]
 
 
-class MockHandler(http.server.BaseHTTPRequestHandler):
-    """Mock handler — replace with the real fixture surface."""
-
-    def log_message(self, format: str, *args: Any) -> None:  # silence
-        pass
-
-    def do_GET(self) -> None:
-        # CHANGE: real GET handling.
-        body = json.dumps({"path": self.path, "ok": True}).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-
-def start_mock_server(port: int) -> socketserver.TCPServer:
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), MockHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    return server
-
-
-# ---------------------------------------------------------------------------
-# Self-test
-# ---------------------------------------------------------------------------
-
-
-def _run_self_test(config: HarnessConfig) -> int:
-    """Run the built-in self-test scenarios. Return 0 on success, non-zero on failure."""
-    failures: list[str] = []
-    for name in list_scenarios(config):
+def prove(impl: Callable[[str], bool]) -> bool:
+    """True iff ``impl`` disagrees with the corpus on any case (i.e. is caught)."""
+    for case in CASES:
         try:
-            result = run_scenario(name, config)
-            if not result.get("ok"):
-                failures.append(f"{name}: {result}")
-        except Exception as exc:
-            failures.append(f"{name}: {exc!r}")
-
-    if failures:
-        print(f"FAILED ({len(failures)}):", file=sys.stderr)
-        for line in failures:
-            print(f"  - {line}", file=sys.stderr)
-        return 1
-
-    print(f"OK: {len(list_scenarios(config))} scenarios passed.")
-    return 0
+            if impl(case.value) != case.expected_valid:
+                return True
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+    return False
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle,
+    mutants=(Mutant("endpoints_only", buggy, "checks only endpoints, not the whole value"),),
+    corpus_size=len(CASES),
+    kind="oracle_swap",  # or "auditor" / "statistical" — see harnesses/_teeth.py
+    notes="CHANGE: the invariant the planted bug violates",
+)
 
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        description="<one-line description>",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    p.add_argument("--self-test", action="store_true", help="Run built-in self-test")
-    p.add_argument("--list-scenarios", action="store_true", help="List built-in scenarios")
-    p.add_argument("--port", type=int, default=HarnessConfig.port, help="Mock server port")
-    p.add_argument("--verbose", action="store_true", help="Verbose output")
-    return p
+# --------------------------------------------------------------------------- #
+# Self-test — fails loud, reports findings.
+# --------------------------------------------------------------------------- #
+def _run_self_test(as_json: bool = False) -> int:
+    report = Report("<cat>/<name>")  # CHANGE to "category/name"
+    for case in CASES:
+        report.add(f"case:{case.name}", case.expected_valid, oracle(case.value), detail=case.note)
+    report.assert_teeth(TEETH)  # oracle is clean + every planted mutant is caught
+    return report.emit(as_json=as_json)
 
 
-def main() -> int:
-    args = build_parser().parse_args()
-    config = HarnessConfig(port=args.port, verbose=args.verbose)
+# --------------------------------------------------------------------------- #
+# CLI — default action is the self-test (repo convention).
+# --------------------------------------------------------------------------- #
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(description="<one-line description>")
+    p.add_argument("--self-test", action="store_true", help="run built-in checks")
+    p.add_argument("--json", action="store_true",
+                   help="emit machine-readable findings (implies --self-test)")
+    p.add_argument("--list-scenarios", action="store_true")
+    args = p.parse_args(argv)
 
     if args.list_scenarios:
-        for name in list_scenarios(config):
-            print(name)
+        print("\n".join(list_scenarios()))
         return 0
-
-    if args.self_test:
-        return _run_self_test(config)
-
-    # Default: start the mock server and block.
-    server = start_mock_server(config.port)
-    print(f"Mock server on http://127.0.0.1:{config.port} (Ctrl-C to stop)")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        server.shutdown()
-    return 0
+    return _run_self_test(as_json=args.json)
 
 
 if __name__ == "__main__":

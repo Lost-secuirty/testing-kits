@@ -31,6 +31,13 @@ import sys
 from dataclasses import dataclass
 from typing import Callable
 
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Teeth  # noqa: E402
+
 
 # --------------------------------------------------------------------------- #
 # ASCII guards (re-derived locally; no shared helpers, no stdlib str.isdigit
@@ -287,6 +294,35 @@ def run_case(case: IdentifierCase) -> bool:
 
 def run_all() -> list[tuple[IdentifierCase, bool]]:
     return [(case, run_case(case)) for case in CASES]
+
+
+# --------------------------------------------------------------------------- #
+# Teeth: the correct validator agrees with every fixture; the buggy shape-only
+# validator disagrees on at least one (it accepts a corrupted check digit).
+# --------------------------------------------------------------------------- #
+def _prove(impl: Callable[[str, str], bool]) -> bool:
+    """True iff `impl` disagrees with the frozen CASES corpus on any case."""
+    for case in CASES:
+        try:
+            result = impl(case.scheme, case.identifier)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if result != case.expected_valid:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=_prove,
+    oracle=validate,
+    mutants=(
+        Mutant("checksum_skipped", validate_naive,
+               "shape-only validator accepts a corrupted check digit"),
+    ),
+    corpus_size=len(CASES),
+    kind="oracle_swap",
+    notes="a single-digit checksum corruption must be rejected",
+)
 
 
 # --------------------------------------------------------------------------- #

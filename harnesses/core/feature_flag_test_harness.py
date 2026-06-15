@@ -33,6 +33,12 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Teeth  # noqa: E402
+
 
 @dataclass(frozen=True)
 class Flag:
@@ -242,6 +248,50 @@ def buggy_pricer_type_drift(flags: dict[str, bool], flip_flag: str | None = None
     if flags.get("tax_calc_v2"):
         return "108"  # BUG: should be int
     return 100
+
+
+# ---------------------------------------------------------------------------
+# Teeth: a correct pricer produces zero adverse findings across the frozen flag
+# matrix; each planted defect surfaces at least one (crash / expectation
+# violation / type drift). prove() runs the auditor over the same frozen flag
+# set the self-test uses and returns True iff the pricer is caught.
+# ---------------------------------------------------------------------------
+def _prove(impl: Callable[..., Any]) -> bool:
+    """True iff `impl` yields any adverse finding over the frozen flag matrix.
+
+    Pure and deterministic: rebuilds the frozen flag set and a fixed config on
+    every call (no RNG, clock, network, or filesystem I/O); the combo
+    enumeration is itself deterministic.
+    """
+    runner = FlagMatrixRunner(FlagMatrixConfig(enable_triple_wise=False))
+    flagset = _make_flagset()
+    try:
+        results = runner.run(impl, flagset)
+    except Exception:  # noqa: BLE001 — a harness-level crash counts as caught
+        return True
+    return any(r.outcome != "ok" for r in results)
+
+
+_TEETH_CORPUS_SIZE = len(
+    FlagMatrixRunner(FlagMatrixConfig(enable_triple_wise=False))._combos(_make_flagset().all())
+)
+
+
+TEETH = Teeth(
+    prove=_prove,
+    oracle=good_pricer,
+    mutants=(
+        Mutant("expectation_violation", buggy_pricer_combo,
+               "new_pricing+loyalty_v2 combo violates the @flag_expects assertion"),
+        Mutant("dormant_path_crash", buggy_pricer_crash,
+               "legacy_discount+new_pricing hits a dormant branch that crashes"),
+        Mutant("return_type_drift", buggy_pricer_type_drift,
+               "tax_calc_v2 combo returns str while others return int"),
+    ),
+    corpus_size=_TEETH_CORPUS_SIZE,
+    kind="auditor",
+    notes="every flag combination must complete with a consistent int return",
+)
 
 
 # ---------------------------------------------------------------------------

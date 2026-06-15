@@ -22,7 +22,8 @@ output.
 > mode — happy-path-only code), caching correctness, rate-limiting / throttling,
 > webhook delivery & signature verification, and i18n / Unicode / encoding.
 > Pagination/cursor-consistency and accessibility were identified but deferred to
-> a later batch (max 6 harnesses per batch).
+> a later batch. Batch-size rule: up to **10 harnesses per batch when UPGRADING
+> existing harnesses** (the 2026 teeth campaign), **6 for brand-new harnesses**.
 >
 > Harnesses 31–36 (batch 2) were added after a 12-agent read-only audit of the
 > whole collection: pagination/cursor consistency, accessibility (static a11y),

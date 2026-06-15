@@ -13,8 +13,20 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["harnesses*"]
 
-[project.optional-dependencies]
-dev = ["ruff"]
+# Dev/test/tooling stack (PEP 735). Harness CODE stays pure-stdlib, zero runtime
+# deps; these are local-dev + advisory-CI tools only. CI installs tools via its
+# own pinned `pip install` steps, so this group does not gate the required path.
+[dependency-groups]
+dev = [
+    "ruff==0.15.17",
+    "pytest>=9.1",
+    "pytest-cov",
+    "pytest-xdist",
+    "hypothesis",
+    "mutmut>=3.6",        # uses the `source_paths` config key (>=3.6); Linux/WSL only
+    "deptry",
+    "zizmor==1.25.2",
+]
 
 [tool.ruff]
 line-length = 100
@@ -27,3 +39,8 @@ ignore = ["E501"]
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["B011"]
 "experiments/**/*.py" = ["F401", "F841"]
+
+# Advisory mutation lane (tools/mutmut_lane.py). `source_paths` is the mutmut>=3.6
+# key (renamed from paths_to_mutate). Linux/WSL only; never gates a merge.
+[tool.mutmut]
+source_paths = ["harnesses"]
