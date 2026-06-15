@@ -106,6 +106,21 @@ def _teeth_failure_reasons(teeth: dict) -> list[str]:
     return reasons
 
 
+def _declares_teeth(path: Path) -> bool:
+    """Source-level check: does this harness textually declare a module-level TEETH?
+
+    Used only to tell a *broken* required harness (declares TEETH but failed to
+    import -> blocks) apart from a still-pending one (no TEETH -> an import/runner
+    error is a non-blocking warning, preserving "pending never red-locks main").
+    Mirrors the detection in tools/mutmut_lane.py.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return "\nTEETH" in text or text.startswith("TEETH")
+
+
 def audit_harnesses(
     records: list[HarnessRecord] | None = None,
     *,
@@ -198,15 +213,23 @@ def audit_harnesses(
                 if row["teeth_verified"]:
                     proof_sources.append("teeth_swap")
             else:
-                # pending OR a hard import/runner error (which IS blocking)
-                if teeth_reasons:
-                    scope = "required"  # broken import on an in-scope harness blocks
+                # The runtime check saw no TEETH object. Read the source to tell two
+                # cases apart: a harness that *textually* declares TEETH but failed to
+                # import is a broken `required` harness and blocks; one with no TEETH
+                # is still `pending` and — per the documented invariant — must never
+                # red-lock main, so any import/runner error is only a warning until it
+                # opts in via TEETH (then the swap-check makes the failure blocking).
+                if teeth_reasons and _declares_teeth(record.path):
+                    scope = "required"
                     failures.extend(teeth_reasons)
                 else:
                     scope = "pending"
-                    warnings.append("no TEETH declared yet (pending upgrade)")
-                    if selftest_status is not None and selftest_status != "OK":
-                        warnings.append(f"self-test status {selftest_status}")
+                    if teeth_reasons:
+                        warnings.extend(teeth_reasons)
+                    else:
+                        warnings.append("no TEETH declared yet (pending upgrade)")
+                        if selftest_status is not None and selftest_status != "OK":
+                            warnings.append(f"self-test status {selftest_status}")
 
         row["scope"] = scope
         row["proof_sources"] = proof_sources

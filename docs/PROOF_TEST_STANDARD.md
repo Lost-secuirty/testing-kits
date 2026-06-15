@@ -41,6 +41,7 @@ gate; `tools/mutmut_lane.py` (mutmut, Linux/WSL only) is an **advisory** deepeni
 that catches "vacuous green" the swap-check cannot.
 
 ### Scopes
+
 - **required** — a non-legacy harness that declares `TEETH`. It MUST pass the
   swap-check, have a paired unittest, and a green self-test. Declaring `TEETH` is
   the opt-in; there is no separate allowlist.

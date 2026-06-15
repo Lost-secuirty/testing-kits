@@ -35,6 +35,9 @@ def check(target: Path) -> tuple[dict, int]:
         return result, 2
     modpath = ".".join(rel.parts)
     result["module"] = modpath
+    if rel.parts[0] != "harnesses":
+        result["error"] = f"refusing to import non-harness path: {modpath}"
+        return result, 2
 
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))

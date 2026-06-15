@@ -43,9 +43,13 @@ report:
 
 lint:
 	$(PY) -m compileall -q harnesses tests tools
-	@(uv run ruff check harnesses tests tools 2>/dev/null) \
-		|| (command -v ruff >/dev/null && ruff check harnesses tests tools) \
-		|| echo "ruff not installed; skipping ruff check"
+	@if command -v uv >/dev/null 2>&1; then \
+		uv run ruff check harnesses tests tools; \
+	elif command -v ruff >/dev/null 2>&1; then \
+		ruff check harnesses tests tools; \
+	else \
+		echo "ruff not installed; skipping ruff check"; \
+	fi
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

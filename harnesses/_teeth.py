@@ -87,7 +87,7 @@ def verify(teeth: Teeth) -> dict:
     out: dict[str, Any] = {
         "teeth_present": True,
         "kind": teeth.kind,
-        "corpus_size": int(teeth.corpus_size),
+        "corpus_size": 0,
         "oracle_clean": None,
         "mutants_total": len(teeth.mutants),
         "mutants_caught": 0,
@@ -96,6 +96,7 @@ def verify(teeth: Teeth) -> dict:
         "error": None,
     }
     try:
+        out["corpus_size"] = int(teeth.corpus_size)
         out["oracle_clean"] = teeth.prove(teeth.oracle) is False
         caught = 0
         uncaught: list[str] = []

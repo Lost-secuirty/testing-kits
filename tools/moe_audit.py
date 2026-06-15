@@ -73,7 +73,7 @@ def changed_harnesses(changed: list[str]) -> list[str]:
         p = f.replace("\\", "/")
         parts = p.split("/")
         if len(parts) == 3 and parts[0] == "harnesses" and p.endswith(".py") \
-                and not p.endswith("__init__.py") and parts[1] != "_teeth.py":
+                and not parts[2].startswith("_"):
             out.append(p)
     return out
 
@@ -247,9 +247,9 @@ def build_report(base: str) -> tuple[str, str]:
     verdict = {"ok": "clean", "info": "clean", "warn": "review advised",
                "fail": "blockers found"}[worst]
 
-    out = [MARKER, "## MoE learnings report",
-           f"_Auto-generated when this PR left draft. Deterministic expert panel · "
-           f"overall: **{_ICON[worst]} {verdict}**._", ""]
+    overall = (f"_Auto-generated when this PR left draft. Deterministic expert "
+               f"panel · overall: **{_ICON[worst]} {verdict}**._")
+    out = [MARKER, "## MoE learnings report", overall, ""]
     for ln in lenses:
         out.append(f"### {_ICON[ln.status]} {ln.key}")
         out.extend(ln.lines or ["(nothing to report)"])
@@ -265,6 +265,8 @@ def build_report(base: str) -> tuple[str, str]:
 # GitHub comment post/update (GITHUB_TOKEN via urllib; stdlib only)
 # --------------------------------------------------------------------------- #
 def _api(method: str, url: str, token: str, payload: dict | None = None) -> dict:
+    if not url.startswith("https://"):
+        raise ValueError(f"refusing non-https GitHub API URL: {url!r}")
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("Authorization", f"Bearer {token}")
@@ -332,8 +334,9 @@ def main(argv: list[str] | None = None) -> int:
         try:
             print(post_comment(args.repo, args.pr, token, body))
         except urllib.error.URLError as exc:
-            print(f"post failed: {exc}", file=sys.stderr)
-            return 1
+            # Advisory tool: a failed/forbidden POST (e.g. a read-only GITHUB_TOKEN
+            # on a fork PR -> 403) must not turn the advisory check red.
+            print(f"post failed (advisory, ignoring): {exc}", file=sys.stderr)
     # Advisory tool: never fail the build on findings.
     return 0
 

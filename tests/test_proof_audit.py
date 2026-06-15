@@ -139,6 +139,20 @@ class ProofAuditToolTests(unittest.TestCase):
         self.assertTrue(row["ok"])
         self.assertIn("teeth_swap", row["proof_sources"])
 
+    def test_declares_teeth_detects_module_level_teeth(self):
+        # Source-level TEETH detection distinguishes a broken `required` harness
+        # (declares TEETH but fails to import -> blocks) from a still-`pending`
+        # one (no TEETH -> import error is a non-blocking warning).
+        from tools.proof_audit import _declares_teeth
+        with self._fixture_root() as tmp:
+            root = Path(tmp)
+            has = root / "harnesses/core/has_test_harness.py"
+            none = root / "harnesses/core/none_test_harness.py"
+            _write(has, "import json\nTEETH = object()\n")
+            _write(none, "import json\n# no teeth declared yet\n")
+            self.assertTrue(_declares_teeth(has))
+            self.assertFalse(_declares_teeth(none))
+
     def test_unicode_selftest_output_does_not_crash_runner(self):
         with self._fixture_root() as tmp:
             root = Path(tmp)

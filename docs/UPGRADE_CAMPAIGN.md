@@ -7,6 +7,7 @@ and **reports its findings** (structured). Gate + contract are documented in
 `harnesses/_teeth.py`, `tools/proof_audit.py`, `tools/teeth_check.py`.
 
 ## Scope & rules
+
 - **In scope: 69 harnesses** — core (52), security (10), ai (7).
 - **Out of scope: pharmacy (8)** — kept on the legacy soft gate; the operator will
   do that category later.
@@ -19,6 +20,7 @@ and **reports its findings** (structured). Gate + contract are documented in
   flip `pending → required` → draft PR (operator merges).
 
 ## Status snapshot (Batch 0, 2026-06-14)
+
 | Scope | Count | Meaning |
 |---|---:|---|
 | required (teeth verified) | 9 | proven by the swap-check; gate blocks on these |
@@ -30,6 +32,7 @@ core/grpc_contract, core/idempotency, core/queue, core/tracing,
 security/ci_workflow_hardening, security/diff_secret_gate.
 
 ## Batch roadmap (provisional; exact membership ranked at each batch start)
+
 - **Batch 0 — Foundation (this PR):** teeth machinery, hardened gate, advisory
   mutmut lane, GOLD template, 9 GOLD anchors, docs. No non-GOLD harness rewrites.
 - **Batch 1 — BRONZE, establish rewrite+TEETH pipeline:** security/authz, core/config,
@@ -56,6 +59,7 @@ security/ci_workflow_hardening, security/diff_secret_gate.
   (spec→eval scenario generator — freeze outputs into fixtures).
 
 ## Known issues found in Batch 0 (fix in the relevant tier batch)
+
 - **core/datetime** — looked GOLD (grep hit on a "buggy"/"naive" string) but is a
   class library: no oracle predicate, no buggy twin, no frozen corpus, and its
   `--self-test` is a no-op (no argparse). Needs a full upgrade, not a TEETH add.

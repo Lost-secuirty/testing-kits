@@ -83,9 +83,12 @@ def main(argv: list[str] | None = None) -> int:
 
     # mutmut reads [tool.mutmut].source_paths from pyproject.toml (key renamed from
     # paths_to_mutate in 3.6). Run, then collect results; advisory unless --strict.
-    run = subprocess.run(["mutmut", "run"], cwd=REPO_ROOT)
-    results = subprocess.run(["mutmut", "results"], cwd=REPO_ROOT,
-                             capture_output=True, text=True)
+    try:
+        run = subprocess.run(["mutmut", "run"], cwd=REPO_ROOT, timeout=1800)
+        results = subprocess.run(["mutmut", "results"], cwd=REPO_ROOT,
+                                 capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired as exc:
+        return _skip(f"mutmut timed out ({exc}); advisory lane, not a gate")
     report = REPO_ROOT / "mutmut-report.txt"
     report.write_text(results.stdout or "", encoding="utf-8")
     print(results.stdout or "(no mutmut results captured)")

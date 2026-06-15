@@ -11,6 +11,11 @@ dist/
 STATUS.md
 STATUS.json
 
+# advisory mutation lane (tools/mutmut_lane.py)
+mutmut-report.txt
+.mutmut-cache
+mutants/
+
 # per-user Claude Code overrides; .claude/settings.json is shared
 .claude/settings.local.json
 
