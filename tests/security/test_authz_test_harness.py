@@ -5,7 +5,9 @@ Tests for the Authorization / Access-Control Test Harness.
 
 import unittest
 
+from harnesses._teeth import verify
 from harnesses.security.authz_test_harness import (
+    TEETH,
     AccessControl,
     AuthzServer,
     HorizontalEscalationTester,
@@ -21,6 +23,8 @@ from harnesses.security.authz_test_harness import (
     http_delete,
     http_get,
     http_post,
+    oracle_decide,
+    prove,
 )
 
 
@@ -787,6 +791,31 @@ class TestEdgeCases(unittest.TestCase):
         self.assertTrue(results["deny_by_default"])
         self.assertTrue(results["forged_role_denied"])
         self.assertTrue(results["revocation_overrides_grant"])
+
+
+# ---------------------------------------------------------------------------
+# Teeth: the harness must catch a real planted authz bug.
+# ---------------------------------------------------------------------------
+
+class TestTeeth(unittest.TestCase):
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct decider must NOT be flagged by prove.
+        self.assertFalse(prove(oracle_decide))
+        self.assertFalse(prove(TEETH.oracle))
+
+    def test_every_mutant_is_caught(self):
+        # Each planted authz defect must be individually caught.
+        self.assertEqual(len(TEETH.mutants), 3)
+        for mutant in TEETH.mutants:
+            self.assertTrue(prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
 
 
 if __name__ == "__main__":

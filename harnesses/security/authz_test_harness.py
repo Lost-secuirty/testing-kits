@@ -5,6 +5,7 @@ Pure stdlib, zero external dependencies.
 
 from __future__ import annotations
 
+import argparse
 import base64
 import json
 import threading
@@ -14,8 +15,16 @@ import urllib.error
 from dataclasses import dataclass, field
 from enum import IntEnum
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 import socket
+import sys
+
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -525,3 +534,329 @@ def http_delete(url: str, token: Optional[str] = None) -> Tuple[int, dict]:
             return resp.status, json.loads(resp.read())
     except urllib.error.HTTPError as e:
         return e.code, json.loads(e.read())
+
+
+# ---------------------------------------------------------------------------
+# TEETH: a pure, in-process RBAC decision model + planted authz mutants.
+#
+# The networked MockAuthzHandler above is exercised over a real socket by the
+# paired unittest. The teeth, by contrast, run a PURE in-process model of the
+# same RBAC decision so the gate can verify "this harness catches a real authz
+# bug" with zero clock/network/filesystem I/O and full determinism.
+#
+# A *decider* maps a frozen AuthzRequest to a literal decision "allow"|"deny".
+# The oracle decider reuses the harness's own AccessControl engine under a fixed
+# grant policy. Each Mutant is a faithful real-world access-control defect.
+# prove() judges a decider against the corpus's FROZEN expected decisions --
+# never against the oracle object -- so the check is non-circular.
+# ---------------------------------------------------------------------------
+
+ALLOW = "allow"
+DENY = "deny"
+
+
+@dataclass(frozen=True)
+class AuthzRequest:
+    """A frozen access-control decision request."""
+    name: str
+    role: Role
+    permission: Permission
+    # Optional resource ownership context.
+    resource_id: Optional[str] = None
+    resource_owner: Optional[str] = None
+    requesting_user_id: Optional[str] = None
+    note: str = ""
+
+    def resource(self) -> Optional[Resource]:
+        if self.resource_id is None or self.resource_owner is None:
+            return None
+        return Resource(self.resource_id, self.resource_owner, "document")
+
+
+# The fixed grant policy the oracle and every mutant share. Deny-by-default:
+# USER may READ; EDITOR may READ/WRITE; ADMIN may do everything; ANONYMOUS has
+# no grants. ADMIN's WRITE is explicitly REVOKED to model a deny-list override:
+# an explicit deny must beat the role's other grants (deny-precedence).
+def _build_policy(ac: AccessControl) -> None:
+    ac.grant(Role.USER, Permission.READ)
+    ac.grant(Role.EDITOR, Permission.READ)
+    ac.grant(Role.EDITOR, Permission.WRITE)
+    ac.grant(Role.ADMIN, Permission.READ)
+    ac.grant(Role.ADMIN, Permission.WRITE)
+    ac.grant(Role.ADMIN, Permission.DELETE)
+    ac.grant(Role.ADMIN, Permission.ADMIN_ACTION)
+    # Explicit deny that must override the ADMIN WRITE grant above.
+    ac.revoke(Role.ADMIN, Permission.WRITE)
+
+
+def oracle_decide(req: AuthzRequest) -> str:
+    """Correct RBAC decision — the contract AccessControl implements.
+
+    Deny-by-default, ownership auto-grants READ only, explicit revocation beats
+    a grant, and ANONYMOUS can never WRITE/DELETE/ADMIN_ACTION.
+    """
+    ac = AccessControl()
+    _build_policy(ac)
+    allowed = ac.can(
+        req.role,
+        req.permission,
+        resource=req.resource(),
+        requesting_user_id=req.requesting_user_id,
+    )
+    return ALLOW if allowed else DENY
+
+
+# --- Planted buggy deciders (each models a real, common authz defect) -------
+
+class _DefaultAllowAC(AccessControl):
+    """BUG: default-ALLOW instead of deny-by-default.
+
+    A fail-open access-control engine: any role/permission with no explicit grant
+    AND no explicit revocation is allowed through. This is the classic
+    deny-by-default inversion — the single most damaging RBAC misconfiguration,
+    letting unprivileged or unknown roles perform actions they were never granted.
+    """
+
+    def can(self, role, permission, resource=None, requesting_user_id=None):  # type: ignore[override]
+        if role == Role.ANONYMOUS and permission in (
+            Permission.WRITE, Permission.DELETE, Permission.ADMIN_ACTION,
+        ):
+            return False
+        if (
+            permission == Permission.READ
+            and resource is not None
+            and requesting_user_id is not None
+            and resource.owner_id == requesting_user_id
+        ):
+            return True
+        if permission in self._revocations[role]:
+            return False
+        # BUG: missing grant no longer denies — anything not revoked is allowed.
+        return True
+
+
+class _DenyIgnoredAC(AccessControl):
+    """BUG: explicit deny (revocation) is ignored — a grant wins.
+
+    Deny-precedence is dropped: once a permission is granted to a role, a later
+    revocation has no effect, so an admin whose WRITE was explicitly revoked can
+    still write. Models a policy engine that ORs allow-rules without honouring
+    the deny-list (e.g. additive role merge that forgets the deny entries).
+    """
+
+    def can(self, role, permission, resource=None, requesting_user_id=None):  # type: ignore[override]
+        if role == Role.ANONYMOUS and permission in (
+            Permission.WRITE, Permission.DELETE, Permission.ADMIN_ACTION,
+        ):
+            return False
+        if (
+            permission == Permission.READ
+            and resource is not None
+            and requesting_user_id is not None
+            and resource.owner_id == requesting_user_id
+        ):
+            return True
+        # BUG: every rule is treated as an allow. The revocation set is OR'd back
+        # in as if it were a grant, so an explicit deny is silently overridden by
+        # the permission it was meant to revoke (additive role merge that forgets
+        # the deny-list). Note revoke() also discards from _grants, so honouring
+        # the deny-list here would deny correctly — the bug is re-allowing it.
+        effective = self._grants[role] | self._revocations[role]
+        return permission in effective
+
+
+class _OwnershipOverGrantAC(AccessControl):
+    """BUG: ownership shortcut over-matches — owner gets ANY action, not just READ.
+
+    The owner-can-act check was widened from READ-only to every permission, so a
+    resource owner can WRITE/DELETE/admin a resource without holding the grant.
+    Models an over-broad ownership wildcard (a common IDOR-adjacent privilege
+    bug where 'owner' is treated as a super-role on their own objects).
+    """
+
+    def can(self, role, permission, resource=None, requesting_user_id=None):  # type: ignore[override]
+        if role == Role.ANONYMOUS and permission in (
+            Permission.WRITE, Permission.DELETE, Permission.ADMIN_ACTION,
+        ):
+            return False
+        # BUG: ownership now auto-grants EVERY permission, not just READ.
+        if (
+            resource is not None
+            and requesting_user_id is not None
+            and resource.owner_id == requesting_user_id
+        ):
+            return True
+        if permission in self._revocations[role]:
+            return False
+        return permission in self._grants[role]
+
+
+def _decider_for(ac_cls: type) -> Callable[[AuthzRequest], str]:
+    """Build a decider closure over an AccessControl subclass, applying the
+    shared policy. Used to mint the planted-mutant deciders."""
+
+    def decide(req: AuthzRequest) -> str:
+        ac = ac_cls()
+        _build_policy(ac)
+        allowed = ac.can(
+            req.role,
+            req.permission,
+            resource=req.resource(),
+            requesting_user_id=req.requesting_user_id,
+        )
+        return ALLOW if allowed else DENY
+
+    return decide
+
+
+mutant_default_allow = _decider_for(_DefaultAllowAC)
+mutant_deny_ignored = _decider_for(_DenyIgnoredAC)
+mutant_ownership_over_grant = _decider_for(_OwnershipOverGrantAC)
+
+
+# --- Frozen corpus: (role, permission, ownership) -> expected decision -------
+
+AUTHZ_CORPUS: Tuple[AuthzRequest, ...] = (
+    # deny-by-default: an unknown/ungranted combo MUST be denied
+    # (catches _DefaultAllowAC fail-open).
+    AuthzRequest("user_delete_denied", Role.USER, Permission.DELETE,
+                 note="USER has no DELETE grant -> deny-by-default"),
+    AuthzRequest("editor_admin_denied", Role.EDITOR, Permission.ADMIN_ACTION,
+                 note="EDITOR cannot perform admin actions"),
+    AuthzRequest("anon_read_denied", Role.ANONYMOUS, Permission.READ,
+                 note="ANONYMOUS has no READ grant -> deny"),
+    # explicit deny beats grant: ADMIN WRITE was granted then revoked
+    # (catches _DenyIgnoredAC ignoring deny-precedence).
+    AuthzRequest("admin_write_revoked", Role.ADMIN, Permission.WRITE,
+                 note="ADMIN WRITE explicitly revoked -> deny beats grant"),
+    # ownership auto-grants READ only, not WRITE/DELETE
+    # (catches _OwnershipOverGrantAC over-broad ownership).
+    AuthzRequest("owner_read_allowed", Role.USER, Permission.READ,
+                 resource_id="r1", resource_owner="alice", requesting_user_id="alice",
+                 note="owner may READ own resource without a grant"),
+    AuthzRequest("owner_write_denied", Role.USER, Permission.WRITE,
+                 resource_id="r1", resource_owner="alice", requesting_user_id="alice",
+                 note="ownership does NOT auto-grant WRITE"),
+    AuthzRequest("owner_delete_denied", Role.USER, Permission.DELETE,
+                 resource_id="r1", resource_owner="alice", requesting_user_id="alice",
+                 note="ownership does NOT auto-grant DELETE"),
+    # baseline allows the oracle must honour (so a deny-everything impl is caught)
+    AuthzRequest("user_read_allowed", Role.USER, Permission.READ,
+                 note="USER has READ grant -> allow"),
+    AuthzRequest("editor_write_allowed", Role.EDITOR, Permission.WRITE,
+                 note="EDITOR has WRITE grant -> allow"),
+    AuthzRequest("admin_delete_allowed", Role.ADMIN, Permission.DELETE,
+                 note="ADMIN has DELETE grant -> allow"),
+)
+
+# Literal expected decisions, computed by hand from the contract — NEVER read
+# back from the oracle object, which is what keeps prove() non-circular.
+EXPECTED_DECISIONS: Dict[str, str] = {
+    "user_delete_denied": DENY,
+    "editor_admin_denied": DENY,
+    "anon_read_denied": DENY,
+    "admin_write_revoked": DENY,
+    "owner_read_allowed": ALLOW,
+    "owner_write_denied": DENY,
+    "owner_delete_denied": DENY,
+    "user_read_allowed": ALLOW,
+    "editor_write_allowed": ALLOW,
+    "admin_delete_allowed": ALLOW,
+}
+
+
+def prove(decider: Callable[[AuthzRequest], str]) -> bool:
+    """True iff ``decider`` MISDECIDES any frozen corpus case (i.e. caught).
+
+    Non-circular and deterministic: each decision is compared against the literal
+    EXPECTED_DECISIONS constant, never against the oracle object. No clock,
+    network, or filesystem I/O; no RNG. A decider that raises on a corpus case
+    counts as caught.
+    """
+    for req in AUTHZ_CORPUS:
+        expected = EXPECTED_DECISIONS[req.name]
+        try:
+            actual = decider(req)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if actual != expected:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_decide,
+    mutants=(
+        Mutant("default_allow", mutant_default_allow,
+               "deny-by-default inverted to fail-open: ungranted role/permission allowed"),
+        Mutant("deny_precedence_ignored", mutant_deny_ignored,
+               "explicit revocation ignored: a grant overrides an explicit deny"),
+        Mutant("ownership_over_grant", mutant_ownership_over_grant,
+               "ownership over-matches: owner auto-granted WRITE/DELETE, not just READ"),
+    ),
+    corpus_size=len(AUTHZ_CORPUS),
+    kind="oracle_swap",
+    notes="deny-by-default, explicit deny beats grant, ownership auto-grants READ only",
+)
+
+
+def list_oracle_cases() -> List[str]:
+    return [req.name for req in AUTHZ_CORPUS]
+
+
+# ---------------------------------------------------------------------------
+# Report-based self-test — fails loud, reports findings, asserts the teeth.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(as_json: bool = False) -> int:
+    report = Report("security/authz")
+
+    # 1. The correct oracle decider must match every frozen expected decision.
+    for req in AUTHZ_CORPUS:
+        expected = EXPECTED_DECISIONS[req.name]
+        actual = oracle_decide(req)
+        report.add(f"oracle_case:{req.name}", expected, actual, detail=req.note)
+
+    # 2. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    # 3. Harness-specific invariants exercised directly against AccessControl.
+    ac = AccessControl()
+    report.record("deny_by_default", not ac.can(Role.ADMIN, Permission.ADMIN_ACTION),
+                  detail="a fresh engine grants nothing")
+    ac.grant(Role.ADMIN, Permission.ADMIN_ACTION)
+    ac.revoke(Role.ADMIN, Permission.ADMIN_ACTION)
+    report.record("revocation_overrides_grant", not ac.can(Role.ADMIN, Permission.ADMIN_ACTION),
+                  detail="explicit deny must beat a grant")
+    report.record("anonymous_cannot_write",
+                  not AccessControl().can(Role.ANONYMOUS, Permission.WRITE),
+                  detail="ANONYMOUS is never allowed to write")
+    boundary = PrivilegeBoundaryTester(AccessControl()).run_all()
+    report.record("privilege_boundary_all_pass", all(boundary.values()),
+                  detail=str(boundary))
+
+    return report.emit(as_json=as_json)
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point — default action is the self-test (repo convention).
+# ---------------------------------------------------------------------------
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Authorization / Access-Control Test Harness")
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true",
+                        help="list the frozen oracle corpus case names")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_oracle_cases()))
+        return 0
+    return _run_self_test(as_json=args.json)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

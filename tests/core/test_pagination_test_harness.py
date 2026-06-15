@@ -9,7 +9,9 @@ import threading
 import time
 import unittest
 
+from harnesses._teeth import verify
 from harnesses.core.pagination_test_harness import (
+    TEETH,
     BackingStore,
     CursorPaginator,
     OffsetPaginator,
@@ -1055,6 +1057,33 @@ class TestBoundaryCases(unittest.TestCase):
                 break
             offset += limit
         self.assertEqual(len(seen), 100)
+
+
+# ===========================================================================
+# Teeth (campaign teeth contract)
+# ===========================================================================
+
+class TestTeeth(unittest.TestCase):
+    """The harness must catch a real planted pagination bug (the teeth contract)."""
+
+    # 128
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    # 129
+    def test_oracle_is_clean(self):
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+
+    # 130
+    def test_every_mutant_is_caught(self):
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    # 131
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
 
 
 if __name__ == "__main__":

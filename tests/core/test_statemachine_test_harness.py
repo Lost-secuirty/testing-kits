@@ -9,7 +9,9 @@ import unittest
 import urllib.request
 from urllib.error import HTTPError
 
+from harnesses._teeth import verify
 from harnesses.core.statemachine_test_harness import (
+    TEETH,
     CoverageTracker,
     CycleDetector,
     DeterminismChecker,
@@ -736,6 +738,29 @@ class TestIntegration(unittest.TestCase):
         with MockStateMachineServer(machine=m) as srv:
             data = http_get(f"{srv.url}/health")
             self.assertEqual(data["status"], "ok")
+
+
+# ===========================================================================
+# 13. Teeth — the harness must catch a real planted FSM-checker bug
+# ===========================================================================
+
+class TestTeeth(unittest.TestCase):
+    """The harness must catch a real planted bug (the campaign teeth contract)."""
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+
+    def test_every_mutant_is_caught(self):
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
 
 
 if __name__ == "__main__":
