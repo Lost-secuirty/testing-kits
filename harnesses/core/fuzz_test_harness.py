@@ -278,9 +278,9 @@ def _make_fingerprint(exc: Exception, tb_str: str) -> str:
     """Create a deduplication fingerprint from exception type + last frame."""
     exc_type = type(exc).__name__
     # Extract last meaningful frame from traceback
-    lines = [l.strip() for l in tb_str.splitlines() if l.strip()]
+    lines = [line.strip() for line in tb_str.splitlines() if line.strip()]
     # Find "File ... line ..." frames
-    frames = [l for l in lines if l.startswith("File ")]
+    frames = [line for line in lines if line.startswith("File ")]
     last_frame = frames[-1] if frames else ""
     raw = f"{exc_type}:{last_frame}"
     return hashlib.md5(raw.encode("utf-8", errors="replace")).hexdigest()[:12]
@@ -569,9 +569,11 @@ class FuzzRunner:
         report = FuzzReport(seed=self.seed)
 
         for i in range(num_iterations):
-            if timeout_seconds is not None:
-                if time.monotonic() - start_time > timeout_seconds:
-                    break
+            if (
+                timeout_seconds is not None
+                and time.monotonic() - start_time > timeout_seconds
+            ):
+                break
 
             inp = self._generate_input(input_type)
             report.total_iterations += 1

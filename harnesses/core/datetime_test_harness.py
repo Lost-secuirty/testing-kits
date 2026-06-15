@@ -7,17 +7,14 @@ Mock HTTP server on dynamic port (default 19060).
 import calendar
 import datetime
 import http.server
+import importlib.util
 import json
 import threading
 import time
 from datetime import timedelta, timezone
 
-# Try to import zoneinfo (Python 3.9+)
-try:
-    import zoneinfo
-    HAS_ZONEINFO = True
-except ImportError:
-    HAS_ZONEINFO = False
+# Detect zoneinfo availability (Python 3.9+) without importing it.
+HAS_ZONEINFO = importlib.util.find_spec("zoneinfo") is not None
 
 
 # ---------------------------------------------------------------------------
@@ -139,10 +136,7 @@ class DSTTester:
         Convert a fall-back ambiguous time to UTC using fold.
         fold=0 → EDT (UTC-4), fold=1 → EST (UTC-5)
         """
-        if fold == 0:
-            offset = timedelta(hours=-4)  # EDT
-        else:
-            offset = timedelta(hours=-5)  # EST
+        offset = timedelta(hours=-4) if fold == 0 else timedelta(hours=-5)  # EDT / EST
         tz = timezone(offset)
         dt_aware = dt_naive.replace(tzinfo=tz)
         return dt_aware.astimezone(timezone.utc)

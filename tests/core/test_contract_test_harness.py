@@ -402,7 +402,9 @@ class TestInterfaceChecker(unittest.TestCase):
         return spec
 
     class GoodStack:
-        def push(self, item): self._items = getattr(self, "_items", []); self._items.append(item)
+        def push(self, item):
+            self._items = getattr(self, "_items", [])
+            self._items.append(item)
         def pop(self): return self._items.pop()
         def peek(self): return self._items[-1]
         def is_empty(self): return len(getattr(self, "_items", [])) == 0

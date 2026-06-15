@@ -486,7 +486,6 @@ class SingleFlightCache:
             if key in self._store:
                 return self._store[key]
             if key in self._inflight:
-                self._inflight[key]
                 ev_wait = True
             else:
                 self._inflight[key] = event

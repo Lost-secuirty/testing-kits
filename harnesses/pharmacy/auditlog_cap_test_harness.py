@@ -301,7 +301,7 @@ def run_all_scenarios(verbose=False):
         with open(export_path) as fh:
             lines = fh.readlines()
         # header: 4 lines + header row + 10 data rows = 16 lines total
-        data_lines = [l for l in lines if l.startswith("202")]
+        data_lines = [line for line in lines if line.startswith("202")]
         check("10. Integration: export has exactly cap(10) data rows",
               len(data_lines) == 10,
               f"got {len(data_lines)} data lines")

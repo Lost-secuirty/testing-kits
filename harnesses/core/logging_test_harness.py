@@ -296,9 +296,12 @@ class TimestampValidator:
         out: list[tuple[int, int]] = []
         parsed = [_parse_iso8601(e.timestamp) for e in entries]
         for i in range(len(parsed) - 1):
-            if parsed[i] is not None and parsed[i + 1] is not None:
-                if parsed[i + 1] < parsed[i]:  # type: ignore[operator]
-                    out.append((i, i + 1))
+            if (
+                parsed[i] is not None
+                and parsed[i + 1] is not None
+                and parsed[i + 1] < parsed[i]  # type: ignore[operator]
+            ):
+                out.append((i, i + 1))
         return out
 
     def all_timestamps_valid(self, entries: list[LogEntry]) -> bool:

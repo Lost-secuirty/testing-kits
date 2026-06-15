@@ -107,7 +107,7 @@ class LossDetector:
     @staticmethod
     def _values_equal(a: Any, b: Any) -> bool:
         """Check if two values are semantically equal (handling NaN, inf, etc.)."""
-        if type(a) != type(b):
+        if type(a) is not type(b):
             # Allow int/float equivalence when value is the same
             if isinstance(a, (int, float)) and isinstance(b, (int, float)):
                 if math.isnan(a) and math.isnan(b):
@@ -181,7 +181,7 @@ class FormatTester:
                 if math.isinf(orig) and math.isinf(dec) and orig == dec:
                     continue
             # Type mismatch
-            if type(orig) != type(dec) and not (isinstance(orig, bool) and isinstance(dec, bool)):
+            if type(orig) is not type(dec) and not (isinstance(orig, bool) and isinstance(dec, bool)):
                 # bool is subclass of int; handle carefully
                 if isinstance(orig, bool) or isinstance(dec, bool):
                     if orig != dec:

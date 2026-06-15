@@ -224,15 +224,17 @@ def audit_workflow(data: dict[str, Any]) -> list[Finding]:
                             "ref, not a 40-hex commit SHA",
                         )
                     )
-                if uses.startswith("actions/checkout@"):
-                    if with_block.get("persist-credentials") is not False:
-                        findings.append(
-                            Finding(
-                                "checkout-credentials",
-                                f"job '{job_name}' checkout leaves persist-credentials "
-                                "on (token persisted in .git/config)",
-                            )
+                if (
+                    uses.startswith("actions/checkout@")
+                    and with_block.get("persist-credentials") is not False
+                ):
+                    findings.append(
+                        Finding(
+                            "checkout-credentials",
+                            f"job '{job_name}' checkout leaves persist-credentials "
+                            "on (token persisted in .git/config)",
                         )
+                    )
 
     return findings
 
@@ -302,16 +304,18 @@ def audit_workflow_naive(data: dict[str, Any]) -> list[Finding]:
                     Finding("fork-checkout", f"job '{job_name}' checks out fork ref")
                 )
             uses = step.get("uses")
-            if isinstance(uses, str):
-                # BUG: any '@'-pinned action is accepted; no SHA check at all.
-                if uses.startswith("actions/checkout@"):
-                    if with_block.get("persist-credentials") is not False:
-                        findings.append(
-                            Finding(
-                                "checkout-credentials",
-                                f"job '{job_name}' checkout persists credentials",
-                            )
-                        )
+            # BUG: any '@'-pinned action is accepted; no SHA check at all.
+            if (
+                isinstance(uses, str)
+                and uses.startswith("actions/checkout@")
+                and with_block.get("persist-credentials") is not False
+            ):
+                findings.append(
+                    Finding(
+                        "checkout-credentials",
+                        f"job '{job_name}' checkout persists credentials",
+                    )
+                )
     return findings
 
 
@@ -514,7 +518,7 @@ def list_cases() -> list[str]:
 def run_case(case: WorkflowCase) -> AuditResult:
     findings = audit_workflow(case.build_workflow())
     codes = tuple(finding.code for finding in findings)
-    if case.should_pass:
+    if case.should_pass:  # noqa: SIM108 — else-branch comment documents exact-match rationale
         ok = len(codes) == 0
     else:
         # Exact match: expected codes present AND no unexpected extras, so an

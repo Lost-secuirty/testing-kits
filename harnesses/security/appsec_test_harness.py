@@ -269,7 +269,7 @@ class JWTChecker:
             payload = json.loads(_b64url_decode(parts[1]))
             signature = parts[2]
         except Exception as exc:
-            raise ValueError(f"JWT decode error: {exc}")
+            raise ValueError(f"JWT decode error: {exc}") from exc
         return header, payload, signature
 
     def check_alg_none(self, token: str) -> tuple[bool, str]:

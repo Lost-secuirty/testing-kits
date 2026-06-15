@@ -101,7 +101,7 @@ class SimpleHTMLParser:
         # Also pick up <a href="..."/> (self-closing or no text)
         for tag_str in self.find_all_tags('a'):
             href = self._get_attr(tag_str, 'href') or ''
-            if href and not any(l['href'] == (urllib.parse.urljoin(base_url, href) if (base_url and not href.startswith('http')) else href) for l in links):
+            if href and not any(link['href'] == (urllib.parse.urljoin(base_url, href) if (base_url and not href.startswith('http')) else href) for link in links):
                 if base_url and not href.startswith('http'):
                     href = urllib.parse.urljoin(base_url, href)
                 links.append({'href': href, 'text': ''})
@@ -428,10 +428,9 @@ class RobotsTxtParser:
         best_len = -1
         best_allowed = True
         for directive, pattern in rules:
-            if not pattern:
-                # empty disallow => allow all
-                if directive == 'disallow':
-                    continue
+            # empty disallow => allow all
+            if not pattern and directive == 'disallow':
+                continue
             if path.startswith(pattern) or (pattern and re.match(
                     re.escape(pattern).replace(r'\*', '.*').replace(r'\$', '$'), path)):
                 if len(pattern) > best_len:
@@ -846,7 +845,7 @@ class ScraperTestRunner:
 
         # Link extraction
         links = parser.get_links(f'{self.base_url}/page1')
-        hrefs = [l['href'] for l in links]
+        hrefs = [link['href'] for link in links]
         self._record('parse_links_found', len(links) >= 3, f'found {len(links)} links')
         self._record('parse_link_has_next', any('/page2' in h for h in hrefs), f'hrefs={hrefs}')
 

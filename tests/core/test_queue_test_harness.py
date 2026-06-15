@@ -1,5 +1,6 @@
 """Test suite for queue_test_harness."""
 
+import dataclasses
 import unittest
 
 from harnesses.core.queue_test_harness import (
@@ -28,7 +29,7 @@ def _broker(delivery=Delivery.AT_LEAST_ONCE, **cfg):
 class TestMessageAndConfig(unittest.TestCase):
     def test_message_is_frozen(self):
         m = Message("a", "k", "body")
-        with self.assertRaises(Exception):
+        with self.assertRaises(dataclasses.FrozenInstanceError):
             m.id = "b"  # type: ignore[misc]
 
     def test_config_defaults(self):

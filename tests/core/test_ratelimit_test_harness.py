@@ -7,6 +7,7 @@ import dataclasses
 import threading
 import time
 import unittest
+import urllib.error
 
 from harnesses.core.ratelimit_test_harness import (
     FakeClock,
@@ -1295,7 +1296,7 @@ class TestMockServer(unittest.TestCase):
         srv, _, _, port = self._start()
         srv.stop()
         # After stop, connection should fail
-        with self.assertRaises(Exception):
+        with self.assertRaises(urllib.error.URLError):
             http_get(f"http://127.0.0.1:{port}/", timeout=1.0)
 
 

@@ -360,13 +360,14 @@ class CliTestRunner:
             stderr_v = OutputValidator(actual_stderr)
 
             # stdout checks
-            if test_case.expected_stdout_exact is not None:
-                if not stdout_v.exact_match(test_case.expected_stdout_exact):
-                    failures.append(
-                        f"Stdout exact mismatch.\n"
-                        f"  Expected: {test_case.expected_stdout_exact!r}\n"
-                        f"  Actual  : {actual_stdout!r}"
-                    )
+            if test_case.expected_stdout_exact is not None and not stdout_v.exact_match(
+                test_case.expected_stdout_exact
+            ):
+                failures.append(
+                    f"Stdout exact mismatch.\n"
+                    f"  Expected: {test_case.expected_stdout_exact!r}\n"
+                    f"  Actual  : {actual_stdout!r}"
+                )
 
             if test_case.expected_stdout_contains:
                 ok, missing = stdout_v.contains_all(test_case.expected_stdout_contains)
@@ -374,11 +375,12 @@ class CliTestRunner:
                     for m in missing:
                         failures.append(f"Stdout missing: {m!r}")
 
-            if test_case.expected_stdout_regex is not None:
-                if not stdout_v.regex_match(test_case.expected_stdout_regex):
-                    failures.append(
-                        f"Stdout did not match regex: {test_case.expected_stdout_regex!r}"
-                    )
+            if test_case.expected_stdout_regex is not None and not stdout_v.regex_match(
+                test_case.expected_stdout_regex
+            ):
+                failures.append(
+                    f"Stdout did not match regex: {test_case.expected_stdout_regex!r}"
+                )
 
             # stderr checks
             if test_case.expected_stderr_contains:
@@ -387,11 +389,12 @@ class CliTestRunner:
                     for m in missing:
                         failures.append(f"Stderr missing: {m!r}")
 
-            if test_case.expected_stderr_regex is not None:
-                if not stderr_v.regex_match(test_case.expected_stderr_regex):
-                    failures.append(
-                        f"Stderr did not match regex: {test_case.expected_stderr_regex!r}"
-                    )
+            if test_case.expected_stderr_regex is not None and not stderr_v.regex_match(
+                test_case.expected_stderr_regex
+            ):
+                failures.append(
+                    f"Stderr did not match regex: {test_case.expected_stderr_regex!r}"
+                )
 
         passed = (error_msg is None) and (len(failures) == 0)
 

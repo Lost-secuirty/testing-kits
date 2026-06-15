@@ -136,7 +136,7 @@ def audit(fn: Callable[[], Any], config: AuditConfig) -> AuditResult:
 
     # Vary time only.
     samples = []
-    for i in range(config.iterations):
+    for _ in range(config.iterations):
         with _MockEnv(True, False, False, False, seed=rng.randint(1, 10_000)):
             samples.append(_capture(fn))
     if len({s for s in samples}) > 1:
@@ -144,7 +144,7 @@ def audit(fn: Callable[[], Any], config: AuditConfig) -> AuditResult:
 
     # Vary random only.
     samples = []
-    for i in range(config.iterations):
+    for _ in range(config.iterations):
         with _MockEnv(False, True, False, False, seed=rng.randint(1, 10_000)):
             samples.append(_capture(fn))
     if len({s for s in samples}) > 1:
@@ -161,7 +161,7 @@ def audit(fn: Callable[[], Any], config: AuditConfig) -> AuditResult:
 
     # Vary $HOME only.
     samples = []
-    for i in range(config.iterations):
+    for _ in range(config.iterations):
         with _MockEnv(False, False, False, True, seed=rng.randint(1, 10_000)):
             samples.append(_capture(fn))
     if len({s for s in samples}) > 1:

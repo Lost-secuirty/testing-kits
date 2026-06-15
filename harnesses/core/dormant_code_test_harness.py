@@ -144,16 +144,16 @@ def _load_target_module() -> tuple[Any, str]:
     import importlib.util
     import tempfile
 
-    tmp = tempfile.NamedTemporaryFile(
+    with tempfile.NamedTemporaryFile(
         mode="w", suffix=".py", delete=False, encoding="utf-8"
-    )
-    tmp.write(TARGET_SOURCE + "\n")
-    tmp.close()
-    spec = importlib.util.spec_from_file_location("dormant_target", tmp.name)
+    ) as tmp:
+        tmp.write(TARGET_SOURCE + "\n")
+        tmp_name = tmp.name
+    spec = importlib.util.spec_from_file_location("dormant_target", tmp_name)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module, tmp.name
+    return module, tmp_name
 
 
 def _baseline_workload(module: Any) -> None:

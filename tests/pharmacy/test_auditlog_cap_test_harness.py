@@ -147,7 +147,7 @@ class TestExport(unittest.TestCase):
         path = os.path.join(self.tmpdir, "full.txt")
         s.export(path)
         with open(path) as fh:
-            lines = [l for l in fh.readlines() if l.startswith("202")]
+            lines = [line for line in fh.readlines() if line.startswith("202")]
         # 15 inserts with cap=10 -> 10 rows in DB -> export has 10 data rows
         self.assertEqual(len(lines), 10)
 

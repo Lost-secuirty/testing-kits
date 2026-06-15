@@ -229,7 +229,7 @@ class TestMoneyDivision(unittest.TestCase):
         self.assertEqual(result.currency, "CHF")
 
     def test_divide_by_zero_raises(self):
-        with self.assertRaises(Exception):
+        with self.assertRaises(ZeroDivisionError):
             Money("10.00").divide(0)
 
 

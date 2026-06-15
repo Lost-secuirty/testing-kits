@@ -627,10 +627,8 @@ class _DefaultAllowAC(AccessControl):
             and resource.owner_id == requesting_user_id
         ):
             return True
-        if permission in self._revocations[role]:
-            return False
         # BUG: missing grant no longer denies — anything not revoked is allowed.
-        return True
+        return permission not in self._revocations[role]
 
 
 class _DenyIgnoredAC(AccessControl):

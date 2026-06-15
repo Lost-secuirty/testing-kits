@@ -361,10 +361,8 @@ def run_all_scenarios(verbose=False):
     with contextlib.suppress(RuntimeError):
         cb.call(boom)
     cb.call(lambda: "ok")          # reset
-    try:
+    with contextlib.suppress(RuntimeError):
         cb.call(boom)              # only 1 failure since reset
-    except RuntimeError:
-        pass
     check("4. Success resets counter (1 fail after reset != trip)",
           cb.state == CLOSED, cb.state)
 
@@ -395,10 +393,8 @@ def run_all_scenarios(verbose=False):
     with contextlib.suppress(RuntimeError):
         cb.call(boom)
     clk2.advance(5.0)                # -> HALF_OPEN
-    try:
+    with contextlib.suppress(RuntimeError):
         cb.call(boom)               # trial fails
-    except RuntimeError:
-        pass
     check("8. Trial failure re-trips to OPEN", cb.state == OPEN, cb.state)
 
     # 9. Half-open admits at most half_open_max_calls trials

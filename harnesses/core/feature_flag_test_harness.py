@@ -146,11 +146,10 @@ class FlagMatrixRunner:
 
             # Check expectations.
             for exp_combo, exp_return in expects:
-                if all(combo.get(k) == v for k, v in exp_combo.items()):
-                    if ret != exp_return:
-                        outcome = "expectation_violation"
-                        detail = f"expected {exp_return!r}, got {ret!r}"
-                        break
+                if all(combo.get(k) == v for k, v in exp_combo.items()) and ret != exp_return:
+                    outcome = "expectation_violation"
+                    detail = f"expected {exp_return!r}, got {ret!r}"
+                    break
 
             return_types[tuple(sorted(combo.items()))] = ret_type
             results.append(ComboResult(combo=dict(combo), outcome=outcome,

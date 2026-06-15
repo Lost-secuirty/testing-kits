@@ -3,6 +3,7 @@ Test suite for appsec_test_harness.py — 129 tests.
 Pure stdlib, zero external dependencies.
 """
 
+import contextlib
 import json
 import pickle
 import time
@@ -740,11 +741,9 @@ class TestMockAppSecServer(unittest.TestCase):
             def redirect_request(self, req, fp, code, msg, headers, newurl):
                 return None
         opener2 = ur.build_opener(NoRedirect())
-        try:
+        with contextlib.suppress(Exception):
             opener2.open(url, timeout=5)
             # If no redirect, might be a 302 handled or 200
-        except Exception:
-            pass
         # Just check the safe redirect blocks bad ones
         status, body = self._get("/safe/redirect?to=https://evil.com/phish")
         self.assertEqual(status, 400)

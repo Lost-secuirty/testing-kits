@@ -920,9 +920,12 @@ def check_ignores_removed_field(old: ContractSchema, new: ContractSchema) -> boo
             return False
         if new_spec.required and not old_spec.required:
             return False
-        if old_spec.enum is not None and new_spec.enum is not None:
-            if set(old_spec.enum) - set(new_spec.enum):
-                return False
+        if (
+            old_spec.enum is not None
+            and new_spec.enum is not None
+            and set(old_spec.enum) - set(new_spec.enum)
+        ):
+            return False
     return True  # BUG: removed fields never make it incompatible
 
 
@@ -945,9 +948,12 @@ def check_ignores_type_change(old: ContractSchema, new: ContractSchema) -> bool:
         # BUG: type mismatch is never flagged.
         if new_spec.required and not old_spec.required:
             return False
-        if old_spec.enum is not None and new_spec.enum is not None:
-            if set(old_spec.enum) - set(new_spec.enum):
-                return False
+        if (
+            old_spec.enum is not None
+            and new_spec.enum is not None
+            and set(old_spec.enum) - set(new_spec.enum)
+        ):
+            return False
     return True
 
 
@@ -970,9 +976,12 @@ def check_allows_new_required_field(old: ContractSchema, new: ContractSchema) ->
             return False
         if new_spec.required and not old_spec.required:
             return False
-        if old_spec.enum is not None and new_spec.enum is not None:
-            if set(old_spec.enum) - set(new_spec.enum):
-                return False
+        if (
+            old_spec.enum is not None
+            and new_spec.enum is not None
+            and set(old_spec.enum) - set(new_spec.enum)
+        ):
+            return False
     return True
 
 

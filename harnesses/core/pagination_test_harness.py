@@ -104,11 +104,11 @@ def decode_cursor(cursor: str) -> tuple[Any, Any]:
     try:
         decoded_bytes = base64.urlsafe_b64decode(cursor + "==")
     except Exception:
-        raise ValueError(f"Malformed base64 cursor: {cursor!r}")
+        raise ValueError(f"Malformed base64 cursor: {cursor!r}") from None
     try:
         payload = json.loads(decoded_bytes.decode())
     except Exception:
-        raise ValueError(f"Cursor payload is not valid JSON: {cursor!r}")
+        raise ValueError(f"Cursor payload is not valid JSON: {cursor!r}") from None
     if not isinstance(payload, dict):
         raise ValueError(f"Cursor payload is not a JSON object: {cursor!r}")
     if "sort_key" not in payload or "id" not in payload:
@@ -572,11 +572,8 @@ def page_inclusive_boundary(
     Models the very common `>=` vs `>` keyset error, which duplicates the last
     item of each page as the first item of the following page.
     """
-    if after is None:
-        candidates = records
-    else:
-        # BUG: `>=` re-includes the cursor record itself.
-        candidates = [r for r in records if _key_of(r) >= after]
+    # BUG: `>=` re-includes the cursor record itself.
+    candidates = records if after is None else [r for r in records if _key_of(r) >= after]
     items = candidates[:limit]
     has_next = len(candidates) > limit
     next_after = _key_of(items[-1]) if (has_next and items) else None
