@@ -111,10 +111,8 @@ def _events(data: dict[str, Any]) -> list[str]:
         value = data[key]
         if isinstance(value, str):
             events.append(value)
-        elif isinstance(value, list):
+        elif isinstance(value, (list, dict)):
             events.extend(str(item) for item in value)
-        elif isinstance(value, dict):
-            events.extend(str(item) for item in value.keys())
     return events
 
 
@@ -129,9 +127,7 @@ def _check_concurrency(data: dict[str, Any]) -> bool:
     cancel = concurrency.get("cancel-in-progress")
     if cancel is True:
         return True
-    if isinstance(cancel, str) and cancel.startswith("${{"):
-        return True
-    return False
+    return bool(isinstance(cancel, str) and cancel.startswith("${{"))
 
 
 def audit_workflow(data: dict[str, Any]) -> list[Finding]:

@@ -603,7 +603,7 @@ class MockAgenticHandler(BaseHTTPRequestHandler):
         args = body.get("args", {})
         call_id = body.get("call_id", str(uuid.uuid4()))
 
-        call = ToolCall(tool_name=tool_name, args=args, call_id=call_id)
+        ToolCall(tool_name=tool_name, args=args, call_id=call_id)
 
         if not self._registry.is_known(tool_name):
             self._send_json(400, {"error": f"Unknown tool '{tool_name}'", "call_id": call_id})

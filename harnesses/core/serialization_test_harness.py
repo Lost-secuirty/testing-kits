@@ -128,7 +128,7 @@ class LossDetector:
         if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
             if len(a) != len(b):
                 return False
-            return all(LossDetector._values_equal(x, y) for x, y in zip(a, b))
+            return all(LossDetector._values_equal(x, y) for x, y in zip(a, b, strict=False))
         return a == b
 
 
@@ -232,7 +232,7 @@ class FormatTester:
         lossy: list[str] = []
         for key in original:
             orig = original[key]
-            dec = decoded.get(key, "")
+            decoded.get(key, "")
             # In CSV everything is a string; any non-string value is lossy
             if not isinstance(orig, str):
                 lossy.append(key)
@@ -414,7 +414,7 @@ class FormatTester:
         lossy: list[str] = []
         for key in original:
             orig = original[key]
-            dec = decoded.get(str(key), "")
+            decoded.get(str(key), "")
             # Everything becomes string in XML
             if not isinstance(orig, str):
                 lossy.append(key)

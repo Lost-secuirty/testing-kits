@@ -235,12 +235,11 @@ class ConfigValidator:
                     pass
 
             # Enum membership
-            if field_schema.enum is not None:
-                if value not in field_schema.enum:
-                    report.add_error(
-                        key,
-                        f"Field '{key}' value {value!r} is not in allowed values {field_schema.enum}.",
-                    )
+            if field_schema.enum is not None and value not in field_schema.enum:
+                report.add_error(
+                    key,
+                    f"Field '{key}' value {value!r} is not in allowed values {field_schema.enum}.",
+                )
 
             # Regex pattern
             if field_schema.regex is not None:
@@ -286,7 +285,7 @@ class EnvOverrideChecker:
             if not env_key.upper().startswith(self.prefix + "_"):
                 continue
             remainder = env_key[prefix_len:]           # e.g. "DB_HOST"
-            config_key = remainder.lower().replace("_", ".", 1)  # "db.host"
+            remainder.lower().replace("_", ".", 1)  # "db.host"
             # Also try direct underscore-to-dot replacement for multi-segment keys
             # Use a more complete approach: replace all underscores with dots
             config_key_full = remainder.lower().replace("_", ".")
@@ -400,10 +399,7 @@ class SensitiveValueDetector:
     def _is_sensitive_key(self, key: str) -> bool:
         if _KEY_SENSITIVE.search(key):
             return True
-        for pat in self._extra_patterns:
-            if pat.search(key):
-                return True
-        return False
+        return any(pat.search(key) for pat in self._extra_patterns)
 
     def _looks_like_plaintext_secret(self, value: str) -> bool:
         """Heuristic: non-empty string that isn't a path, URL, hostname, or short word."""
@@ -414,9 +410,7 @@ class SensitiveValueDetector:
         # Exclude typical non-secret values
         if re.match(r"https?://", value):
             return False
-        if re.match(r"^[\w\-\.]+$", value) and len(value) < 20:
-            return False
-        return True
+        return not (re.match(r"^[\w\-\.]+$", value) and len(value) < 20)
 
     def scan(
         self, config: dict[str, Any], report: ConfigReport | None = None, _prefix: str = ""

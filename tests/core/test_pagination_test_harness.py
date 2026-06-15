@@ -345,8 +345,8 @@ class TestOffsetPaginator(unittest.TestCase):
     # 45
     def test_exact_multiple_limit(self):
         p = self._paginator(9)
-        r1 = p.page(offset=0, limit=3)
-        r2 = p.page(offset=3, limit=3)
+        p.page(offset=0, limit=3)
+        p.page(offset=3, limit=3)
         r3 = p.page(offset=6, limit=3)
         self.assertFalse(r3.page.has_next)
         self.assertEqual(len(r3.page.items), 3)

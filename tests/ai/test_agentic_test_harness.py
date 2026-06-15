@@ -177,7 +177,7 @@ class TestMockAgent(unittest.TestCase):
         self.assertEqual(len(result), 5)
 
     def test_max_rounds_limits_execution(self):
-        for i in range(10):
+        for _i in range(10):
             self.agent.add_step(ToolCall(tool_name="x"))
         result = self.agent.run(max_rounds=3)
         self.assertEqual(len(result), 3)

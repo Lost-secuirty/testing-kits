@@ -411,19 +411,19 @@ class TestMutationReport(unittest.TestCase):
 
     def _make_report(self, killed=3, survived=2, errors=1, timeouts=0):
         mutants = []
-        for i in range(killed):
+        for _i in range(killed):
             m = Mutant("x=1", "x=2", MutationOperator.CONSTANT_SWAP, "k")
             m.result = MutationResult.KILLED
             mutants.append(m)
-        for i in range(survived):
+        for _i in range(survived):
             m = Mutant("x=1", "x=2", MutationOperator.CONSTANT_SWAP, "s")
             m.result = MutationResult.SURVIVED
             mutants.append(m)
-        for i in range(errors):
+        for _i in range(errors):
             m = Mutant("x=1", "x=(", MutationOperator.CONSTANT_SWAP, "e")
             m.result = MutationResult.ERROR
             mutants.append(m)
-        for i in range(timeouts):
+        for _i in range(timeouts):
             m = Mutant("x=1", "x=2", MutationOperator.CONSTANT_SWAP, "t")
             m.result = MutationResult.TIMEOUT
             mutants.append(m)
@@ -638,7 +638,8 @@ class TestEndToEnd(unittest.TestCase):
     def test_mutation_score_with_weak_tests(self):
         """A test that never fails → score should be 0.0 (all survived)."""
         source = "def add(a, b):\n    return a + b\n"
-        always_pass = lambda src: True
+        def always_pass(src):
+            return True
         runner = MutationRunner(always_pass, timeout=5)
         report = runner.run(source, [MutationOperator.ARITHMETIC_SWAP])
         # Only error mutants cause non-survived

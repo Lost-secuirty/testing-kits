@@ -27,6 +27,8 @@ from urllib.parse import parse_qs, urlparse
 
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+import contextlib
+
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ─── Constants ────────────────────────────────────────────────────────────────
@@ -778,10 +780,8 @@ class FuzzHTTPServer:
 
     def _serve(self):
         while self._running:
-            try:
+            with contextlib.suppress(Exception):
                 self._server.handle_request()
-            except Exception:
-                pass
 
     def stop(self):
         if self._server is not None:

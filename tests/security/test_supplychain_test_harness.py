@@ -602,12 +602,14 @@ class TestReproducibleBuildChecker(unittest.TestCase):
         self.assertIn('nondeterministic', findings[0].message.lower())
 
     def test_empty_inputs_deterministic(self):
-        build = lambda inputs: 'constant-output'
+        def build(inputs):
+            return 'constant-output'
         ok, findings = self.checker.check(build, {})
         self.assertTrue(ok)
 
     def test_constant_build_no_findings(self):
-        build = lambda inputs: b'binary-blob'
+        def build(inputs):
+            return b'binary-blob'
         ok, findings = self.checker.check(build, {'x': 'y'})
         self.assertEqual(findings, [])
 

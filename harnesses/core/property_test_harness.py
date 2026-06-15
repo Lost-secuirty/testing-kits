@@ -182,7 +182,7 @@ class Shrinker:
 
         best = value
         # Bisect towards 0
-        lo, hi = 0, abs(value)
+        _lo, _hi = 0, abs(value)
         sign = 1 if value > 0 else -1
 
         # Repeatedly halve distance to 0
@@ -367,7 +367,7 @@ class Shrinker:
         best = dict(value)
 
         # Try removing keys
-        keys = list(best.keys())
+        list(best.keys())
         changed = True
         while changed:
             changed = False

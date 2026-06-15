@@ -34,12 +34,12 @@ from pathlib import Path as _Path
 
 if str(_Path(__file__).resolve().parents[2]) not in sys.path:
     sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+import contextlib
+
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
-try:
+with contextlib.suppress(Exception):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
 
 
 # ---------------------------------------------------------------------------
@@ -294,7 +294,7 @@ def _preorder(dom: Dom) -> list[tuple[str, str]]:
 def hydration_diff(a: Dom, b: Dom) -> int:
     pa, pb = _preorder(a), _preorder(b)
     diff = abs(len(pa) - len(pb))
-    for x, y in zip(pa, pb):
+    for x, y in zip(pa, pb, strict=False):
         if x != y:
             diff += 1
     return diff
@@ -787,7 +787,7 @@ def _run_self_test(verbose: bool = False, as_json: bool = False) -> int:
     report = Report("core/browser_e2e")
 
     # 1. Every existing scenario becomes a recorded check (preserved verbatim).
-    for name, fn in SCENARIOS.items():
+    for _name, fn in SCENARIOS.items():
         chk = fn()
         report.record(chk.name, chk.passed, detail=chk.detail)
         if verbose and not as_json and chk.passed:

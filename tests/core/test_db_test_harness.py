@@ -13,6 +13,7 @@ Harness 3 of 36 — Database Test Harness
   - Edge cases (empty tables, double-return, large batches, etc.)
 """
 
+import contextlib
 import sqlite3
 import unittest
 
@@ -342,14 +343,10 @@ class TestConnectionPool(unittest.TestCase):
         monitor = ConnectionPoolMonitor(pool)
         try:
             c = monitor.checkout_with_monitoring()
-            try:
+            with contextlib.suppress(ConnectionPoolExhausted):
                 monitor.checkout_with_monitoring()
-            except ConnectionPoolExhausted:
-                pass
-            try:
+            with contextlib.suppress(ConnectionPoolExhausted):
                 monitor.checkout_with_monitoring()
-            except ConnectionPoolExhausted:
-                pass
             self.assertEqual(monitor.exhaustion_count, 2)
             monitor.checkin_with_monitoring(c)
         finally:

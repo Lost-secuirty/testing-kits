@@ -421,7 +421,6 @@ class TestMemoryAssertions(unittest.TestCase):
         # We patch analyze_snapshots result via a runner with absurdly low threshold
         # Instead: patch the runner so leak_report.leaked = True
         from harnesses.core import memory_test_harness as mh
-        original_analyze = mh.analyze_snapshots
 
         def fake_analyze(snaps, threshold=1024.0):
             return LeakReport(

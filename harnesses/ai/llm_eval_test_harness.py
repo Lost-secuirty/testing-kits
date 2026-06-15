@@ -81,10 +81,7 @@ class MockLLM:
         self._call_count = 0
 
     def _is_dangerous(self, prompt: str) -> bool:
-        for pattern in self.dangerous_patterns:
-            if pattern.search(prompt):
-                return True
-        return False
+        return any(pattern.search(prompt) for pattern in self.dangerous_patterns)
 
     def _hmac_hash(self, prompt: str) -> str:
         return hmac.new(_HMAC_KEY, prompt.encode("utf-8"), hashlib.sha256).hexdigest()
@@ -128,7 +125,7 @@ class MockLLM:
         if self.temperature > 0:
             # Add controlled perturbation proportional to temperature
             h = self._hmac_hash(prompt + f"_t{self._call_count}")
-            perturb_idx = int(h[8:16], 16) % max(1, len(base))
+            int(h[8:16], 16) % max(1, len(base))
             perturbation = f" [t={self.temperature:.2f},v={h[:4]}]"
             base = base + perturbation
 

@@ -33,12 +33,12 @@ from pathlib import Path as _Path
 
 if str(_Path(__file__).resolve().parents[2]) not in sys.path:
     sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+import contextlib
+
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
-try:
+with contextlib.suppress(Exception):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +262,7 @@ def ingest(stream: list[Message], clock: FakeClock | None = None,
     for recs in accepted_by_topic.values():
         rs = sorted(recs, key=lambda r: r.seq) if resequence else list(recs)
         final.extend(rs)
-        for a, b in zip(rs, rs[1:]):
+        for a, b in zip(rs, rs[1:], strict=False):
             if b.seq < a.seq:
                 oop += 1
 

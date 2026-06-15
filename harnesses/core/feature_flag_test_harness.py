@@ -117,7 +117,7 @@ class FlagMatrixRunner:
         for subset in itertools.combinations(names, arity):
             for vals in itertools.product([False, True], repeat=arity):
                 assignment = dict(defaults)
-                for n, v in zip(subset, vals):
+                for n, v in zip(subset, vals, strict=False):
                     assignment[n] = v
                 key = tuple(sorted(assignment.items()))
                 if key in seen:
@@ -207,10 +207,7 @@ def good_pricer(flags: dict[str, bool], flip_flag: str | None = None,
         base = 90
     if flags.get("loyalty_v2"):
         base -= 5
-    if flags.get("tax_calc_v2"):
-        base = int(base * 1.08)
-    else:
-        base = int(base * 1.05)
+    base = int(base * 1.08) if flags.get("tax_calc_v2") else int(base * 1.05)
     if flip_flag is not None:
         return base  # ignores mid-call flip — deterministic
     return base
@@ -226,10 +223,7 @@ def buggy_pricer_combo(flags: dict[str, bool], flip_flag: str | None = None,
     if flags.get("loyalty_v2"):
         # BUG: should subtract 1 to satisfy the assertion (89), but adds.
         base += 5
-    if flags.get("tax_calc_v2"):
-        base = int(base * 1.08)
-    else:
-        base = int(base * 1.05)
+    base = int(base * 1.08) if flags.get("tax_calc_v2") else int(base * 1.05)
     return base
 
 

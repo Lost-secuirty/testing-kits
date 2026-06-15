@@ -1,5 +1,6 @@
 """Tests for api_test_harness.py — 64 tests."""
 
+import contextlib
 import json
 import threading
 import unittest
@@ -499,10 +500,8 @@ class TestMockServerIntegration(unittest.TestCase):
                 method="GET",
                 headers={"X-API-Key": key},
             )
-            try:
+            with contextlib.suppress(urllib.error.HTTPError):
                 urllib.request.urlopen(req)
-            except urllib.error.HTTPError:
-                pass
 
         r = self._run_one(ApiTestCase(
             "ratelimit_429", "GET", "/rate-limited",
@@ -519,10 +518,8 @@ class TestMockServerIntegration(unittest.TestCase):
                 method="GET",
                 headers={"X-API-Key": key},
             )
-            try:
+            with contextlib.suppress(urllib.error.HTTPError):
                 urllib.request.urlopen(req)
-            except urllib.error.HTTPError:
-                pass
 
         r = self._run_one(ApiTestCase(
             "retry_after", "GET", "/rate-limited",

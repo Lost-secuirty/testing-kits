@@ -414,7 +414,7 @@ class TestInterfaceChecker(unittest.TestCase):
     def test_compliant_object_passes(self):
         spec = self._make_spec()
         checker = InterfaceChecker(spec)
-        results = checker.check(self.GoodStack())
+        checker.check(self.GoodStack())
         self.assertTrue(checker.all_compliant())
 
     def test_non_compliant_object_fails(self):

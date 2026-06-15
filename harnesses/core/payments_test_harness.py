@@ -713,7 +713,8 @@ def _run_probe(factory: Callable[[], PaymentProcessor], probe: PayProbe) -> dict
     no RNG, no clock — deterministic Decimal/integer arithmetic only."""
     p = factory()
     forbidden_rejected = True  # default True for probes whose "forbidden" op is a no-op
-    cents = lambda c: int((c.amount * 100).to_integral_value())
+    def cents(c):
+        return int((c.amount * 100).to_integral_value())
 
     if probe.name == "overcapture_rejected":
         cid = p.authorize(Money(1, USD))

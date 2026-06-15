@@ -563,22 +563,28 @@ class TestDifferentialFuzzer(unittest.TestCase):
 
     def test_no_divergence_identical(self):
         df = DifferentialFuzzer(seed=42)
-        impl_a = lambda x: x * 2
-        impl_b = lambda x: x * 2
+        def impl_a(x):
+            return x * 2
+        def impl_b(x):
+            return x * 2
         divs = df.compare(impl_a, impl_b, [1, 2, 3, 4])
         self.assertEqual(len(divs), 0)
 
     def test_divergence_detected(self):
         df = DifferentialFuzzer(seed=42)
-        impl_a = lambda x: x + 1
-        impl_b = lambda x: x + 2
+        def impl_a(x):
+            return x + 1
+        def impl_b(x):
+            return x + 2
         divs = df.compare(impl_a, impl_b, [0, 1, 2])
         self.assertGreater(len(divs), 0)
 
     def test_exception_mismatch_detected(self):
         df = DifferentialFuzzer(seed=42)
-        impl_a = lambda x: 1 / x
-        impl_b = lambda x: x
+        def impl_a(x):
+            return 1 / x
+        def impl_b(x):
+            return x
         divs = df.compare(impl_a, impl_b, [0])
         self.assertEqual(len(divs), 1)
         self.assertEqual(divs[0]["divergence_type"], "exception_mismatch")

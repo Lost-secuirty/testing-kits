@@ -72,7 +72,7 @@ class TestWalker(unittest.TestCase):
 
     def test_walk_dict_rebuild_replaces_correctly(self):
         original = {"a": 1, "b": 2}
-        for path, rebuild, value in _walk(original, "u", max_depth=2):
+        for path, rebuild, _value in _walk(original, "u", max_depth=2):
             if path == "u.a":
                 rebuilt = rebuild(99)
                 self.assertEqual(rebuilt, {"a": 99, "b": 2})
@@ -98,7 +98,7 @@ class TestWalker(unittest.TestCase):
 
     def test_walk_list_rebuild(self):
         original = [10, 20, 30]
-        for path, rebuild, value in _walk(original, "items", max_depth=2):
+        for path, rebuild, _value in _walk(original, "items", max_depth=2):
             if path == "items[1]":
                 self.assertEqual(rebuild(99), [10, 99, 30])
                 return
@@ -120,7 +120,7 @@ class TestWalkerDataclass(unittest.TestCase):
 
     def test_walk_dataclass_rebuild(self):
         box = _Box(x=1, y="hi")
-        for path, rebuild, value in _walk(box, "box", max_depth=2):
+        for path, rebuild, _value in _walk(box, "box", max_depth=2):
             if path == "box.x":
                 new = rebuild(99)
                 self.assertEqual(new.x, 99)

@@ -581,10 +581,7 @@ def _prove_composite(impl: Callable[..., Any]) -> bool:
     """prove() wrapper: the composite oracle is judged against ALL targets'
     must-handle probes (and stays clean); any other impl routes by identity."""
     if impl is _COMPOSITE_ORACLE:
-        for target, good in _ORACLES.items():
-            if prove(good):  # each good twin must itself be clean
-                return True
-        return False
+        return any(prove(good) for target, good in _ORACLES.items())
     return prove(impl)
 
 

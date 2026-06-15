@@ -267,7 +267,7 @@ class MockSecurityHandler(http.server.BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
 
     def _sql_safe(self, params: dict[str, list[str]]) -> None:
-        q = self._get_param(params, "q")
+        self._get_param(params, "q")
         # Safe: does not reflect user input into SQL-like string
         result = {"status": "ok", "query": "SELECT * FROM items WHERE id = ?", "rows": []}
         self._send_json(200, result)

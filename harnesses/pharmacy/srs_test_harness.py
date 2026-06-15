@@ -72,10 +72,7 @@ def sm2_update(ease_factor, interval_days, repetitions, correct):
                 # Guard against numeric overflow when interval*ease becomes infinite
                 try:
                     prod = interval * ease
-                    if not math.isfinite(prod):
-                        new_interval = int(10**9)
-                    else:
-                        new_interval = int(round(prod))
+                    new_interval = int(10 ** 9) if not math.isfinite(prod) else int(round(prod))
                 except OverflowError:
                     new_interval = int(10**9)
         new_reps = reps + 1

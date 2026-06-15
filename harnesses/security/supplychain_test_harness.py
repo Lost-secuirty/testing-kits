@@ -353,7 +353,7 @@ def _version_satisfies(version: str, specifier: str) -> bool:
         for op in ('>=', '<=', '!=', '==', '>', '<'):
             if part.startswith(op):
                 bound = _version_tuple(part[len(op):])
-                if op == '>=' and not (ver >= bound) or op == '<=' and not (ver <= bound) or op == '!=' and not (ver != bound) or op == '==' and not (ver == bound) or op == '>' and not (ver > bound) or op == '<' and not (ver < bound):
+                if op == '>=' and not (ver >= bound) or op == '<=' and not (ver <= bound) or op == '!=' and ver == bound or op == '==' and ver != bound or op == '>' and not (ver > bound) or op == '<' and not (ver < bound):
                     return False
                 break
     return True

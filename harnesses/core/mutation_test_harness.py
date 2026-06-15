@@ -93,7 +93,6 @@ class Mutator:
 
     def arithmetic_swap(self, source: str) -> list[tuple[str, str]]:
         """Swap arithmetic operators one at a time."""
-        results = []
         # Pattern matches arithmetic operators not part of augmented assignment,
         # comparison operators, or decorators.
         # We find all candidate positions and create one mutant per position.
@@ -121,7 +120,7 @@ class Mutator:
                 pattern = self._arith_pattern(op)
                 for m in re.finditer(pattern, masked):
                     # Reconstruct source with this single substitution
-                    orig_char_offset = sum(len(l) for l in lines[:line_idx]) + m.start()
+                    sum(len(l) for l in lines[:line_idx]) + m.start()
                     new_line = (
                         code_part[:m.start()]
                         + m.group().replace(op, replacement, 1)
@@ -380,7 +379,7 @@ class Mutator:
         for line_idx, line in enumerate(lines):
             line_no = line_idx + 1
             code_part, sep, comment = self._split_comment(line)
-            stripped = code_part.strip()
+            code_part.strip()
 
             for keyword in ('if', 'elif', 'while'):
                 kw_pattern = r'^(\s*)(' + keyword + r')\s+'
@@ -543,7 +542,7 @@ class MutationRunner:
         """Run a single mutant and classify the result."""
         # First, try to compile the mutant
         try:
-            compiled = compile(mutant.mutated_source, '<mutant>', 'exec')
+            compile(mutant.mutated_source, '<mutant>', 'exec')
         except SyntaxError as exc:
             mutant.result = MutationResult.ERROR
             mutant.error_message = f"SyntaxError: {exc}"

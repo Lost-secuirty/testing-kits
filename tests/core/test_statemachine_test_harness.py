@@ -3,6 +3,7 @@ Tests for the State Machine Test Harness (Harness 22 of 36).
 ~82 tests covering all components.
 """
 
+import contextlib
 import json
 import time
 import unittest
@@ -222,10 +223,8 @@ class TestStateMachineCore(unittest.TestCase):
             self.machine.send("nonexistent")
 
     def test_state_unchanged_after_invalid(self):
-        try:
+        with contextlib.suppress(InvalidTransition):
             self.machine.send("nonexistent")
-        except InvalidTransition:
-            pass
         self.assertEqual(self.machine.state, "A")
 
     def test_reset(self):

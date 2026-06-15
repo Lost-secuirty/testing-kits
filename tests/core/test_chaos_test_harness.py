@@ -12,6 +12,7 @@ Unit tests for chaos_test_harness.py  (Harness 7 of 36)
   - Recovery / cooldown behaviour
 """
 
+import contextlib
 import json
 import time
 import unittest
@@ -76,36 +77,28 @@ class TestCircuitBreakerClosed(unittest.TestCase):
 
     def test_failure_increments_count(self):
         cb = self._make_cb(threshold=5)
-        try:
+        with contextlib.suppress(ConnectionError):
             cb.call(lambda: (_ for _ in ()).throw(ConnectionError("fail")))
-        except ConnectionError:
-            pass
         self.assertEqual(cb.failure_count, 1)
 
     def test_failure_below_threshold_stays_closed(self):
         cb = self._make_cb(threshold=3)
         for _ in range(2):
-            try:
+            with contextlib.suppress(ConnectionError):
                 cb.call(lambda: (_ for _ in ()).throw(ConnectionError()))
-            except ConnectionError:
-                pass
         self.assertEqual(cb.state, CircuitState.CLOSED)
 
     def test_success_resets_failure_count(self):
         cb = self._make_cb(threshold=3)
-        try:
+        with contextlib.suppress(ConnectionError):
             cb.call(lambda: (_ for _ in ()).throw(ConnectionError()))
-        except ConnectionError:
-            pass
         cb.call(lambda: "ok")  # success resets
         self.assertEqual(cb.failure_count, 0)
 
     def test_non_transient_exception_still_counted(self):
         cb = self._make_cb(threshold=2)
-        try:
+        with contextlib.suppress(RuntimeError):
             cb.call(lambda: (_ for _ in ()).throw(RuntimeError("boom")))
-        except RuntimeError:
-            pass
         self.assertEqual(cb.failure_count, 1)
 
 
@@ -118,10 +111,8 @@ class TestCircuitBreakerOpen(unittest.TestCase):
     def _tripped_cb(self, threshold=2, open_duration=60.0):
         cb = CircuitBreaker(failure_threshold=threshold, open_duration=open_duration)
         for _ in range(threshold):
-            try:
+            with contextlib.suppress(ConnectionError, CircuitOpenError):
                 cb.call(lambda: (_ for _ in ()).throw(ConnectionError("fail")))
-            except (ConnectionError, CircuitOpenError):
-                pass
         return cb
 
     def test_transitions_to_open_after_threshold(self):
@@ -136,19 +127,15 @@ class TestCircuitBreakerOpen(unittest.TestCase):
     def test_open_circuit_does_not_call_fn(self):
         cb = self._tripped_cb(threshold=2)
         fn = MagicMock()
-        try:
+        with contextlib.suppress(CircuitOpenError):
             cb.call(fn)
-        except CircuitOpenError:
-            pass
         fn.assert_not_called()
 
     def test_fallback_returned_when_open(self):
         cb = CircuitBreaker(failure_threshold=2, open_duration=60.0, fallback="default")
         for _ in range(2):
-            try:
+            with contextlib.suppress(ConnectionError, CircuitOpenError):
                 cb.call(lambda: (_ for _ in ()).throw(ConnectionError()))
-            except (ConnectionError, CircuitOpenError):
-                pass
         # Manually use a runner that handles fallback
         runner = ResilienceTestRunner(circuit_breaker=cb)
         result = runner.run(lambda: "live", use_fault_injector=False)
@@ -170,10 +157,8 @@ class TestCircuitBreakerHalfOpen(unittest.TestCase):
     def _open_cb(self, open_duration=0.05):
         cb = CircuitBreaker(failure_threshold=2, open_duration=open_duration)
         for _ in range(2):
-            try:
+            with contextlib.suppress(ConnectionError, CircuitOpenError):
                 cb.call(lambda: (_ for _ in ()).throw(ConnectionError()))
-            except (ConnectionError, CircuitOpenError):
-                pass
         return cb
 
     def test_transitions_to_half_open_after_cooldown(self):
@@ -191,10 +176,8 @@ class TestCircuitBreakerHalfOpen(unittest.TestCase):
         cb = self._open_cb(open_duration=0.05)
         time.sleep(0.1)
         self.assertEqual(cb.state, CircuitState.HALF_OPEN)
-        try:
+        with contextlib.suppress(ConnectionError, CircuitOpenError):
             cb.call(lambda: (_ for _ in ()).throw(ConnectionError("probe fail")))
-        except (ConnectionError, CircuitOpenError):
-            pass
         self.assertEqual(cb.state, CircuitState.OPEN)
 
     def test_full_cycle_closed_open_half_open_closed(self):
@@ -202,10 +185,8 @@ class TestCircuitBreakerHalfOpen(unittest.TestCase):
         self.assertEqual(cb.state, CircuitState.CLOSED)
 
         for _ in range(2):
-            try:
+            with contextlib.suppress(ConnectionError, CircuitOpenError):
                 cb.call(lambda: (_ for _ in ()).throw(ConnectionError()))
-            except (ConnectionError, CircuitOpenError):
-                pass
         self.assertEqual(cb.state, CircuitState.OPEN)
 
         time.sleep(0.1)
@@ -516,18 +497,14 @@ class TestResilienceTestRunner(unittest.TestCase):
         cb = CircuitBreaker(failure_threshold=1, open_duration=60.0, fallback=None)
         runner = ResilienceTestRunner(circuit_breaker=cb, metrics=m)
         # Trip the circuit
-        try:
+        with contextlib.suppress(ConnectionError, CircuitOpenError):
             runner.run(
                 lambda: (_ for _ in ()).throw(ConnectionError()),
                 use_fault_injector=False,
             )
-        except (ConnectionError, CircuitOpenError):
-            pass
         # Next call should be open
-        try:
+        with contextlib.suppress(CircuitOpenError):
             runner.run(lambda: "live", use_fault_injector=False)
-        except CircuitOpenError:
-            pass
         self.assertGreaterEqual(m.open_count, 1)
 
     def test_run_scenario_returns_list(self):
@@ -609,10 +586,8 @@ class TestRecoveryBehavior(unittest.TestCase):
 
         # Trip it
         for _ in range(2):
-            try:
+            with contextlib.suppress(ConnectionError, CircuitOpenError):
                 cb.call(lambda: (_ for _ in ()).throw(ConnectionError()))
-            except (ConnectionError, CircuitOpenError):
-                pass
         self.assertEqual(cb.state, CircuitState.OPEN)
 
         # Wait for cooldown
@@ -630,13 +605,11 @@ class TestRecoveryBehavior(unittest.TestCase):
 
         # Two failures → open
         for _ in range(2):
-            try:
+            with contextlib.suppress(ConnectionError, CircuitOpenError):
                 runner.run(
                     lambda: (_ for _ in ()).throw(ConnectionError()),
                     use_fault_injector=False,
                 )
-            except (ConnectionError, CircuitOpenError):
-                pass
 
         # Open call → returns fallback, records open
         result = runner.run(lambda: "live", use_fault_injector=False)
@@ -654,18 +627,14 @@ class TestRecoveryBehavior(unittest.TestCase):
         """Half-open probe failure should re-trip to OPEN."""
         cb = CircuitBreaker(failure_threshold=2, open_duration=0.05)
         for _ in range(2):
-            try:
+            with contextlib.suppress(ConnectionError, CircuitOpenError):
                 cb.call(lambda: (_ for _ in ()).throw(ConnectionError()))
-            except (ConnectionError, CircuitOpenError):
-                pass
 
         time.sleep(0.08)
         self.assertEqual(cb.state, CircuitState.HALF_OPEN)
 
-        try:
+        with contextlib.suppress(ConnectionError, CircuitOpenError):
             cb.call(lambda: (_ for _ in ()).throw(ConnectionError("probe fail")))
-        except (ConnectionError, CircuitOpenError):
-            pass
         self.assertEqual(cb.state, CircuitState.OPEN)
 
 

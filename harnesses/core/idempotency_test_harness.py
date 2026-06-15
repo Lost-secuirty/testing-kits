@@ -643,7 +643,7 @@ class MockIdempotencyHandler(http.server.BaseHTTPRequestHandler):
         self._send_json(200, {"method": "DELETE", "path": self.path, "idempotent": True})
 
     def do_PUT(self):
-        body = self._read_body()
+        self._read_body()
         self._send_json(200, {"method": "PUT", "path": self.path, "idempotent": True})
 
     def do_POST(self):

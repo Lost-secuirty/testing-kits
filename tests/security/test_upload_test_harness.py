@@ -448,7 +448,7 @@ class TestDecompressionBombChecker(unittest.TestCase):
 
     def test_zip_nested_depth_limit(self):
         """Nested zip exceeding max_depth should raise."""
-        checker = DecompressionBombChecker(max_output_bytes=10 * 1024 * 1024,
+        DecompressionBombChecker(max_output_bytes=10 * 1024 * 1024,
                                            max_ratio=100, max_depth=1)
         # Create inner zip
         inner = make_zip({"inner.txt": b"deep content"})

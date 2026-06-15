@@ -605,10 +605,7 @@ class MockUploadHandler(BaseHTTPRequestHandler):
             cl = None
 
         # Read body
-        if cl is not None:
-            body = self.rfile.read(cl)
-        else:
-            body = self.rfile.read(65536)
+        body = self.rfile.read(cl) if cl is not None else self.rfile.read(65536)
 
         # Check truncation
         pst = PartialStreamTester()

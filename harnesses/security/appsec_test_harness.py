@@ -338,10 +338,7 @@ class JWTChecker:
         if aud is None:
             return True, "Missing 'aud' claim"
         # aud can be string or list
-        if isinstance(aud, str):
-            aud_list = [aud]
-        else:
-            aud_list = list(aud)
+        aud_list = [aud] if isinstance(aud, str) else list(aud)
         # At least one must match
         for a in aud_list:
             if a in self.allowed_audiences:

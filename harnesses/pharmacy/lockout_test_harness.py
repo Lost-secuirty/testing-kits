@@ -315,7 +315,6 @@ def run_all_scenarios(verbose=False):
     clock12 = FakeClock(0.0)
     mgr12 = LockoutManager(threshold=2, lockout_seconds=300, clock=clock12)
     barrier = threading.Barrier(2)
-    lock_counts = []
 
     def concurrent_fail():
         barrier.wait()

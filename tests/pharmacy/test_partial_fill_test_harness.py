@@ -28,7 +28,7 @@ class TestPartialFillStore(unittest.TestCase):
         self.assertGreater(pid, 0)
 
     def test_open_partial_correct_fields(self):
-        pid = self._add("Amoxicillin", 30, "Alice", "2026-05-25")
+        self._add("Amoxicillin", 30, "Alice", "2026-05-25")
         rows = self.s.list_open()
         self.assertEqual(len(rows), 1)
         r = rows[0]

@@ -531,10 +531,7 @@ def oracle_page(
     when more records remain, else None. This is the reference behaviour the
     harness's CursorPaginator implements; reused here as the ORACLE.
     """
-    if after is None:
-        candidates = records
-    else:
-        candidates = [r for r in records if _key_of(r) > after]
+    candidates = records if after is None else [r for r in records if _key_of(r) > after]
     items = candidates[:limit]
     has_next = len(candidates) > limit
     next_after = _key_of(items[-1]) if (has_next and items) else None
@@ -556,10 +553,7 @@ def page_skip_boundary(
     record *after* the page's last item instead of the last item itself, dropping
     one record at each page boundary.
     """
-    if after is None:
-        candidates = records
-    else:
-        candidates = [r for r in records if _key_of(r) > after]
+    candidates = records if after is None else [r for r in records if _key_of(r) > after]
     items = candidates[:limit]
     has_next = len(candidates) > limit
     # BUG: advance past the FIRST item beyond the page, not the last item in it.
@@ -600,10 +594,7 @@ def page_stuck_cursor(
     Models a pager that forgets to emit a next-page token (or sets has_next but
     no cursor), silently truncating the result set after page one.
     """
-    if after is None:
-        candidates = records
-    else:
-        candidates = [r for r in records if _key_of(r) > after]
+    candidates = records if after is None else [r for r in records if _key_of(r) > after]
     items = candidates[:limit]
     # BUG: never report a next cursor — position is lost after the first page.
     return items, None

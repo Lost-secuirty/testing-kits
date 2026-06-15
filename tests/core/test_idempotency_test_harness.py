@@ -418,7 +418,7 @@ class TestConcurrentDedupTester(unittest.TestCase):
     # 41. Exactly one thread executes the side effect
     def test_exactly_one_execution(self):
         k = _key()
-        results = self.tester.run_concurrent(k, {"data": "x"}, n_threads=10)
+        self.tester.run_concurrent(k, {"data": "x"}, n_threads=10)
         self.assertEqual(self.tester.execution_count, 1)
 
     # 42. All threads get a result (none left as None)

@@ -522,7 +522,7 @@ class TestOpenRedirectChecker(unittest.TestCase):
         self.assertFalse(ok)
 
     def test_block_no_allowed_domains_configured(self):
-        checker = OpenRedirectChecker()  # no domains
+        OpenRedirectChecker()  # no domains
         ok, reason = self.checker.check("https://evil.com/")
         self.assertFalse(ok)
 
@@ -732,16 +732,16 @@ class TestMockAppSecServer(unittest.TestCase):
 
     def test_safe_redirect_allowed(self):
         url = self.base + "/safe/redirect?to=https://example.com/page"
-        req = urllib.request.Request(url)
+        urllib.request.Request(url)
         import urllib.request as ur
         # Don't follow redirects
-        opener = ur.build_opener(ur.HTTPRedirectHandler())
+        ur.build_opener(ur.HTTPRedirectHandler())
         class NoRedirect(ur.HTTPRedirectHandler):
             def redirect_request(self, req, fp, code, msg, headers, newurl):
                 return None
         opener2 = ur.build_opener(NoRedirect())
         try:
-            resp = opener2.open(url, timeout=5)
+            opener2.open(url, timeout=5)
             # If no redirect, might be a 302 handled or 200
         except Exception:
             pass
@@ -794,9 +794,7 @@ class TestMockAppSecServer(unittest.TestCase):
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 body = json.loads(resp.read())
-                status = resp.status
         except urllib.error.HTTPError as e:
-            status = e.code
             body = json.loads(e.read())
         self.assertTrue(body.get("dangerous", False))
 

@@ -427,8 +427,11 @@ def _broker(delivery: Delivery = Delivery.AT_LEAST_ONCE, **cfg) -> InMemoryBroke
 def s_at_least_once_redelivers_on_nack() -> QueueCheck:
     b = _broker()
     b.publish(Message("m1", "k"))
-    r = b.poll(); b.nack(r)              # consumer rejects → redeliver
-    r = b.poll(); ran = b.process(r); b.ack(r)
+    r = b.poll()
+    b.nack(r)              # consumer rejects → redeliver
+    r = b.poll()
+    ran = b.process(r)
+    b.ack(r)
     return _chk("at_least_once_redelivers_on_nack",
                 ran and b.deliveries_of("m1") >= 2, f"deliveries={b.deliveries_of('m1')}")
 
@@ -504,8 +507,10 @@ def s_fifo_within_key_preserved() -> QueueCheck:
 
 def s_interleave_across_keys_allowed() -> QueueCheck:
     b = _broker()
-    b.publish(Message("a1", "A")); b.publish(Message("b1", "B"))
-    b.publish(Message("a2", "A")); b.publish(Message("b2", "B"))
+    b.publish(Message("a1", "A"))
+    b.publish(Message("b1", "B"))
+    b.publish(Message("a2", "A"))
+    b.publish(Message("b2", "B"))
     proc = consume_all(b)
     rep = build_report(b, proc)
     return _chk("interleave_across_keys_allowed", rep.ordering_preserved, "")
@@ -518,7 +523,8 @@ def s_rebalance_preserves_per_key_order() -> QueueCheck:
     r = b.poll()  # m0 in flight
     b.rebalance(consumers=3)
     blocked = b.poll()  # head-of-key: m1 must NOT be deliverable while m0 unacked
-    b.process(r); b.ack(r)
+    b.process(r)
+    b.ack(r)
     proc = [r.msg] + consume_all(b)
     rep = build_report(b, proc)
     return _chk("rebalance_preserves_per_key_order",
@@ -532,7 +538,8 @@ def s_rebalance_no_message_loss() -> QueueCheck:
         b.publish(Message(f"m{i}", f"k{i % 2}"))
     r = b.poll()
     b.rebalance(consumers=2)
-    b.process(r); b.ack(r)
+    b.process(r)
+    b.ack(r)
     proc = [r.msg] + consume_all(b)
     return _chk("rebalance_no_message_loss",
                 {m.id for m in proc} == {f"m{i}" for i in range(5)},
@@ -541,10 +548,13 @@ def s_rebalance_no_message_loss() -> QueueCheck:
 
 def s_rebalance_no_double_delivery_for_acked() -> QueueCheck:
     b = _broker()
-    b.publish(Message("m0", "k")); b.publish(Message("m1", "k"))
-    r = b.poll(); b.process(r); b.ack(r)  # m0 done
+    b.publish(Message("m0", "k"))
+    b.publish(Message("m1", "k"))
+    r = b.poll()
+    b.process(r)
+    b.ack(r)  # m0 done
     b.rebalance(consumers=2)
-    proc = consume_all(b)
+    consume_all(b)
     return _chk("rebalance_no_double_delivery_for_acked",
                 b.deliveries_of("m0") == 1, f"m0_deliveries={b.deliveries_of('m0')}")
 
@@ -553,8 +563,10 @@ def s_ack_timeout_extends_on_heartbeat() -> QueueCheck:
     b = _broker(ack_timeout_s=30.0)
     b.publish(Message("m1", "k"))
     r = b.poll()
-    b.clock.advance(20.0); b.heartbeat(r)
-    b.clock.advance(20.0); b.tick()  # 40s total but heartbeat reset the deadline
+    b.clock.advance(20.0)
+    b.heartbeat(r)
+    b.clock.advance(20.0)
+    b.tick()  # 40s total but heartbeat reset the deadline
     return _chk("ack_timeout_extends_on_heartbeat",
                 r.in_flight and b.deliveries_of("m1") == 1,
                 f"in_flight={r.in_flight} deliveries={b.deliveries_of('m1')}")
@@ -564,7 +576,8 @@ def s_backpressure_caps_in_flight() -> QueueCheck:
     b = _broker(max_in_flight=2)
     for i in range(3):
         b.publish(Message(f"m{i}", f"k{i}"))
-    b.poll(); b.poll()
+    b.poll()
+    b.poll()
     third = b.poll()
     return _chk("backpressure_caps_in_flight",
                 third is None and b.max_in_flight_observed <= 2,
@@ -608,17 +621,21 @@ def s_lossy_eo_double_processes_detected() -> QueueCheck:
 
 def s_order_breaking_rebalance_detected() -> QueueCheck:
     oracle = _broker()
-    oracle.publish(Message("m0", "K")); oracle.publish(Message("m1", "K"))
+    oracle.publish(Message("m0", "K"))
+    oracle.publish(Message("m1", "K"))
     oracle.poll()
     oracle_blocked = oracle.poll()  # oracle blocks m1 while m0 unacked
 
     bug = OrderBreakingRebalance(QueueConfig(), Clock())
-    bug.publish(Message("m0", "K")); bug.publish(Message("m1", "K"))
+    bug.publish(Message("m0", "K"))
+    bug.publish(Message("m1", "K"))
     r0 = bug.poll()
     r1 = bug.poll()  # bug delivers m1 concurrently
     # consumer 2 finishes m1 before consumer 1 finishes m0 → out of order
-    bug.process(r1); bug.ack(r1)
-    bug.process(r0); bug.ack(r0)
+    bug.process(r1)
+    bug.ack(r1)
+    bug.process(r0)
+    bug.ack(r0)
     rep = build_report(bug, [r1.msg, r0.msg])
     return _chk("order_breaking_rebalance_detected",
                 oracle_blocked is None and r1 is not None and rep.ordering_violations >= 1,

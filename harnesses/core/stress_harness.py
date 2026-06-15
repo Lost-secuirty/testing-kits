@@ -25,6 +25,7 @@ Author: Scott (codeing testing harnesses project)
 
 import argparse
 import asyncio
+import contextlib
 import json
 import math
 import random
@@ -478,9 +479,9 @@ class StressEngine:
 
                 # Compute current rate (with optional ramp-up)
                 if cfg.ramp_up > 0 and elapsed < cfg.ramp_up:
-                    current_rate = max(1, int(cfg.rate * (elapsed / cfg.ramp_up)))
+                    max(1, int(cfg.rate * (elapsed / cfg.ramp_up)))
                 else:
-                    current_rate = cfg.rate
+                    pass
 
                 # Schedule time for THIS request
                 scheduled_at = start + (request_idx / cfg.rate)
@@ -530,10 +531,8 @@ class StressEngine:
 
             self._stop = True
             reporter_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await reporter_task
-            except asyncio.CancelledError:
-                pass
 
             pool.shutdown(wait=False)
 
@@ -713,10 +712,8 @@ async def async_main():
     # Graceful shutdown on Ctrl+C
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
+        with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, engine.stop)
-        except NotImplementedError:
-            pass
 
     mock_server = None
     if args.self_test:

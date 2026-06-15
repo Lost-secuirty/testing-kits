@@ -105,10 +105,7 @@ class Money:
 
     def multiply(self, scalar) -> Money:
         """Multiply by a scalar (int, float, or Decimal)."""
-        if isinstance(scalar, float):
-            scalar = Decimal(str(scalar))
-        else:
-            scalar = Decimal(scalar)
+        scalar = Decimal(str(scalar)) if isinstance(scalar, float) else Decimal(scalar)
         return Money(
             self._amount * scalar,
             self.currency,
@@ -118,10 +115,7 @@ class Money:
 
     def divide(self, scalar) -> Money:
         """Divide by a scalar (int, float, or Decimal)."""
-        if isinstance(scalar, float):
-            scalar = Decimal(str(scalar))
-        else:
-            scalar = Decimal(scalar)
+        scalar = Decimal(str(scalar)) if isinstance(scalar, float) else Decimal(scalar)
         return Money(
             self._amount / scalar,
             self.currency,

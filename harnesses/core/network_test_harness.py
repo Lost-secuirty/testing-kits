@@ -21,6 +21,7 @@ Port: 19040 (dynamic, picked at runtime)
 
 from __future__ import annotations
 
+import contextlib
 import json
 import socket
 import threading
@@ -133,10 +134,8 @@ class MockNetworkHandler(BaseHTTPRequestHandler):
             # pause before writing body to trigger read timeout
             read_delay = cfg.get("read_delay", 0.5)
             time.sleep(read_delay)
-            try:
+            with contextlib.suppress(Exception):
                 self.wfile.write(body)
-            except Exception:
-                pass
             return
 
         if payload_size:
@@ -152,10 +151,8 @@ class MockNetworkHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("X-Test-Header", "harness-18")
         self.end_headers()
-        try:
+        with contextlib.suppress(BrokenPipeError, ConnectionResetError):
             self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
 
 
 def _start_mock_server(config: dict[str, Any] | None = None) -> tuple[ThreadingHTTPServer, int]:

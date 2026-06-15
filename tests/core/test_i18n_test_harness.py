@@ -1053,7 +1053,7 @@ class TestMockServer(ServerTestCase):
 
     def test_truncate_results_are_valid_strings(self):
         data = _fetch(f"{self.base}/truncate")
-        for key, val in data["truncated"].items():
+        for _key, val in data["truncated"].items():
             self.assertIsInstance(val, str)
 
     def test_east_asian_width_endpoint(self):

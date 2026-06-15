@@ -501,7 +501,7 @@ class TestEdgeCases(unittest.TestCase):
         self.store.destroy()
 
     def test_snapshot_with_none_value(self):
-        snap = self.store.save("null_snap", None)
+        self.store.save("null_snap", None)
         loaded = self.store.load("null_snap")
         self.assertIsNone(loaded.value)
         self.assertTrue(loaded.verify_checksum())

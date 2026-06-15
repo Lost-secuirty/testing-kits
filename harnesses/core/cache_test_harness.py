@@ -182,9 +182,7 @@ class Cache:
             entry = self._store.get(key)
             if entry is None:
                 return False
-            if self._is_expired(entry):
-                return False
-            return True
+            return not self._is_expired(entry)
 
 
 # ---------------------------------------------------------------------------
@@ -475,10 +473,7 @@ class SingleFlightCache:
             with self._meta_lock:
                 if key in self._store:
                     return self._store[key]
-                if key in self._inflight:
-                    event = self._inflight[key]
-                else:
-                    event = None
+                event = self._inflight.get(key, None)
 
             if event is not None:
                 event.wait()
@@ -491,7 +486,7 @@ class SingleFlightCache:
             if key in self._store:
                 return self._store[key]
             if key in self._inflight:
-                ev = self._inflight[key]
+                self._inflight[key]
                 ev_wait = True
             else:
                 self._inflight[key] = event
@@ -844,10 +839,7 @@ def prove(impl: Callable[..., Any]) -> bool:
         observed = _run_corpus(impl)
     except Exception:  # noqa: BLE001 — raising while driving the corpus counts as caught
         return True
-    for _name, expected, actual in observed:
-        if actual != expected:
-            return True
-    return False
+    return any(actual != expected for _name, expected, actual in observed)
 
 
 TEETH = Teeth(

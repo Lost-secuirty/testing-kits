@@ -761,7 +761,7 @@ class ReadWriteLockTest:
 
         def writer(tid: int) -> None:
             barrier.wait()
-            for i in range(self.ops):
+            for _i in range(self.ops):
                 rw_lock.acquire_write()
                 try:
                     shared_value["v"] += 1

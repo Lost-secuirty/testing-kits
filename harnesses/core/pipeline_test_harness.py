@@ -165,10 +165,7 @@ class NullHandler(PipelineStage):
         self.dropped_count = 0
 
     def _has_null(self, record: dict[str, Any], fields_to_check: list[str]) -> bool:
-        for f in fields_to_check:
-            if record.get(f) is None:
-                return True
-        return False
+        return any(record.get(f) is None for f in fields_to_check)
 
     def process(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         self.dropped_count = 0
@@ -743,7 +740,7 @@ class MockPipelineServer:
 # Utility: find free port
 # ---------------------------------------------------------------------------
 
-def find_free_port(preferred: int = DEFAULT_PORT if False else 19050) -> int:
+def find_free_port(preferred: int = 19050) -> int:
     """Find a free port, starting from preferred."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:

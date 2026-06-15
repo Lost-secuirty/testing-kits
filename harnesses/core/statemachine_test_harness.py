@@ -284,11 +284,7 @@ class CycleDetector:
             color[node] = BLACK
             return False
 
-        for state in self._machine.states:
-            if color[state] == WHITE:
-                if dfs(state):
-                    return True
-        return False
+        return any(color[state] == WHITE and dfs(state) for state in self._machine.states)
 
     def find_cycles(self) -> list[list[str]]:
         """Return a list of cycles (each cycle is a list of state names)."""

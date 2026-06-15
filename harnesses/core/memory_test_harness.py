@@ -22,6 +22,7 @@ try:
     import resource  # Unix-only; absent on Windows
 except ImportError:
     resource = None
+import contextlib
 import json
 import socket
 import sys
@@ -231,10 +232,8 @@ class ObjectTracker:
         with self._lock:
             self._created[kind] = self._created.get(kind, 0) + 1
             if obj is not None:
-                try:
+                with contextlib.suppress(TypeError):
                     self._weak_refs.append(weakref.ref(obj))
-                except TypeError:
-                    pass
 
     def record_destroy(self, kind: str) -> None:
         with self._lock:
@@ -282,13 +281,13 @@ def _linear_regression(xs: list[float], ys: list[float]) -> tuple[float, float, 
     mean_x = sum(xs) / n
     mean_y = sum(ys) / n
     ss_xx = sum((x - mean_x) ** 2 for x in xs)
-    ss_xy = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    ss_xy = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys, strict=False))
     if ss_xx == 0:
         return 0.0, mean_y, 0.0
     slope = ss_xy / ss_xx
     intercept = mean_y - slope * mean_x
     # R²
-    ss_res = sum((y - (slope * x + intercept)) ** 2 for x, y in zip(xs, ys))
+    ss_res = sum((y - (slope * x + intercept)) ** 2 for x, y in zip(xs, ys, strict=False))
     ss_tot = sum((y - mean_y) ** 2 for y in ys)
     r_sq = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
     return slope, intercept, r_sq

@@ -222,10 +222,7 @@ def schema_resolver_coverage(schema: Schema,
 def query_depth(node: Selection) -> int:
     best = 0
     for c in node.children:
-        if c.is_fragment_spread:
-            best = max(best, 1)
-        else:
-            best = max(best, 1 + query_depth(c))
+        best = max(best, 1) if c.is_fragment_spread else max(best, 1 + query_depth(c))
     return best
 
 

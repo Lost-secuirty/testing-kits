@@ -83,7 +83,8 @@ class TestOracleBroker(unittest.TestCase):
         b = _broker(max_in_flight=2)
         for i in range(3):
             b.publish(Message(f"m{i}", f"k{i}"))
-        b.poll(); b.poll()
+        b.poll()
+        b.poll()
         self.assertIsNone(b.poll())
         self.assertLessEqual(b.max_in_flight_observed, 2)
 

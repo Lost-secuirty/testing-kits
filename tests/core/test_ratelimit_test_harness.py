@@ -180,7 +180,8 @@ class TestTokenBucket(unittest.TestCase):
 
     def test_denied_when_empty(self):
         tb, _ = self._make(capacity=2)
-        tb.allow(); tb.allow()
+        tb.allow()
+        tb.allow()
         d = tb.allow()
         self.assertFalse(d.allowed)
 
@@ -209,7 +210,8 @@ class TestTokenBucket(unittest.TestCase):
 
     def test_retry_after_positive_when_denied(self):
         tb, _ = self._make(capacity=2)
-        tb.allow(); tb.allow()
+        tb.allow()
+        tb.allow()
         d = tb.allow()
         self.assertFalse(d.allowed)
         self.assertGreater(d.retry_after, 0)
@@ -239,13 +241,15 @@ class TestTokenBucket(unittest.TestCase):
 
     def test_stats_allowed(self):
         tb, _ = self._make(capacity=5)
-        tb.allow(); tb.allow()
+        tb.allow()
+        tb.allow()
         s = tb.stats()
         self.assertEqual(s.allowed, 2)
 
     def test_stats_denied(self):
         tb, _ = self._make(capacity=1)
-        tb.allow(); tb.allow()
+        tb.allow()
+        tb.allow()
         s = tb.stats()
         self.assertEqual(s.denied, 1)
 
@@ -317,8 +321,10 @@ class TestTokenBucket(unittest.TestCase):
                         allowed_count[0] += 1
 
         threads = [threading.Thread(target=run) for _ in range(10)]
-        for t in threads: t.start()
-        for t in threads: t.join()
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
         self.assertLessEqual(allowed_count[0], 100)
 
     def test_retry_after_proportional_to_deficit(self):
@@ -365,13 +371,16 @@ class TestLeakyBucket(unittest.TestCase):
 
     def test_denied_when_full(self):
         lb, _ = self._make(capacity=3)
-        lb.allow(); lb.allow(); lb.allow()
+        lb.allow()
+        lb.allow()
+        lb.allow()
         d = lb.allow()
         self.assertFalse(d.allowed)
 
     def test_drain_allows_new_requests(self):
         lb, clock = self._make(capacity=2, drain_rate=1.0)
-        lb.allow(); lb.allow()
+        lb.allow()
+        lb.allow()
         clock.advance(1.0)
         d = lb.allow()
         self.assertTrue(d.allowed)
@@ -392,13 +401,15 @@ class TestLeakyBucket(unittest.TestCase):
 
     def test_stats_tracking(self):
         lb, _ = self._make(capacity=5)
-        lb.allow(); lb.allow()
+        lb.allow()
+        lb.allow()
         s = lb.stats()
         self.assertEqual(s.allowed, 2)
 
     def test_retry_after_positive_when_denied(self):
         lb, _ = self._make(capacity=2)
-        lb.allow(); lb.allow()
+        lb.allow()
+        lb.allow()
         d = lb.allow()
         self.assertFalse(d.allowed)
         self.assertGreater(d.retry_after, 0)
@@ -426,7 +437,8 @@ class TestLeakyBucket(unittest.TestCase):
 
     def test_stats_denied_count(self):
         lb, _ = self._make(capacity=1)
-        lb.allow(); lb.allow()
+        lb.allow()
+        lb.allow()
         s = lb.stats()
         self.assertEqual(s.denied, 1)
 
@@ -466,13 +478,15 @@ class TestFixedWindow(unittest.TestCase):
 
     def test_denied_at_limit(self):
         fw, _ = self._make(max_req=2)
-        fw.allow(); fw.allow()
+        fw.allow()
+        fw.allow()
         d = fw.allow()
         self.assertFalse(d.allowed)
 
     def test_reset_after_window(self):
         fw, clock = self._make(max_req=2, window=5.0)
-        fw.allow(); fw.allow()
+        fw.allow()
+        fw.allow()
         clock.advance(5.0)
         d = fw.allow()
         self.assertTrue(d.allowed)
@@ -510,7 +524,8 @@ class TestFixedWindow(unittest.TestCase):
 
     def test_no_reset_before_window(self):
         fw, clock = self._make(max_req=2, window=10.0)
-        fw.allow(); fw.allow()
+        fw.allow()
+        fw.allow()
         clock.advance(9.9)
         d = fw.allow()
         self.assertFalse(d.allowed)
@@ -525,13 +540,17 @@ class TestFixedWindow(unittest.TestCase):
 
     def test_stats_requests(self):
         fw, _ = self._make(max_req=5)
-        fw.allow(); fw.allow(); fw.allow()
+        fw.allow()
+        fw.allow()
+        fw.allow()
         s = fw.stats()
         self.assertEqual(s.requests, 3)
 
     def test_stats_denied(self):
         fw, _ = self._make(max_req=2)
-        fw.allow(); fw.allow(); fw.allow()
+        fw.allow()
+        fw.allow()
+        fw.allow()
         s = fw.stats()
         self.assertEqual(s.denied, 1)
 
@@ -572,9 +591,11 @@ class TestFixedWindow(unittest.TestCase):
 
     def test_multiple_windows_cycle(self):
         fw, clock = self._make(max_req=2, window=5.0)
-        fw.allow(); fw.allow()
+        fw.allow()
+        fw.allow()
         clock.advance(5.0)
-        fw.allow(); fw.allow()
+        fw.allow()
+        fw.allow()
         clock.advance(5.0)
         d = fw.allow()
         self.assertTrue(d.allowed)
@@ -602,7 +623,8 @@ class TestSlidingWindow(unittest.TestCase):
 
     def test_denied_at_limit(self):
         sw, _ = self._make(max_req=2)
-        sw.allow(); sw.allow()
+        sw.allow()
+        sw.allow()
         d = sw.allow()
         self.assertFalse(d.allowed)
 
@@ -621,7 +643,9 @@ class TestSlidingWindow(unittest.TestCase):
 
     def test_allows_after_expiry(self):
         sw, clock = self._make(max_req=3, window=5.0)
-        sw.allow(); sw.allow(); sw.allow()
+        sw.allow()
+        sw.allow()
+        sw.allow()
         clock.advance(5.01)      # old timestamps expire
         d = sw.allow()
         self.assertTrue(d.allowed)
@@ -632,7 +656,9 @@ class TestSlidingWindow(unittest.TestCase):
         """
         sw, clock = self._make(max_req=3, window=10.0)
         # t=0: 3 requests
-        sw.allow(); sw.allow(); sw.allow()
+        sw.allow()
+        sw.allow()
+        sw.allow()
         # t=5: no slots (all within last 10s)
         clock.advance(5.0)
         d = sw.allow()
@@ -644,7 +670,8 @@ class TestSlidingWindow(unittest.TestCase):
 
     def test_remaining_field(self):
         sw, _ = self._make(max_req=5)
-        sw.allow(); sw.allow()
+        sw.allow()
+        sw.allow()
         d = sw.allow()
         self.assertEqual(d.remaining, 2)
 
@@ -665,19 +692,23 @@ class TestSlidingWindow(unittest.TestCase):
 
     def test_stats_requests(self):
         sw, _ = self._make(max_req=5)
-        sw.allow(); sw.allow()
+        sw.allow()
+        sw.allow()
         s = sw.stats()
         self.assertEqual(s.requests, 2)
 
     def test_stats_denied(self):
         sw, _ = self._make(max_req=1)
-        sw.allow(); sw.allow()
+        sw.allow()
+        sw.allow()
         s = sw.stats()
         self.assertEqual(s.denied, 1)
 
     def test_internal_timestamps_expire(self):
         sw, clock = self._make(max_req=3, window=5.0)
-        sw.allow(); sw.allow(); sw.allow()
+        sw.allow()
+        sw.allow()
+        sw.allow()
         clock.advance(5.1)
         sw.stats()
         self.assertEqual(len(sw._timestamps), 0)
@@ -746,8 +777,10 @@ class TestSlidingWindow(unittest.TestCase):
         clock2_sliding = FakeClock(0.0)
         fw2 = FixedWindow(5, 10.0, clock=clock2_fixed)
         sw2 = SlidingWindow(5, 10.0, clock=clock2_sliding)
-        for _ in range(5): fw2.allow()
-        for _ in range(5): sw2.allow()
+        for _ in range(5):
+            fw2.allow()
+        for _ in range(5):
+            sw2.allow()
         clock2_fixed.advance(9.9)
         clock2_sliding.advance(9.9)
         # Fixed: not yet reset, denied
@@ -782,19 +815,22 @@ class TestPerKeyTokenBuckets(unittest.TestCase):
 
     def test_same_key_depletes(self):
         pk, _ = self._make(capacity=2)
-        pk.allow("alice"); pk.allow("alice")
+        pk.allow("alice")
+        pk.allow("alice")
         d = pk.allow("alice")
         self.assertFalse(d.allowed)
 
     def test_separate_buckets_per_key(self):
         pk, _ = self._make(capacity=3)
-        for _ in range(3): pk.allow("x")
+        for _ in range(3):
+            pk.allow("x")
         d = pk.allow("y")
         self.assertTrue(d.allowed)
 
     def test_stats_per_key(self):
         pk, _ = self._make(capacity=5)
-        pk.allow("alpha"); pk.allow("alpha")
+        pk.allow("alpha")
+        pk.allow("alpha")
         s = pk.stats("alpha")
         self.assertIsNotNone(s)
         self.assertEqual(s.allowed, 2)
@@ -806,7 +842,9 @@ class TestPerKeyTokenBuckets(unittest.TestCase):
 
     def test_keys_listing(self):
         pk, _ = self._make()
-        pk.allow("a"); pk.allow("b"); pk.allow("c")
+        pk.allow("a")
+        pk.allow("b")
+        pk.allow("c")
         k = pk.keys()
         self.assertIn("a", k)
         self.assertIn("b", k)
@@ -849,8 +887,10 @@ class TestPerKeyTokenBuckets(unittest.TestCase):
                 except Exception as e:
                     errors.append(e)
         threads = [threading.Thread(target=run, args=(f"k{i}",)) for i in range(10)]
-        for t in threads: t.start()
-        for t in threads: t.join()
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
         self.assertEqual(errors, [])
 
 
@@ -977,8 +1017,10 @@ class TestThreadedConcurrency(unittest.TestCase):
                         admitted.append(1)
 
         threads = [threading.Thread(target=run) for _ in range(10)]
-        for t in threads: t.start()
-        for t in threads: t.join()
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
         self.assertLessEqual(len(admitted), 50)
 
     def test_locked_sliding_window_no_over_admit(self):
@@ -995,8 +1037,10 @@ class TestThreadedConcurrency(unittest.TestCase):
                         admitted.append(1)
 
         threads = [threading.Thread(target=run) for _ in range(10)]
-        for t in threads: t.start()
-        for t in threads: t.join()
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
         self.assertLessEqual(len(admitted), 50)
 
     def test_locked_fixed_window_no_over_admit(self):
@@ -1013,8 +1057,10 @@ class TestThreadedConcurrency(unittest.TestCase):
                         admitted.append(1)
 
         threads = [threading.Thread(target=run) for _ in range(10)]
-        for t in threads: t.start()
-        for t in threads: t.join()
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
         self.assertLessEqual(len(admitted), 50)
 
     def test_toctou_race_unlocked_counter(self):
@@ -1034,8 +1080,10 @@ class TestThreadedConcurrency(unittest.TestCase):
                     admitted.append(1)
 
         threads = [threading.Thread(target=run) for _ in range(10)]
-        for t in threads: t.start()
-        for t in threads: t.join()
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
         # The test just demonstrates the pattern; the unlocked version
         # may or may not over-admit on any given run.
         # We just assert it ran without crashing.
@@ -1056,9 +1104,11 @@ class TestThreadedConcurrency(unittest.TestCase):
                 results[key] = count
 
         threads = [threading.Thread(target=run, args=(f"key_{i}",)) for i in range(5)]
-        for t in threads: t.start()
-        for t in threads: t.join()
-        for key, count in results.items():
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        for _key, count in results.items():
             self.assertLessEqual(count, 100)
 
     def test_concurrent_stats_consistent(self):
@@ -1070,8 +1120,10 @@ class TestThreadedConcurrency(unittest.TestCase):
                 tb.allow()
 
         threads = [threading.Thread(target=run) for _ in range(10)]
-        for t in threads: t.start()
-        for t in threads: t.join()
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
         s = tb.stats()
         self.assertEqual(s.requests, s.allowed + s.denied)
 
@@ -1089,8 +1141,10 @@ class TestThreadedConcurrency(unittest.TestCase):
                         admitted.append(1)
 
         threads = [threading.Thread(target=run) for _ in range(5)]
-        for t in threads: t.start()
-        for t in threads: t.join()
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
         self.assertLessEqual(len(admitted), 50)
 
     def test_http_server_concurrent_requests(self):
@@ -1108,8 +1162,10 @@ class TestThreadedConcurrency(unittest.TestCase):
                     status_codes.append(s)
 
             threads = [threading.Thread(target=fetch) for _ in range(40)]
-            for t in threads: t.start()
-            for t in threads: t.join()
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
 
             ok_count = status_codes.count(200)
             rl_count = status_codes.count(429)
@@ -1137,8 +1193,12 @@ class TestRateLimitReport(unittest.TestCase):
     def test_make_report_from_stats(self):
         clock = FakeClock(0.0)
         tb = TokenBucket(5, 1.0, clock=clock)
-        tb.allow(); tb.allow(); tb.allow()
-        tb.allow(); tb.allow(); tb.allow()
+        tb.allow()
+        tb.allow()
+        tb.allow()
+        tb.allow()
+        tb.allow()
+        tb.allow()
         s = tb.stats()
         r = make_report("token_bucket", s, notes="test run")
         self.assertEqual(r.total_requests, 6)
@@ -1292,7 +1352,8 @@ class TestCrossAlgorithm(unittest.TestCase):
             (SlidingWindow, (10, 100.0)),
         ]:
             limiter = Cls(*args, clock=clock)
-            for _ in range(7): limiter.allow()
+            for _ in range(7):
+                limiter.allow()
             s = limiter.stats()
             self.assertEqual(s.requests, 7, msg=f"{Cls.__name__}")
 
@@ -1305,7 +1366,8 @@ class TestCrossAlgorithm(unittest.TestCase):
             ("sliding_window", SlidingWindow, (5, 10.0)),
         ]:
             limiter = Cls(*args, clock=clock)
-            for _ in range(8): limiter.allow()
+            for _ in range(8):
+                limiter.allow()
             s = limiter.stats()
             r = make_report(name, s)
             self.assertEqual(r.algorithm, name)
@@ -1315,14 +1377,16 @@ class TestCrossAlgorithm(unittest.TestCase):
         """Sliding window limits burst that fixed window allows."""
         clock_sw = FakeClock(0.0)
         sw = SlidingWindow(5, 10.0, clock=clock_sw)
-        for _ in range(5): sw.allow()
+        for _ in range(5):
+            sw.allow()
         clock_sw.advance(9.9)    # old requests not yet expired
         d_sw = sw.allow()
         self.assertFalse(d_sw.allowed)
 
         clock_fw = FakeClock(0.0)
         fw = FixedWindow(5, 10.0, clock=clock_fw)
-        for _ in range(5): fw.allow()
+        for _ in range(5):
+            fw.allow()
         clock_fw.advance(10.0)   # window fully resets
         d_fw = fw.allow()
         self.assertTrue(d_fw.allowed)
@@ -1340,7 +1404,8 @@ class TestCrossAlgorithm(unittest.TestCase):
     def test_per_key_wraps_token_bucket_semantics(self):
         clock = FakeClock(0.0)
         pk = PerKeyTokenBuckets(3, 1.0, clock=clock)
-        for _ in range(3): pk.allow("user1")
+        for _ in range(3):
+            pk.allow("user1")
         d = pk.allow("user1")
         self.assertFalse(d.allowed)
         d2 = pk.allow("user2")
@@ -1363,7 +1428,8 @@ class TestCrossAlgorithm(unittest.TestCase):
     def test_report_denied_field(self):
         clock = FakeClock(0.0)
         tb = TokenBucket(3, 0.01, clock=clock)
-        for _ in range(5): tb.allow()
+        for _ in range(5):
+            tb.allow()
         s = tb.stats()
         r = make_report("token_bucket", s)
         self.assertEqual(r.total_denied, 2)

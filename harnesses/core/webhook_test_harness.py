@@ -575,9 +575,6 @@ class MockWebhookHandler:
                 "event_type": event_type,
                 "headers": headers,
             })
-            if self._status_sequence:
-                status = self._status_sequence.pop(0)
-            else:
-                status = self._default_status
+            status = self._status_sequence.pop(0) if self._status_sequence else self._default_status
 
         return status, self._response_body
