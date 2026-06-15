@@ -6,6 +6,7 @@ Mock HTTP server on dynamic port (default 19200).
 
 from __future__ import annotations
 
+import argparse
 import dataclasses
 import hashlib
 import hmac
@@ -13,11 +14,20 @@ import http.server
 import json
 import re
 import socket
+import sys
 import threading
 import time
 import urllib.request
 from collections import defaultdict
-from typing import Dict, List, Optional, Set, Tuple
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Optional, Set, Tuple
+
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -746,3 +756,307 @@ def build_default_registry_packages() -> Dict[str, dict]:
             },
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# TEETH: a FROZEN supply-chain admission corpus + planted real-world mutants.
+#
+# A supply-chain harness only has teeth if it REJECTS a package that fails any
+# of the three core gates a lockfile-enforcing installer must apply:
+#
+#   1. the artifact bytes must hash to the sha256 pinned in the lockfile
+#      (integrity / hash-pinning),
+#   2. the version specifier must be an EXACT pin, never floating/unpinned
+#      (reproducibility), and
+#   3. the package name must be on the known-good allowlist; a typosquat /
+#      lookalike (Levenshtein-1) or hallucinated name must NOT be admitted.
+#
+# The networked MockRegistry above is exercised over a real socket by the
+# paired unittest. The teeth, by contrast, run a PURE in-process admission
+# decision built from the harness's own PinningChecker / IntegrityChecker /
+# NonexistentPackageChecker so the gate can verify "this harness catches a real
+# supply-chain bug" with zero clock/network/filesystem I/O and full determinism.
+#
+# An "impl" is an admission decider:  admit(pkg: SupplyCase) -> "accept"|"reject".
+# The oracle reuses the harness's correct checkers. Each Mutant is a faithful
+# model of a genuine real-world defect (hash bypass, pin-skip, typosquat-allow).
+# prove() judges a decider against the corpus's FROZEN expected verdicts (literal
+# "accept"/"reject" constants computed by hand) -- NEVER against the oracle
+# object at runtime -- so the check is non-circular.
+# ---------------------------------------------------------------------------
+
+ACCEPT = "accept"
+REJECT = "reject"
+
+# The frozen allowlist of known-good package names the admission gate trusts.
+# 'flask' is present so 'flas'/'flassk' (Levenshtein-1) read as typosquats.
+ALLOWED_PACKAGES: Set[str] = {"requests", "flask", "django", "numpy", "pytest"}
+
+# A frozen artifact + its real sha256, shared by the corpus. Computing the hash
+# here (not hand-transcribing 64 hex chars) keeps the fixture honest; the
+# admission VERDICTS below are the hand-authored literals prove() judges against.
+_GOOD_ARTIFACT = b"requests-2.28.0 wheel bytes"
+_GOOD_SHA = hashlib.sha256(_GOOD_ARTIFACT).hexdigest()
+
+
+@dataclass(frozen=True)
+class SupplyCase:
+    """One frozen package-admission request with a hand-authored expected verdict."""
+    name: str
+    pkg_name: str
+    specifier: str           # version specifier as declared in the manifest
+    locked_sha256: str       # sha256 pinned in the lockfile for this artifact
+    artifact: bytes          # the actual bytes the installer fetched
+    note: str = ""
+
+
+# Cases chosen so the correct oracle yields every expected verdict AND each
+# planted mutant gets at least one WRONG. Verdicts are literals, NOT read from
+# the oracle, which is what keeps prove() non-circular.
+SUPPLY_CORPUS: Tuple[SupplyCase, ...] = (
+    # --- the fully clean package: pinned, hash matches, name allowlisted -----
+    SupplyCase("clean_pinned_match", "requests", "==2.28.0", _GOOD_SHA, _GOOD_ARTIFACT,
+               note="exact pin + matching hash + known name -> accept"),
+    # --- TAMPERED artifact: bytes do NOT hash to the locked sha256 -----------
+    # Teeth case for the integrity-bypass mutant: a checker that skips/short-
+    # circuits the hash comparison would admit a swapped/poisoned artifact.
+    SupplyCase("tampered_hash_mismatch", "requests", "==2.28.0", _GOOD_SHA,
+               b"poisoned artifact bytes",
+               note="artifact hash != locked sha256 -> reject (integrity)"),
+    # --- FLOATING specifier: not an exact pin -------------------------------
+    # Teeth case for the pin-skip mutant: a gate that doesn't enforce exact
+    # pinning lets a range/floating version slip in (non-reproducible build).
+    SupplyCase("floating_version", "flask", ">=2.0", _GOOD_SHA, _GOOD_ARTIFACT,
+               note="floating/range specifier -> reject (must be exact pin)"),
+    # --- UNPINNED: no version specifier at all -------------------------------
+    SupplyCase("unpinned_no_version", "numpy", "", _GOOD_SHA, _GOOD_ARTIFACT,
+               note="empty specifier (unpinned) -> reject"),
+    # --- WILDCARD: latest/* -------------------------------------------------
+    SupplyCase("wildcard_latest", "django", "latest", _GOOD_SHA, _GOOD_ARTIFACT,
+               note="wildcard 'latest' specifier -> reject"),
+    # --- TYPOSQUAT: name 1 edit from an allowlisted package -----------------
+    # Teeth case for the typosquat-allow mutant: 'flassk' is Levenshtein-1 from
+    # 'flask'. A gate that admits any not-found name (or only flags it without
+    # rejecting) lets a lookalike package through.
+    SupplyCase("typosquat_lookalike", "flassk", "==1.0.0", _GOOD_SHA, _GOOD_ARTIFACT,
+               note="'flassk' is 1 edit from 'flask' -> reject (typosquat)"),
+    # --- HALLUCINATED name: not on the allowlist, not a near-match ----------
+    SupplyCase("hallucinated_name", "totally-made-up-pkg", "==1.0.0", _GOOD_SHA,
+               _GOOD_ARTIFACT,
+               note="name not in registry / allowlist -> reject (slopsquat)"),
+)
+
+# Literal expected verdicts, computed by hand from the admission contract --
+# NEVER read back from the oracle object, which keeps prove() non-circular.
+EXPECTED_VERDICTS: Dict[str, str] = {
+    "clean_pinned_match": ACCEPT,
+    "tampered_hash_mismatch": REJECT,
+    "floating_version": REJECT,
+    "unpinned_no_version": REJECT,
+    "wildcard_latest": REJECT,
+    "typosquat_lookalike": REJECT,
+    "hallucinated_name": REJECT,
+}
+
+
+# --- ORACLE: reuse the harness's own correct checkers -----------------------
+
+def oracle_admit(case: SupplyCase) -> str:
+    """Correct supply-chain admission decision.
+
+    Accept iff ALL three gates pass: the name is allowlisted (no typosquat /
+    hallucination), the specifier is an exact pin, and the artifact bytes hash
+    to the locked sha256. Any failure -> reject. Reuses PinningChecker,
+    IntegrityChecker and NonexistentPackageChecker so the oracle is the
+    harness's own tested logic, not a re-implementation.
+    """
+    # Gate 1: name must be known / not a typosquat or hallucination.
+    name_findings = NonexistentPackageChecker(ALLOWED_PACKAGES).check(case.pkg_name)
+    if name_findings:
+        return REJECT
+
+    # Gate 2: the version specifier must be an exact pin.
+    pin_findings = PinningChecker().check(case.pkg_name, case.specifier)
+    if pin_findings:
+        return REJECT
+
+    # Gate 3: the artifact bytes must match the locked sha256.
+    dep = LockedDep(case.pkg_name, _spec_version(case.specifier),
+                    case.locked_sha256, "https://example.com/artifact")
+    ok, _msg = IntegrityChecker().verify(dep, case.artifact)
+    if not ok:
+        return REJECT
+
+    return ACCEPT
+
+
+def _spec_version(specifier: str) -> str:
+    """Extract a non-empty version string for LockedDep (it rejects empty)."""
+    v = specifier.lstrip("=<>!~ ").strip()
+    return v or "0"
+
+
+# --- Planted buggy admission deciders (each models a real-world defect) ------
+
+def mutant_skip_integrity(case: SupplyCase) -> str:
+    """BUG: the integrity gate is skipped -- the locked hash is never compared.
+
+    Models the classic 'trust the lockfile entry, don't re-verify the bytes'
+    mistake (or a verify() that returns True on any non-empty hash). A swapped
+    or poisoned artifact whose bytes do NOT match the pinned sha256 is admitted
+    -- the single most dangerous supply-chain failure (dependency confusion /
+    artifact substitution).
+    """
+    if NonexistentPackageChecker(ALLOWED_PACKAGES).check(case.pkg_name):
+        return REJECT
+    if PinningChecker().check(case.pkg_name, case.specifier):
+        return REJECT
+    # BUG: no hash verification at all -- the locked sha256 is ignored.
+    return ACCEPT
+
+
+def mutant_allow_unpinned(case: SupplyCase) -> str:
+    """BUG: the pinning gate accepts floating/unpinned specifiers.
+
+    Only an explicit wildcard ('*'/'latest') is rejected; a range like '>=2.0'
+    or an empty (unpinned) specifier slips through. Models a gate that checks
+    'is it not a wildcard' instead of 'is it an exact pin', yielding a
+    non-reproducible build that can silently pull a newer (possibly compromised)
+    version on the next install.
+    """
+    if NonexistentPackageChecker(ALLOWED_PACKAGES).check(case.pkg_name):
+        return REJECT
+    spec = case.specifier.strip().lower()
+    # BUG: only the obvious wildcards are blocked; ranges/unpinned pass.
+    if spec in PinningChecker.WILDCARD_VALUES or spec == "*":
+        return REJECT
+    dep = LockedDep(case.pkg_name, _spec_version(case.specifier) or "0",
+                    case.locked_sha256, "https://example.com/artifact")
+    ok, _msg = IntegrityChecker().verify(dep, case.artifact)
+    return ACCEPT if ok else REJECT
+
+
+def mutant_allow_typosquat(case: SupplyCase) -> str:
+    """BUG: a typosquat / lookalike name is admitted instead of rejected.
+
+    The name gate treats a Levenshtein-1 near-match as a mere 'warning' and
+    lets it through (rejecting only outright-hallucinated names), so 'flassk'
+    sails past as if it were 'flask'. Models the real failure where typosquat
+    detection is advisory-only -- the lookalike package still gets installed.
+    """
+    findings = NonexistentPackageChecker(ALLOWED_PACKAGES).check(case.pkg_name)
+    # BUG: only hard 'error' findings (unknown, no near-match) block admission;
+    # a 'warning' typosquat finding is downgraded to non-blocking.
+    if any(f.severity == "error" for f in findings):
+        return REJECT
+    if PinningChecker().check(case.pkg_name, case.specifier):
+        return REJECT
+    dep = LockedDep(case.pkg_name, _spec_version(case.specifier) or "0",
+                    case.locked_sha256, "https://example.com/artifact")
+    ok, _msg = IntegrityChecker().verify(dep, case.artifact)
+    return ACCEPT if ok else REJECT
+
+
+def prove(admit: Callable[[SupplyCase], str]) -> bool:
+    """True iff ``admit`` MISDECIDES any frozen corpus case (i.e. is caught).
+
+    Non-circular + deterministic: each verdict is compared against the literal
+    EXPECTED_VERDICTS constant, never against the oracle object. No clock,
+    network, filesystem I/O, or RNG. A decider that raises on a corpus case
+    counts as caught.
+    """
+    for case in SUPPLY_CORPUS:
+        expected = EXPECTED_VERDICTS[case.name]
+        try:
+            actual = admit(case)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if actual != expected:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_admit,
+    mutants=(
+        Mutant("skip_integrity", mutant_skip_integrity,
+               "integrity gate skipped: a tampered artifact whose bytes do not "
+               "match the locked sha256 is admitted (artifact substitution)"),
+        Mutant("allow_unpinned", mutant_allow_unpinned,
+               "pinning gate accepts floating/unpinned specifiers (only wildcards "
+               "blocked) -> non-reproducible, version may drift on next install"),
+        Mutant("allow_typosquat", mutant_allow_typosquat,
+               "typosquat detection is advisory-only: a Levenshtein-1 lookalike "
+               "name ('flassk' vs 'flask') is admitted instead of rejected"),
+    ),
+    corpus_size=len(SUPPLY_CORPUS),
+    kind="oracle_swap",
+    notes="admit a package only if its name is allowlisted (no typosquat), its "
+          "version is an exact pin, and its artifact hashes to the locked sha256",
+)
+
+
+def list_scenarios() -> List[str]:
+    """Names of the frozen admission corpus cases (the teeth scenarios)."""
+    return [c.name for c in SUPPLY_CORPUS]
+
+
+# ---------------------------------------------------------------------------
+# Report-based self-test — fails loud, reports findings, asserts the teeth.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(as_json: bool = False) -> int:
+    report = Report("security/supplychain")
+
+    # 1. The correct oracle must yield every frozen expected verdict.
+    for case in SUPPLY_CORPUS:
+        expected = EXPECTED_VERDICTS[case.name]
+        actual = oracle_admit(case)
+        report.add(f"oracle_case:{case.name}", expected, actual, detail=case.note)
+
+    # 2. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    # 3. Harness-specific invariants exercised directly against the checkers.
+    ic = IntegrityChecker()
+    good_dep = LockedDep("requests", "2.28.0", _GOOD_SHA, "https://example.com")
+    report.record("integrity_accepts_matching_hash",
+                  ic.verify(good_dep, _GOOD_ARTIFACT)[0],
+                  detail="matching artifact bytes must verify OK")
+    report.record("integrity_rejects_tampered_hash",
+                  not ic.verify(good_dep, b"tampered")[0],
+                  detail="mismatched artifact bytes must fail integrity")
+    pc = PinningChecker()
+    report.record("pinning_accepts_exact", pc.check("p", "==1.2.3") == [],
+                  detail="an exact pin must produce no finding")
+    report.record("pinning_rejects_floating", bool(pc.check("p", ">=1.0")),
+                  detail="a floating specifier must be flagged")
+    nec = NonexistentPackageChecker(ALLOWED_PACKAGES)
+    report.record("typosquat_flagged", bool(nec.check("flassk")),
+                  detail="a Levenshtein-1 lookalike must produce a finding")
+
+    return report.emit(as_json=as_json)
+
+
+# ---------------------------------------------------------------------------
+# CLI — default action is the self-test (repo convention).
+# ---------------------------------------------------------------------------
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Supply-Chain / Build Reproducibility Test Harness")
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true",
+                        help="list the frozen admission corpus case names")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
+    return _run_self_test(as_json=args.json)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

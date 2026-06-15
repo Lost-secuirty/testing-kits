@@ -1,6 +1,6 @@
 {
   "ai/agent_eval": "pending",
-  "ai/agent_memory_context": "pending",
+  "ai/agent_memory_context": "required",
   "ai/agentic": "pending",
   "ai/drift_detection": "pending",
   "ai/llm_eval": "pending",
@@ -74,6 +74,6 @@
   "security/jwt": "pending",
   "security/pii_redaction": "pending",
   "security/security": "pending",
-  "security/supplychain": "pending",
-  "security/upload": "pending"
+  "security/supplychain": "required",
+  "security/upload": "required"
 }
