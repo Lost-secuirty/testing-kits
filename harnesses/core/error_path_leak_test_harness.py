@@ -423,7 +423,7 @@ LEAK_CORPUS: tuple[ErrorScenario, ...] = (
         kind="auth_error",
         raw_exception="AuthError: token rejected by upstream",
         internal_path="/srv/app/auth/verify.py",
-        secret="sk-live-AKIA9f8h2x7QWERTY",
+        secret="sk-live-AKIA9f8h2x7QWERTY",  # allowlist secret  (intentional fake fixture: proves the redactor strips a realistic key)
         forbidden=(
             "sk-live-AKIA9f8h2x7QWERTY",
             "/srv/app/auth/verify.py",
