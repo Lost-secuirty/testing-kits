@@ -10,6 +10,7 @@ import urllib.request
 import urllib.error
 from decimal import Decimal, ROUND_HALF_EVEN, ROUND_HALF_UP, ROUND_FLOOR, ROUND_CEILING, InvalidOperation
 
+from harnesses._teeth import verify
 from harnesses.core.numeric_test_harness import (
     Money,
     CurrencyMismatchError,
@@ -22,6 +23,10 @@ from harnesses.core.numeric_test_harness import (
     MockNumericHandler,
     NumericTestServer,
     create_server,
+    TEETH,
+    prove,
+    oracle_allocate,
+    ALLOC_CORPUS,
 )
 
 
@@ -843,6 +848,41 @@ class TestEdgeCases(unittest.TestCase):
     def test_precision_tester_decimal_exact_type(self):
         data = PrecisionTester.decimal_exact_sum()
         self.assertIsInstance(data["result"], str)
+
+
+# ===========================================================================
+# 24. Teeth — the harness must catch a real planted numeric bug
+# ===========================================================================
+
+class TestTeeth(unittest.TestCase):
+    """The harness must catch a real planted bug (the campaign teeth contract)."""
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct allocator must NOT be flagged by prove.
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+        self.assertFalse(prove(oracle_allocate))
+
+    def test_every_mutant_is_caught(self):
+        # Each planted defect must be individually caught.
+        self.assertEqual(len(TEETH.mutants), 3)
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
+
+    def test_oracle_matches_frozen_literals_and_conserves(self):
+        # The frozen expectations are non-circular constants the oracle must
+        # reproduce exactly, and every allocation must conserve pennies.
+        for case in ALLOC_CORPUS:
+            shares = oracle_allocate(case.total_cents, case.ratios)
+            self.assertEqual(tuple(shares), case.expected_cents, case.name)
+            self.assertEqual(sum(shares), case.total_cents, f"{case.name} not conserved")
 
 
 if __name__ == "__main__":

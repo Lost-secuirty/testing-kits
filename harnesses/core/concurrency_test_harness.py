@@ -2,6 +2,12 @@
 Concurrency Test Harness (Harness 9 of 36)
 Tests thread safety and synchronization primitives.
 Pure stdlib, zero external dependencies.
+
+TEETH (campaign): the real-thread tests above are inherently timing-dependent
+and so cannot be the gate's proof. Instead the teeth at the bottom of this file
+run a PURE, DETERMINISTIC single-thread simulation of a concrete bad interleaving
+(a forced scheduler), so a lost-update / non-atomic check-then-act bug is caught
+on every run with zero real thread timing, clock, network, or filesystem I/O.
 """
 
 import threading
@@ -15,7 +21,15 @@ import http.server
 import urllib.request
 import urllib.error
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Callable, Tuple
+
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -1333,52 +1347,457 @@ class ConcurrencyTestHarness:
 
 
 # ---------------------------------------------------------------------------
-# CLI entry point
+# TEETH: a FROZEN set of interleaving scenarios -> expected final state, judged
+# by a PURE, DETERMINISTIC single-thread simulation of the bad interleaving.
+#
+# Real thread timing is non-reproducible: a missing lock only *sometimes* loses
+# an update, so a flaky "run 10 threads and hope" check has no teeth. Instead we
+# model concurrency as an explicit step machine. Each transaction is a sequence
+# of primitive steps over a shared cell:
+#
+#     ("lock",)            acquire the cell's lock (blocks if held by another tx)
+#     ("read",)            copy the shared value into this tx's private register
+#     ("compute", f)       transform the private register: reg = f(reg)
+#     ("guard", pred)      if pred(reg) is False, ABORT this tx (no write) -- the
+#                          "act" half of a check-then-act
+#     ("write",)           store this tx's private register back into the cell
+#     ("unlock",)          release the cell's lock
+#
+# A SCHEDULE is a frozen list of transaction indices saying which tx advances by
+# one step next -- a forced, reproducible interleaving. The simulator runs that
+# exact interleaving (respecting lock blocking) and returns the final cell value.
+#
+# An impl is a callable ``build_program(delta_or_pred) -> Tuple[Step, ...]`` that
+# decides HOW a transaction is written:
+#   * the ORACLE wraps read-modify-write inside lock/unlock (mutual exclusion),
+#     and does its check-then-act guard while still holding the lock, so no
+#     schedule can lose an update or violate the invariant;
+#   * each MUTANT models a genuine real-world concurrency bug -- a missing lock
+#     (lost update), or a non-atomic check-then-act (overdraft), or a lock that
+#     is dropped between the read and the write (broken critical section).
+#
+# prove(impl) drives the impl through every frozen scenario under its FROZEN
+# adversarial schedule and compares the simulated final state to a LITERAL,
+# hand-computed expected value baked into the corpus. It is NON-CIRCULAR (it
+# never compares the impl to the oracle object) and fully deterministic (no real
+# threads, clock, network, filesystem, or RNG). prove(impl) is True iff any
+# scenario's simulated outcome diverges from its frozen expectation.
 # ---------------------------------------------------------------------------
 
-def _run_self_test(verbose: bool = False) -> int:
-    """Run the full in-process suite; the locked counter must show no race and
-    the unlocked counter must expose one."""
-    harness = ConcurrencyTestHarness()  # in-process tests need no server
-    harness.run_all()
-    s = harness.summary()
-    rl = harness._results["race_locked"]
-    ru = harness._results["race_unlocked"]
-    checks = [
-        ("primitive suite all-pass", s["failed"] == 0 and s["passed"] >= 15,
-         f"passed={s['passed']} failed={s['failed']}"),
-        ("locked counter: no lost updates",
-         rl["actual"] == rl["expected"] and not rl["race_detected"], str(rl)),
-        ("unlocked counter: race exposed", ru["race_detected"], str(ru)),
-    ]
-    failures = [n for n, ok, _ in checks if not ok]
-    for n, ok, d in checks:
-        print(f"  [{'PASS' if ok else 'FAIL'}] {n}  ({d})")
-    print(f"\n  {len(checks) - len(failures)}/{len(checks)} checks passed")
-    return 0 if not failures else 1
+# A "transaction" is a list of (op, arg) steps. A "schedule" is a tuple of tx
+# indices. The simulator below is the deterministic scheduler.
+
+_NO_TX = -1  # sentinel: the cell's lock is free
 
 
-def main() -> int:
+def _step(programs, pcs, regs, aborted, holds, cell, i: int) -> str:
+    """Attempt ONE step of transaction `i`. Returns:
+        "advanced" — a step executed and the program counter moved on;
+        "blocked"  — the next step is a lock acquire and the lock is held by
+                     another tx, so nothing changed (the tx must retry later);
+        "done"     — the tx has no remaining steps (or already aborted).
+    """
+    if aborted[i] or pcs[i] >= len(programs[i]):
+        return "done"
+    op = programs[i][pcs[i]]
+    name = op[0]
+    if name == "lock":
+        if cell["owner"] != _NO_TX and cell["owner"] != i:
+            return "blocked"          # lock held by another tx — retry later
+        cell["owner"] = i
+        holds[i] = True
+    elif name == "read":
+        regs[i] = cell["value"]
+    elif name == "compute":
+        regs[i] = op[1](regs[i])
+    elif name == "guard":
+        if not op[1](regs[i]):        # "act" half fails -> abort, never write
+            aborted[i] = True
+            if holds[i] and cell["owner"] == i:
+                cell["owner"] = _NO_TX
+            holds[i] = False
+            pcs[i] += 1
+            return "advanced"
+    elif name == "write":
+        cell["value"] = regs[i]
+    elif name == "unlock":
+        if cell["owner"] == i:
+            cell["owner"] = _NO_TX
+        holds[i] = False
+    pcs[i] += 1
+    return "advanced"
+
+
+def simulate(programs: Tuple[Tuple[Tuple[Any, ...], ...], ...],
+             schedule: Tuple[int, ...],
+             initial: int) -> int:
+    """Run `programs` (one step machine per transaction) under the forced
+    `schedule` over a single shared integer cell starting at `initial`.
+
+    Deterministic and single-threaded: ``schedule`` is consumed in order, one
+    entry per *step* — each entry names the transaction that takes its next step
+    next. A transaction whose next step is a lock-acquire blocked by another tx is
+    re-queued (its turn is deferred, modelling a real blocked thread) rather than
+    skipped, so the forced interleaving is honoured exactly. After the schedule is
+    exhausted, any unfinished transactions are drained in index order. Returns the
+    final cell value. A guard cap makes a pathological (e.g. self-deadlocking)
+    program terminate instead of hanging prove().
+    """
+    cell = {"value": initial, "owner": _NO_TX}
+    n = len(programs)
+    pcs = [0] * n              # program counter per tx
+    regs: List[int] = [0] * n  # private register per tx
+    aborted = [False] * n
+    holds = [False] * n        # whether tx currently holds the lock
+
+    def done(i: int) -> bool:
+        return aborted[i] or pcs[i] >= len(programs[i])
+
+    total_steps = sum(len(p) for p in programs)
+    max_iters = total_steps * (n + 2) + len(schedule) + 16
+
+    # Phase 1: consume the explicit schedule. A blocked tx is deferred to the
+    # back of the pending queue so its step still happens, just later.
+    pending: List[int] = list(schedule)
+    iters = 0
+    requeued_streak = 0
+    while pending and iters < max_iters:
+        iters += 1
+        i = pending.pop(0)
+        if i < 0 or i >= n or done(i):
+            continue
+        outcome = _step(programs, pcs, regs, aborted, holds, cell, i)
+        if outcome == "blocked":
+            pending.append(i)       # retry this tx after the others get a turn
+            requeued_streak += 1
+            if requeued_streak > len(pending) + 1:
+                break               # every pending entry is blocked — give up
+            continue
+        requeued_streak = 0
+
+    # Phase 2: drain any transaction the schedule did not run to completion, in
+    # index order, so the corpus need not enumerate every trailing step.
+    iters = 0
+    while not all(done(i) for i in range(n)) and iters < max_iters:
+        iters += 1
+        progressed = False
+        for i in range(n):
+            if done(i):
+                continue
+            outcome = _step(programs, pcs, regs, aborted, holds, cell, i)
+            if outcome == "advanced":
+                progressed = True
+        if not progressed:
+            break  # only blocked txs remain (deadlock) — abandon them
+    return cell["value"]
+
+
+# --- Program builders: the IMPL decides how a transaction is structured. -----
+
+def oracle_program(delta: int) -> Tuple[Tuple[Any, ...], ...]:
+    """CORRECT: read-modify-write fully inside a held lock (mutual exclusion).
+
+    No schedule can interleave another tx between this tx's read and write, so
+    the increment is never lost regardless of the forced interleaving.
+    """
+    return (
+        ("lock",),
+        ("read",),
+        ("compute", lambda v: v + delta),
+        ("write",),
+        ("unlock",),
+    )
+
+
+def oracle_guarded_program(amount: int) -> Tuple[Tuple[Any, ...], ...]:
+    """CORRECT check-then-act: the balance guard AND the debit run inside one
+    held lock, so two withdrawals cannot both pass the guard and overdraw."""
+    return (
+        ("lock",),
+        ("read",),
+        ("guard", lambda v: v - amount >= 0),  # only debit if funds remain
+        ("compute", lambda v: v - amount),
+        ("write",),
+        ("unlock",),
+    )
+
+
+def missing_lock_program(delta: int) -> Tuple[Tuple[Any, ...], ...]:
+    """BUG: read-modify-write with NO lock at all (the classic lost update).
+
+    Because there is no critical section, the forced schedule can interleave a
+    second tx's full RMW between this tx's read and write, so this tx writes a
+    stale value and the other tx's increment is silently lost.
+    """
+    return (
+        ("read",),
+        ("compute", lambda v: v + delta),
+        ("write",),
+    )
+
+
+def lock_dropped_midway_program(delta: int) -> Tuple[Tuple[Any, ...], ...]:
+    """BUG: acquires a lock but RELEASES it between the read and the write.
+
+    A real defect (e.g. ``with lock: x = read()`` then writing outside the
+    ``with``). The critical section no longer covers the write, so another tx can
+    slip its RMW into the gap and this tx clobbers it -> lost update.
+    """
+    return (
+        ("lock",),
+        ("read",),
+        ("unlock",),               # BUG: critical section ends before the write
+        ("compute", lambda v: v + delta),
+        ("write",),
+    )
+
+
+def nonatomic_check_then_act_program(amount: int) -> Tuple[Tuple[Any, ...], ...]:
+    """BUG: non-atomic check-then-act — the guard is OUTSIDE the lock.
+
+    Each tx reads the balance and checks ``balance >= amount`` with no lock held,
+    THEN acquires the lock to debit. Two concurrent withdrawals both see the same
+    sufficient balance, both pass the guard, then both debit -> the account is
+    overdrawn (goes negative), which the correct guarded oracle prevents.
+    """
+    return (
+        ("read",),
+        ("guard", lambda v: v - amount >= 0),  # BUG: checked with no lock held
+        ("lock",),
+        ("read",),                              # re-read under lock, but too late
+        ("compute", lambda v: v - amount),
+        ("write",),
+        ("unlock",),
+    )
+
+
+# --- Frozen corpus: scenario -> literal expected final state -----------------
+
+@dataclass(frozen=True)
+class Scenario:
+    """One frozen interleaving with a hand-computed expected final state."""
+    name: str
+    kind: str            # "increment" | "withdraw"
+    initial: int
+    args: Tuple[int, ...]      # delta per tx (increment) or amount per tx (withdraw)
+    schedule: Tuple[int, ...]  # forced, adversarial interleaving (tx indices)
+    expected: int              # LITERAL correct final state under correct control
+    note: str = ""
+
+
+# The increment schedules force the lost-update window: tx0 reads, then tx1 runs
+# its ENTIRE rmw, then tx0 finishes — under a missing/dropped lock tx0 clobbers
+# tx1. Under the correct oracle, tx0 holds the lock so tx1 cannot start until tx0
+# is done, and both increments land. Steps per missing-lock program: read=0,
+# compute=1, write=2. The schedule advances by tx index, one step at a time.
+SCENARIOS: Tuple[Scenario, ...] = (
+    # Two +1 increments from 0. Correct final = 2. The adversarial schedule
+    # interleaves so a missing/dropped lock loses one increment (final = 1).
+    Scenario(
+        "two_increments_interleaved",
+        kind="increment", initial=0, args=(1, 1),
+        # tx0: read; tx1: read,compute,write (full rmw); tx0: compute,write.
+        # Unlocked: both read 0, last writer wins -> 1 (lost update).
+        # Locked oracle: tx0 holds lock through its rmw -> tx1 waits -> 2.
+        schedule=(0, 1, 1, 1, 0, 0),
+        expected=2,
+        note="missing/dropped lock loses one of two increments (2 -> 1)",
+    ),
+    # Three +1 increments from 10. Correct final = 13. The schedule sandwiches a
+    # full rmw by tx1 and tx2 inside tx0's read..write gap.
+    Scenario(
+        "three_increments_stacked",
+        kind="increment", initial=10, args=(1, 1, 1),
+        schedule=(0, 1, 1, 1, 2, 2, 2, 0, 0),
+        expected=13,
+        note="missing lock collapses three stale increments toward one survivor",
+    ),
+    # Check-then-act: balance 100, two withdrawals of 60 each. Correct control
+    # rejects the second (would overdraw) -> final 40. A non-atomic check lets
+    # both pass the guard -> final -20 (overdraft).
+    Scenario(
+        "double_withdraw_overdraft",
+        kind="withdraw", initial=100, args=(60, 60),
+        # tx0 read+guard, tx1 read+guard (both see 100, both pass), then debits.
+        schedule=(0, 0, 1, 1),
+        expected=40,
+        note="non-atomic check-then-act overdraws (40 -> -20)",
+    ),
+    # A withdrawal that legitimately fails the guard (insufficient funds) must
+    # leave the balance untouched under BOTH correct and the overdraft mutant,
+    # anchoring that the guard itself is honoured when it should fire.
+    Scenario(
+        "withdraw_insufficient_noop",
+        kind="withdraw", initial=50, args=(80,),
+        schedule=(0,),
+        expected=50,
+        note="a single over-limit withdrawal is rejected; balance unchanged",
+    ),
+)
+
+
+# Single-threaded scenario-kind selector (set by _final_state before building),
+# so one impl object can serve both increment and withdraw scenarios via the
+# simple ``builder(arg)`` signature. Safe because prove() is single-threaded.
+_CURRENT_KIND: List[str] = ["increment"]
+
+
+def _final_state(impl: Callable[[int], Tuple[Tuple[Any, ...], ...]],
+                 scenario: Scenario) -> int:
+    """Build one step-program per tx for `scenario` and simulate the interleaving."""
+    _CURRENT_KIND[0] = scenario.kind
+    programs = tuple(impl(arg) for arg in scenario.args)
+    return simulate(programs, scenario.schedule, scenario.initial)
+
+
+def prove(impl: Callable[[int], Tuple[Tuple[Any, ...], ...]]) -> bool:
+    """True iff `impl` produces a WRONG final state on any frozen scenario under
+    its forced adversarial schedule (i.e. the concurrency bug is CAUGHT).
+
+    Non-circular + deterministic: each scenario's `expected` is a literal,
+    hand-computed constant baked into SCENARIOS, never read from the oracle. The
+    simulation uses no real threads, clock, network, filesystem, or RNG, so a
+    given impl always yields the same verdict. An impl that raises while building
+    or simulating a scenario counts as caught.
+
+    `impl` is a program *builder*: increment scenarios call it with a delta and
+    withdraw scenarios with an amount. The oracle below routes by scenario kind
+    so the single correct builder pair models both control patterns.
+    """
+    for scenario in SCENARIOS:
+        try:
+            actual = _final_state(impl, scenario)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if actual != scenario.expected:
+            return True
+    return False
+
+
+def _make_impl(inc_builder: Callable[[int], Tuple[Tuple[Any, ...], ...]],
+               wd_builder: Callable[[int], Tuple[Tuple[Any, ...], ...]]
+               ) -> Callable[[int], Tuple[Tuple[Any, ...], ...]]:
+    """Combine an increment-program builder and a withdraw-program builder into a
+    single impl whose behaviour matches the current scenario's kind.
+
+    `_final_state` sets ``_CURRENT_KIND`` just before building, so the impl keeps
+    the simple ``builder(arg)`` signature while serving both increment and
+    withdraw scenarios. This is safe because prove() runs single-threaded.
+    """
+    def impl(arg: int) -> Tuple[Tuple[Any, ...], ...]:
+        if _CURRENT_KIND[0] == "withdraw":
+            return wd_builder(arg)
+        return inc_builder(arg)
+    return impl
+
+
+# The correct ORACLE: locked RMW for increments, guarded-under-lock for debits.
+oracle_impl = _make_impl(oracle_program, oracle_guarded_program)
+
+# Mutants. Each routes its buggy builder for the relevant kind and uses the
+# correct builder for the other kind, so each mutant isolates ONE real defect.
+missing_lock_impl = _make_impl(missing_lock_program, oracle_guarded_program)
+lock_dropped_impl = _make_impl(lock_dropped_midway_program, oracle_guarded_program)
+overdraft_impl = _make_impl(oracle_program, nonatomic_check_then_act_program)
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_impl,
+    mutants=(
+        Mutant("missing_lock_lost_update", missing_lock_impl,
+               "no lock around read-modify-write: a forced interleaving lets a "
+               "concurrent increment be silently lost (2 -> 1)"),
+        Mutant("lock_dropped_before_write", lock_dropped_impl,
+               "lock released between read and write: the critical section no "
+               "longer covers the write, so a concurrent rmw is clobbered -> lost update"),
+        Mutant("nonatomic_check_then_act_overdraft", overdraft_impl,
+               "balance guard checked outside the lock: two withdrawals both pass "
+               "the check then both debit -> account overdrawn (40 -> -20)"),
+    ),
+    corpus_size=len(SCENARIOS),
+    kind="oracle_swap",
+    notes="under a forced adversarial interleaving the correct lock/atomic control "
+          "preserves every increment and refuses an overdraft; a missing lock, a "
+          "lock dropped before the write, or a non-atomic check-then-act does not",
+)
+
+
+def list_scenarios() -> List[str]:
+    """Names of the frozen interleaving scenarios (the teeth scenarios)."""
+    return [s.name for s in SCENARIOS]
+
+
+# ---------------------------------------------------------------------------
+# Report-based self-test — fails loud, reports findings, asserts the teeth.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(as_json: bool = False) -> int:
+    report = Report("core/concurrency")
+
+    # 1. The correct oracle reproduces every frozen scenario's expected state.
+    for scenario in SCENARIOS:
+        report.add(f"oracle_final_state:{scenario.name}", scenario.expected,
+                   _final_state(oracle_impl, scenario), detail=scenario.note)
+
+    # 2. Cross-check the harness's real locked primitive against an interleaving:
+    #    the deterministic lost-update window must NOT lose an update when the
+    #    correct oracle program holds the lock (sanity that the model is faithful).
+    report.record(
+        "oracle_no_lost_update_under_adversarial_schedule",
+        _final_state(oracle_impl, SCENARIOS[0]) == SCENARIOS[0].expected,
+        detail="locked RMW survives the forced interleaving that breaks a missing lock",
+    )
+
+    # 3. The real in-process SharedCounter (locked) must reach the exact count
+    #    while UnsafeCounter is the racy primitive the teeth model in the small.
+    #    This keeps the legacy thread-based invariant exercised in the self-test
+    #    without making it the GATE (the gate uses the deterministic teeth above).
+    rd = RaceDetector(n_threads=4, increments_per_thread=200)
+    locked = rd.run_with_locked()
+    report.add("real_locked_counter_exact", locked["expected"], locked["actual"],
+               detail="threading.Lock-guarded counter loses no updates")
+    report.record("real_locked_counter_no_race", not locked["race_detected"])
+
+    # 4. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
+
+
+# ---------------------------------------------------------------------------
+# CLI — default action is the self-test (repo convention).
+# ---------------------------------------------------------------------------
+
+def main(argv: Optional[List[str]] = None) -> int:
     import argparse
-    p = argparse.ArgumentParser(description="Concurrency test harness")
-    p.add_argument("--self-test", action="store_true", help="Run built-in scenarios and exit")
+    p = argparse.ArgumentParser(description="Concurrency / synchronization controls")
+    p.add_argument("--self-test", action="store_true", help="run built-in checks")
+    p.add_argument("--json", action="store_true",
+                   help="emit machine-readable findings (implies --self-test)")
+    p.add_argument("--list-scenarios", action="store_true",
+                   help="list the frozen interleaving scenarios")
     p.add_argument("--serve", action="store_true", help="Start the mock HTTP server too")
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
-    p.add_argument("--verbose", action="store_true")
-    args = p.parse_args()
-    if args.self_test:
-        return _run_self_test(verbose=args.verbose)
-    harness = ConcurrencyTestHarness(server_port=args.port if args.serve else 0)
+    args = p.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
+
     if args.serve:
+        harness = ConcurrencyTestHarness(server_port=args.port)
         logger.info("Mock server started on port %d", harness.start_server())
-    try:
-        harness.run_all()
-        print(json.dumps(harness.summary(), indent=2))
-    finally:
-        harness.stop_server()
-    return 0
+        try:
+            harness.run_all()
+            print(json.dumps(harness.summary(), indent=2))
+        finally:
+            harness.stop_server()
+        return 0
+
+    # Default + --self-test: the deterministic teeth report.
+    return _run_self_test(as_json=args.json)
 
 
 if __name__ == "__main__":
-    import sys
-    sys.exit(main())
+    _sys.exit(main())

@@ -4,14 +4,24 @@ Demonstrates and guards against silent numeric bugs.
 Pure stdlib, zero external dependencies.
 """
 
+from __future__ import annotations
+
 import decimal
 import math
 import threading
 import json
 import http.server
 import socket
+from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_EVEN, ROUND_HALF_UP, ROUND_FLOOR, ROUND_CEILING, InvalidOperation
-from typing import List, Optional
+from typing import Callable, List, Optional, Tuple
+
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -606,41 +616,263 @@ def create_server(port: int = 0) -> NumericTestServer:
     return server
 
 
-def _run_self_test(verbose: bool = False) -> int:
-    """Exercise the Money invariants that motivate this harness: Decimal-backed
-    arithmetic (no float drift), banker's rounding, and currency safety."""
-    checks = [
-        ("0.1 + 0.2 == 0.30 (no float drift)",
-         Money(0.1).add(Money(0.2)).rounded().amount == Decimal("0.30"), None),
-        ("2.5 -> 2 (banker's half-even)",
-         Money(Decimal("2.5"), decimal_places=0).rounded().amount == Decimal("2"), None),
-        ("3.5 -> 4 (banker's half-even)",
-         Money(Decimal("3.5"), decimal_places=0).rounded().amount == Decimal("4"), None),
-    ]
+# ---------------------------------------------------------------------------
+# TEETH: a FROZEN corpus of (total_cents, ratios) -> the exact cent allocation
+# a correct money-splitter MUST produce.
+#
+# A numeric/money harness only has teeth if it CATCHES a splitter that loses or
+# creates value when distributing an indivisible total. The contract every
+# correct allocator must hold (the "conservation of pennies" invariant):
+#
+#   * the parts sum to EXACTLY the total — not a cent more, not a cent less;
+#   * the largest-remainder method assigns each leftover penny to the share with
+#     the largest fractional remainder, ties broken by lowest index (stable).
+#
+# An impl is a callable ``allocate(total_cents: int, ratios: Tuple[int, ...])
+# -> List[int]`` returning the integer-cent share for each ratio. prove() judges
+# each impl against the corpus's FROZEN LITERAL expected allocations (hand-
+# computed from the largest-remainder contract, NEVER read back from the oracle
+# at runtime), so the check is non-circular. prove(impl) is True iff any share
+# diverges from the frozen literal — i.e. the planted numeric bug is caught.
+#
+# Pure + deterministic: integer/Decimal arithmetic only, no RNG, no clock, no
+# network, no filesystem, no thread timing. The three planted mutants model
+# genuine real-world money-rounding defects (per the campaign hint):
+#
+#   * float_accumulation_drift — accumulates shares with an explicit ``acc += x``
+#     float loop (NOT sum(), which CPython 3.12+ compensates) so rounding drift
+#     mis-allocates pennies away from the exact total;
+#   * truncate_no_remainder — floors every share and silently drops the leftover
+#     pennies (the classic "lost penny" / banker's-fraud bug): parts sum to LESS
+#     than the total;
+#   * half_up_overallocates — rounds each share independently with ROUND_HALF_UP
+#     instead of distributing the exact remainder, creating pennies from nothing:
+#     parts sum to MORE than the total.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AllocCase:
+    """One frozen allocation case with a literal, hand-computed expectation."""
+    name: str
+    total_cents: int
+    ratios: Tuple[int, ...]
+    expected_cents: Tuple[int, ...]   # the EXACT cent shares a correct splitter yields
+    note: str = ""
+
+
+# Cases chosen so the correct oracle matches every literal AND at least one
+# planted mutant gets each one wrong. Every ``expected_cents`` tuple is computed
+# by hand from the largest-remainder contract (extra pennies go to the largest
+# remainders, ties to the lowest index) — constants, never derived at runtime.
+ALLOC_CORPUS: Tuple[AllocCase, ...] = (
+    # $10.00 split 1:2 -> 333.33.. / 666.66.. ; the leftover penny goes to the
+    # larger remainder (the 2-share), so 333 / 667. A truncate-only splitter
+    # drops that penny (333/666 sums to 999); a half-up splitter inflates it.
+    AllocCase("ten_split_1_2", 1000, (1, 2), (333, 667),
+              "uneven thirds: the extra penny must land on the larger remainder"),
+    # $10.00 split 1:2:3 -> 166.66/333.33/500 ; floor gives 166/333/500=999,
+    # one penny short. Largest remainder is the 1-share (.66) -> it gets +1.
+    AllocCase("ten_split_1_2_3", 1000, (1, 2, 3), (167, 333, 500),
+              "two-leftover case: the largest remainder gets the penny"),
+    # $1.00 split three ways -> 34/33/33. The single leftover penny goes to the
+    # first share (all remainders tie at .33, lowest index wins).
+    AllocCase("dollar_three_ways", 100, (1, 1, 1), (34, 33, 33),
+              "indivisible by 3: first share rounds up, tie broken by index"),
+    # 5 cents split three ways -> 2/2/1. Two leftover pennies, tie-broken by
+    # index. A drift/truncation bug loses one; half-up creates an extra.
+    AllocCase("nickel_three_ways", 5, (1, 1, 1), (2, 2, 1),
+              "tiny total: two pennies distributed to the first two shares"),
+    # $100.00 split three ways -> 3334/3333/3333. Large total magnifies float
+    # accumulation drift while the exact splitter stays penny-perfect.
+    AllocCase("hundred_three_ways", 10000, (1, 1, 1), (3334, 3333, 3333),
+              "large total: float accumulation drift is most visible here"),
+)
+
+
+# --- ORACLE: reuse the harness's own correct largest-remainder Money.allocate --
+
+def oracle_allocate(total_cents: int, ratios: Tuple[int, ...]) -> List[int]:
+    """Correct integer-cent allocation, delegating to the harness's own
+    Decimal-backed largest-remainder ``Money.allocate``. Returns the cent share
+    for each ratio; the shares sum to exactly ``total_cents``."""
+    money = Money(Decimal(total_cents) / 100, "USD", decimal_places=2)
+    parts = money.allocate(list(ratios))
+    return [int((p.amount * 100).to_integral_value()) for p in parts]
+
+
+# --- Planted buggy twins (each models a real money-rounding defect) ----------
+
+def float_accumulation_drift(total_cents: int, ratios: Tuple[int, ...]) -> List[int]:
+    """BUG: distributes the total using binary-float arithmetic accumulated in an
+    explicit ``acc += share`` loop, then rounds each share to whole cents.
+
+    Float64 cannot represent most cent fractions exactly, and the running ``acc``
+    drifts as the sum grows — so the rounded shares can lose (or gain) a penny
+    relative to the exact total. An explicit ``+=`` loop is used deliberately:
+    CPython 3.12+ special-cases ``sum()`` of floats with Neumaier compensation,
+    which would mask this drift on 3.12-3.14; plain accumulation is inexact on
+    every supported CPython (3.10-3.14).
+    """
+    total_ratio = float(sum(ratios))
+    total_dollars = total_cents / 100.0
+    shares: List[int] = []
+    acc = 0.0  # BUG: float accumulator drifts; never reconciled to the total
+    for r in ratios:
+        # naive proportional share in dollars, accumulated with float drift
+        acc += total_dollars * (r / total_ratio)
+        # round the *running accumulation* to cents and diff against prior parts
+        running_cents = int(round(acc * 100))
+        shares.append(running_cents - sum(shares))
+    return shares
+
+
+def truncate_no_remainder(total_cents: int, ratios: Tuple[int, ...]) -> List[int]:
+    """BUG: floors every share to whole cents and NEVER redistributes the
+    leftover pennies — the classic 'lost penny' defect.
+
+    Each share is ``floor(total * ratio / total_ratio)``; the floored shares sum
+    to LESS than the total whenever the division is inexact, silently destroying
+    money (a real-world rounding-fraud / reconciliation bug).
+    """
+    total_ratio = sum(ratios)
+    shares: List[int] = []
+    for r in ratios:
+        # BUG: integer floor division drops the fractional cent, never restored
+        shares.append((total_cents * r) // total_ratio)
+    return shares
+
+
+def half_up_overallocates(total_cents: int, ratios: Tuple[int, ...]) -> List[int]:
+    """BUG: rounds each share INDEPENDENTLY with ROUND_HALF_UP instead of
+    distributing the exact remainder — creating pennies from nothing.
+
+    Rounding every share half-up in isolation means the rounded shares can sum to
+    MORE than the total (e.g. three .33-ish shares each round up), so the splitter
+    hands out money that does not exist — a real over-allocation defect.
+    """
+    total_ratio = Decimal(sum(ratios))
+    total = Decimal(total_cents)
+    shares: List[int] = []
+    for r in ratios:
+        exact = total * Decimal(r) / total_ratio
+        # BUG: independent half-up rounding, no remainder reconciliation
+        shares.append(int(exact.quantize(Decimal("1"), rounding=ROUND_HALF_UP)))
+    return shares
+
+
+def prove(impl: Callable[[int, Tuple[int, ...]], List[int]]) -> bool:
+    """True iff ``impl`` MIS-ALLOCATES any frozen corpus case (i.e. the bug is
+    caught): a share diverges from the frozen literal, the wrong number of shares
+    is returned, or the parts fail to sum to the exact total.
+
+    Non-circular + deterministic: every expectation is a literal baked into
+    ALLOC_CORPUS, never read from the oracle; integer/Decimal arithmetic only,
+    no RNG/clock/network/filesystem. An impl that raises on a corpus case counts
+    as caught.
+    """
+    for case in ALLOC_CORPUS:
+        try:
+            shares = impl(case.total_cents, case.ratios)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        # 1. shape must match the frozen expectation
+        if len(shares) != len(case.expected_cents):
+            return True
+        # 2. every share must equal the hand-computed literal
+        if tuple(shares) != case.expected_cents:
+            return True
+        # 3. conservation: the parts must sum to exactly the total
+        if sum(shares) != case.total_cents:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_allocate,
+    mutants=(
+        Mutant("float_accumulation_drift", float_accumulation_drift,
+               "splits the total with an explicit float `acc += share` loop -> "
+               "binary-float rounding drift mis-allocates pennies off the exact total"),
+        Mutant("truncate_no_remainder", truncate_no_remainder,
+               "floors every share and never redistributes the leftover pennies -> "
+               "parts sum to LESS than the total (the classic lost-penny bug)"),
+        Mutant("half_up_overallocates", half_up_overallocates,
+               "rounds each share independently with ROUND_HALF_UP -> parts sum to "
+               "MORE than the total, creating money from nothing"),
+    ),
+    corpus_size=len(ALLOC_CORPUS),
+    kind="oracle_swap",
+    notes="a money splitter must conserve pennies: parts sum to exactly the total, "
+          "with leftover pennies assigned by largest remainder (ties by index)",
+)
+
+
+def list_scenarios() -> List[str]:
+    """Names of the frozen allocation corpus cases (the teeth scenarios)."""
+    return [c.name for c in ALLOC_CORPUS]
+
+
+# ---------------------------------------------------------------------------
+# Report-based self-test — fails loud, reports findings, asserts the teeth.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(as_json: bool = False) -> int:
+    """Exercise the Money invariants that motivate this harness and assert the
+    teeth: Decimal-backed arithmetic (no float drift), banker's rounding,
+    currency safety, and penny-conserving allocation."""
+    report = Report("core/numeric")
+
+    # 1. Core money invariants the harness exists to guard.
+    report.add("0.1 + 0.2 == 0.30 (no float drift)", Decimal("0.30"),
+               Money(0.1).add(Money(0.2)).rounded().amount)
+    report.add("2.5 -> 2 (banker's half-even)", Decimal("2"),
+               Money(Decimal("2.5"), decimal_places=0).rounded().amount)
+    report.add("3.5 -> 4 (banker's half-even)", Decimal("4"),
+               Money(Decimal("3.5"), decimal_places=0).rounded().amount)
     raised = False
     try:
         Money(1, "USD").add(Money(1, "EUR"))
     except CurrencyMismatchError:
         raised = True
-    checks.append(("cross-currency add raises", raised, None))
+    report.record("cross-currency add raises", raised,
+                  detail="adding USD to EUR must raise CurrencyMismatchError")
 
-    failures = [n for n, ok, _ in checks if not ok]
-    for n, ok, _ in checks:
-        print(f"  [{'PASS' if ok else 'FAIL'}] {n}")
-    print(f"\n  {len(checks) - len(failures)}/{len(checks)} checks passed")
-    return 0 if not failures else 1
+    # 2. The correct oracle reproduces every frozen allocation literal exactly,
+    #    and the shares conserve pennies (sum == total).
+    for case in ALLOC_CORPUS:
+        shares = oracle_allocate(case.total_cents, case.ratios)
+        report.add(f"oracle_alloc:{case.name}", list(case.expected_cents), shares,
+                   detail=case.note)
+        report.add(f"oracle_conserves:{case.name}", case.total_cents, sum(shares),
+                   detail="allocated parts must sum to exactly the total")
+
+    # 3. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
 
 
-def main() -> int:
+# ---------------------------------------------------------------------------
+# CLI — default action is the self-test (repo convention).
+# ---------------------------------------------------------------------------
+
+def main(argv: Optional[List[str]] = None) -> int:
     import argparse
     p = argparse.ArgumentParser(description="Numeric / money correctness harness")
-    p.add_argument("--self-test", action="store_true", help="Run built-in scenarios and exit")
+    p.add_argument("--self-test", action="store_true", help="Run built-in checks")
+    p.add_argument("--json", action="store_true",
+                   help="emit machine-readable findings (implies --self-test)")
+    p.add_argument("--list-scenarios", action="store_true",
+                   help="list the frozen allocation corpus case names")
     p.add_argument("--serve", action="store_true", help="Run the mock HTTP server")
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
-    p.add_argument("--verbose", action="store_true")
-    args = p.parse_args()
-    if args.self_test:
-        return _run_self_test(verbose=args.verbose)
+    args = p.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
     if args.serve:
         server = NumericTestServer(port=args.port)
         actual_port = server.start()
@@ -653,10 +885,8 @@ def main() -> int:
             server.stop()
             print("Server stopped.")
         return 0
-    p.print_help()
-    return 0
+    return _run_self_test(as_json=args.json)
 
 
 if __name__ == "__main__":
-    import sys
-    sys.exit(main())
+    _sys.exit(main())

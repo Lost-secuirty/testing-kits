@@ -23,7 +23,15 @@ import sys
 import os
 import traceback
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -1001,18 +1009,425 @@ class DbTestRunner:
 
 
 # ---------------------------------------------------------------------------
+# TEETH: a FROZEN corpus of (operation, input) -> expected final DB state,
+# judged against a PURE in-process SQLite (:memory:) database.
+#
+# A DB-access harness only has teeth if it CATCHES a data-access layer that
+# commits a genuine database defect. The correct access logic above (build SQL
+# with bound `?` placeholders; commit only after every statement in a write
+# path succeeds; roll back the whole unit of work on any error) is reused as the
+# ORACLE. Each Mutant below is a faithful in-process model of a real-world bug:
+#
+#   * string-interpolated SQL (the classic injection hole) — concatenating an
+#     attacker-controlled value into the statement text instead of binding it,
+#     so a crafted `name` like `x'); DROP TABLE users;--` executes a second
+#     statement and destroys the table;
+#   * a write path that does NOT roll back when a later statement fails — the
+#     debit lands but the credit raises, leaving money destroyed (partial write
+#     / leaked open transaction);
+#   * a write path that forgets to COMMIT — the row is invisible to a fresh
+#     reader/connection and is lost when the connection is recycled.
+#
+# An impl is a callable
+#     run(op: str, payload: dict) -> dict      # the observable final DB state
+# that operates on its OWN fresh :memory: connection (zero shared state, no real
+# network/disk, no threads, no clock-dependent behaviour, fully deterministic).
+# prove() drives the impl across the frozen corpus and compares each observed
+# final state to the corpus's LITERAL hand-computed expectation — it NEVER
+# compares an impl's output to the oracle object, so the check is non-circular.
+# prove(impl) is True iff any observed final state diverges (the bug is caught).
+# ---------------------------------------------------------------------------
+
+# A value chosen to be load-bearing: a classic stacked-statement SQL injection
+# payload. A parameterized writer binds it verbatim as ordinary text (table intact,
+# one row stored). A writer that interpolates it into the statement string breaks out
+# of the string literal — `executescript` then either runs the trailing `DROP TABLE`
+# or aborts on the now-malformed first statement; either way no clean row is stored,
+# so the final state diverges from the oracle and the injection sink is caught.
+_INJECTION_NAME = "Robert'); DROP TABLE users;--"
+
+
+@dataclass(frozen=True)
+class DbCase:
+    """One frozen data-access case with a literal, hand-computed final state.
+
+    `op` selects the operation under test; `payload` is its input. `expected`
+    is the full observed final state the correct access layer MUST produce —
+    every key here is asserted against the impl's output.
+    """
+    name: str
+    op: str
+    payload: Dict[str, Any]
+    expected: Dict[str, Any]
+    note: str = ""
+
+
+# Cases chosen so the correct oracle reproduces every expectation AND at least
+# one planted mutant gets each one wrong. All expectations are constants derived
+# by hand from the data-access contract, never read back from the oracle.
+DB_CORPUS: Tuple[DbCase, ...] = (
+    # --- INSERT a benign user: stored verbatim, exactly one row, no surprises.
+    DbCase(
+        "insert_plain_user",
+        op="insert_user",
+        payload={"name": "Alice", "email": "alice@example.com"},
+        expected={"users_table_exists": True, "user_count": 1,
+                  "stored_name": "Alice"},
+        note="a plain insert stores the name verbatim and leaves one row",
+    ),
+    # --- INSERT a SQL-injection payload as data: the parameterized oracle binds
+    #     it as a literal string, so the users table SURVIVES with one row holding
+    #     the payload verbatim. The interpolating mutant breaks out of the literal
+    #     (stacked DROP, or an aborted malformed statement) and stores no clean row,
+    #     so its final state diverges. THIS is the injection teeth case.
+    DbCase(
+        "insert_injection_payload_is_inert",
+        op="insert_user",
+        payload={"name": _INJECTION_NAME, "email": "evil@example.com"},
+        expected={"users_table_exists": True, "user_count": 1,
+                  "stored_name": _INJECTION_NAME},
+        note="a bound `?` keeps an injection payload inert; the table must survive",
+    ),
+    # --- TRANSFER that fails midway: the whole unit of work rolls back, so the
+    #     debited account is restored to its full balance (atomicity). The
+    #     no-rollback mutant leaves the debit applied -> money destroyed.
+    DbCase(
+        "transfer_failure_rolls_back",
+        op="transfer_failing",
+        payload={"from_balance": 1000.0, "amount": 200.0},
+        expected={"from_balance_after": 1000.0},
+        note="a failed transfer must roll back the debit, not destroy money",
+    ),
+    # --- WRITE then read on a SEPARATE connection: a committed write is durable
+    #     and visible to a fresh reader. The forgot-to-commit mutant leaves the
+    #     row invisible to the new connection (and lost on recycle).
+    DbCase(
+        "write_is_committed_and_visible",
+        op="write_then_read_fresh",
+        payload={"name": "Durable", "email": "durable@example.com"},
+        expected={"visible_to_fresh_reader": True, "fresh_count": 1},
+        note="a write must be committed so a fresh connection can see it",
+    ),
+)
+
+
+# --- ORACLE: correct data-access logic, mirroring the harness's own helpers ---
+
+def _fresh_users_conn() -> sqlite3.Connection:
+    """A private in-memory DB with the harness's users schema applied."""
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        "CREATE TABLE users ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  name TEXT NOT NULL,"
+        "  email TEXT NOT NULL UNIQUE,"
+        "  age INTEGER)"
+    )
+    conn.commit()
+    return conn
+
+
+def _users_table_exists(conn: sqlite3.Connection) -> bool:
+    cur = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='users'"
+    )
+    return cur.fetchone() is not None
+
+
+def _user_count(conn: sqlite3.Connection) -> int:
+    cur = conn.execute("SELECT COUNT(*) FROM users")
+    return cur.fetchone()[0]
+
+
+def _stored_name(conn: sqlite3.Connection) -> Optional[str]:
+    cur = conn.execute("SELECT name FROM users ORDER BY id LIMIT 1")
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def oracle_run(op: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Correct data-access layer. Returns the observable final DB state.
+
+    This is the behaviour MockDbHandler / TransactionTester implement, distilled
+    to the load-bearing decisions: bind values with `?`, commit only after every
+    write in the unit succeeds, and roll back the whole unit on any error.
+    """
+    if op == "insert_user":
+        conn = _fresh_users_conn()
+        try:
+            # Correct: the value is BOUND, never concatenated into the SQL text.
+            conn.execute(
+                "INSERT INTO users (name, email) VALUES (?, ?)",
+                (payload["name"], payload["email"]),
+            )
+            conn.commit()
+            return {
+                "users_table_exists": _users_table_exists(conn),
+                "user_count": _user_count(conn) if _users_table_exists(conn) else 0,
+                "stored_name": _stored_name(conn) if _users_table_exists(conn) else None,
+            }
+        finally:
+            conn.close()
+
+    if op == "transfer_failing":
+        conn = sqlite3.connect(":memory:")
+        try:
+            conn.execute(
+                "CREATE TABLE accounts (owner TEXT PRIMARY KEY, balance REAL NOT NULL)"
+            )
+            conn.execute(
+                "INSERT INTO accounts (owner, balance) VALUES ('src', ?)",
+                (payload["from_balance"],),
+            )
+            conn.commit()
+            try:
+                # Debit succeeds, then the credit leg fails. Correct: roll the
+                # WHOLE unit back so the debit is undone (atomicity).
+                conn.execute(
+                    "UPDATE accounts SET balance = balance - ? WHERE owner = 'src'",
+                    (payload["amount"],),
+                )
+                raise ValueError("credit leg failed")
+            except Exception:
+                conn.rollback()
+            cur = conn.execute("SELECT balance FROM accounts WHERE owner = 'src'")
+            return {"from_balance_after": cur.fetchone()[0]}
+        finally:
+            conn.close()
+
+    if op == "write_then_read_fresh":
+        # A shared on-disk-in-name file:: shared-cache DB so a SECOND connection
+        # observes only what the first one COMMITTED. Deterministic + private to
+        # this call (unique name), no real disk file, no network, no threads.
+        uri = f"file:teeth_{id(payload)}?mode=memory&cache=shared"
+        keepalive = sqlite3.connect(uri, uri=True)  # holds the shared DB alive
+        try:
+            writer = sqlite3.connect(uri, uri=True)
+            writer.execute(
+                "CREATE TABLE users ("
+                "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "  name TEXT NOT NULL, email TEXT NOT NULL)"
+            )
+            writer.commit()
+            writer.execute(
+                "INSERT INTO users (name, email) VALUES (?, ?)",
+                (payload["name"], payload["email"]),
+            )
+            writer.commit()  # Correct: commit so the write is durable + visible.
+            writer.close()
+            reader = sqlite3.connect(uri, uri=True)
+            try:
+                cur = reader.execute("SELECT COUNT(*) FROM users")
+                count = cur.fetchone()[0]
+                return {"visible_to_fresh_reader": count > 0, "fresh_count": count}
+            finally:
+                reader.close()
+        finally:
+            keepalive.close()
+
+    raise ValueError(f"unknown op: {op!r}")
+
+
+# --- Planted buggy twins (each models a genuine real-world DB defect) --------
+
+def injection_run(op: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """BUG: builds the INSERT by STRING-INTERPOLATING the value into the SQL
+    text instead of binding it — the textbook SQL-injection hole.
+
+    With a benign name this looks fine, but a stacked-statement payload like
+    ``Robert'); DROP TABLE users;--`` executes the trailing ``DROP TABLE`` and
+    the users table is annihilated. (executescript is used because real
+    injection sinks — string-built queries fed to a multi-statement executor —
+    run every statement the attacker smuggled in.)
+    """
+    if op == "insert_user":
+        conn = _fresh_users_conn()
+        try:
+            name = payload["name"]
+            email = payload["email"]
+            # BUG: attacker-controlled `name` concatenated straight into SQL.
+            sql = (
+                f"INSERT INTO users (name, email) "
+                f"VALUES ('{name}', '{email}')"
+            )
+            try:
+                conn.executescript(sql)
+                conn.commit()
+            except sqlite3.Error:
+                # A malformed injected statement may error; the damage (DROP) has
+                # often already executed by then. Report whatever state remains.
+                pass
+            exists = _users_table_exists(conn)
+            return {
+                "users_table_exists": exists,
+                "user_count": _user_count(conn) if exists else 0,
+                "stored_name": _stored_name(conn) if exists else None,
+            }
+        finally:
+            conn.close()
+    return oracle_run(op, payload)
+
+
+def no_rollback_run(op: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """BUG: a write path that does NOT roll back when a later statement fails.
+
+    The debit is applied, the credit leg raises, but the except-clause swallows
+    the error WITHOUT rolling back (and even commits the partial state). The
+    money debited is destroyed — a partial write / lost-update defect.
+    """
+    if op == "transfer_failing":
+        conn = sqlite3.connect(":memory:")
+        try:
+            conn.execute(
+                "CREATE TABLE accounts (owner TEXT PRIMARY KEY, balance REAL NOT NULL)"
+            )
+            conn.execute(
+                "INSERT INTO accounts (owner, balance) VALUES ('src', ?)",
+                (payload["from_balance"],),
+            )
+            conn.commit()
+            try:
+                conn.execute(
+                    "UPDATE accounts SET balance = balance - ? WHERE owner = 'src'",
+                    (payload["amount"],),
+                )
+                raise ValueError("credit leg failed")
+            except Exception:
+                conn.commit()  # BUG: commit the partial write instead of rollback
+            cur = conn.execute("SELECT balance FROM accounts WHERE owner = 'src'")
+            return {"from_balance_after": cur.fetchone()[0]}
+        finally:
+            conn.close()
+    return oracle_run(op, payload)
+
+
+def no_commit_run(op: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """BUG: a write path that forgets to COMMIT before the connection closes.
+
+    The insert lands only in the writer's private uncommitted transaction; a
+    fresh reader connection never sees it, and it is lost when the writer is
+    recycled. A classic 'works in the same session, vanishes afterward' defect.
+    """
+    if op == "write_then_read_fresh":
+        uri = f"file:teeth_{id(payload)}_nc?mode=memory&cache=shared"
+        keepalive = sqlite3.connect(uri, uri=True)
+        try:
+            writer = sqlite3.connect(uri, uri=True)
+            writer.execute(
+                "CREATE TABLE users ("
+                "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "  name TEXT NOT NULL, email TEXT NOT NULL)"
+            )
+            writer.commit()
+            writer.execute(
+                "INSERT INTO users (name, email) VALUES (?, ?)",
+                (payload["name"], payload["email"]),
+            )
+            # BUG: no commit() — the row stays in the writer's open transaction.
+            writer.close()
+            reader = sqlite3.connect(uri, uri=True)
+            try:
+                cur = reader.execute("SELECT COUNT(*) FROM users")
+                count = cur.fetchone()[0]
+                return {"visible_to_fresh_reader": count > 0, "fresh_count": count}
+            finally:
+                reader.close()
+        finally:
+            keepalive.close()
+    return oracle_run(op, payload)
+
+
+def prove(impl: Callable[[str, Dict[str, Any]], Dict[str, Any]]) -> bool:
+    """True iff data-access ``impl`` MISHANDLES any frozen corpus case (i.e. the
+    planted bug is caught): the observed final DB state diverges from the case's
+    literal expectation, or the impl raises.
+
+    Non-circular + deterministic: every expectation is a literal baked into
+    DB_CORPUS, never read from the oracle; each impl runs on its own fresh
+    in-memory connection with no RNG, clock, real network, real disk, or
+    threading. An impl that raises on a corpus case counts as caught.
+    """
+    for case in DB_CORPUS:
+        try:
+            observed = impl(case.op, dict(case.payload))
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if not isinstance(observed, dict):
+            return True
+        for key, want in case.expected.items():
+            if observed.get(key) != want:
+                return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_run,
+    mutants=(
+        Mutant("string_interpolated_sql_injection", injection_run,
+               "builds SQL by interpolating the value instead of binding it -> a "
+               "stacked-statement payload DROPs the users table (SQL injection)"),
+        Mutant("no_rollback_on_error", no_rollback_run,
+               "write path swallows the error and commits the partial write "
+               "instead of rolling back -> debited money is destroyed"),
+        Mutant("forgot_to_commit", no_commit_run,
+               "write path never commits -> the row is invisible to a fresh "
+               "reader and lost when the connection is recycled"),
+    ),
+    corpus_size=len(DB_CORPUS),
+    kind="oracle_swap",
+    notes="data access must bind values (not interpolate), roll back the whole "
+          "unit of work on error, and commit so writes are durable + visible",
+)
+
+
+def list_scenarios() -> List[str]:
+    """Names of the frozen corpus cases (the teeth scenarios)."""
+    return [c.name for c in DB_CORPUS]
+
+
+# ---------------------------------------------------------------------------
 # Self-test CLI
 # ---------------------------------------------------------------------------
 
 def self_test() -> int:
-    """Run the harness in self-test mode. Returns 0 on success."""
+    """Run the legacy DbTestRunner self-test. Returns 0 on success."""
     runner = DbTestRunner()
     ok = runner.run_all()
     runner.print_report()
     return 0 if ok else 1
 
 
-def main() -> int:
+def _run_self_test(as_json: bool = False, *, legacy: bool = True) -> int:
+    """Report-based self-test: fail loud, report structured findings, assert teeth.
+
+    1. The correct oracle reproduces every frozen corpus expectation.
+    2. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    3. (optional) The legacy DbTestRunner suite over the real harness classes.
+    """
+    report = Report("core/db")
+
+    # 1. The correct oracle agrees with every frozen corpus expectation.
+    for case in DB_CORPUS:
+        observed = oracle_run(case.op, dict(case.payload))
+        for key, want in case.expected.items():
+            report.add(f"oracle:{case.name}:{key}", want,
+                       observed.get(key), detail=case.note)
+
+    # 2. Teeth: the oracle is clean and every planted mutant IS caught.
+    report.assert_teeth(TEETH)
+
+    # 3. Legacy end-to-end suite over the real harness classes (opt-out for
+    #    pure runs; uses threads/timing so it is excluded from the teeth proof).
+    if legacy:
+        runner = DbTestRunner()
+        report.record("legacy_runner_all_pass", runner.run_all(),
+                      detail="DbTestRunner.run_all() over the real harness classes")
+
+    return report.emit(as_json=as_json)
+
+
+def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Database Test Harness")
     parser.add_argument(
         "--self-test",
@@ -1020,20 +1435,35 @@ def main() -> int:
         help="Run internal self-tests and exit",
     )
     parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit machine-readable findings (implies --self-test)",
+    )
+    parser.add_argument(
+        "--list-scenarios",
+        action="store_true",
+        help="list the frozen corpus case names",
+    )
+    parser.add_argument(
+        "--no-legacy",
+        action="store_true",
+        help="skip the legacy DbTestRunner suite (teeth/oracle checks only)",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable verbose logging",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    if args.self_test:
-        return self_test()
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
 
-    # Default: run self-test
-    return self_test()
+    return _run_self_test(as_json=args.json, legacy=not args.no_legacy)
 
 
 if __name__ == "__main__":

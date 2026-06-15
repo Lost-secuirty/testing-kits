@@ -18,8 +18,10 @@ import threading
 import time
 import unittest
 
+from harnesses._teeth import verify
 from harnesses.core.db_test_harness import (
     MIGRATIONS,
+    TEETH,
     ConnectionPool,
     ConnectionPoolExhausted,
     ConnectionPoolMonitor,
@@ -29,6 +31,8 @@ from harnesses.core.db_test_harness import (
     MockDbHandler,
     QueryPerformanceTracker,
     TransactionTester,
+    oracle_run,
+    prove,
 )
 
 
@@ -457,6 +461,31 @@ class TestDbTestRunnerIntegration(unittest.TestCase):
         runner = DbTestRunner()
         ok = runner.run_all()
         self.assertTrue(ok, "DbTestRunner.run_all() should return True when all tests pass")
+
+
+# ---------------------------------------------------------------------------
+# 11. Teeth: the harness must catch a real planted database bug.
+# ---------------------------------------------------------------------------
+
+class TestTeeth(unittest.TestCase):
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct data-access layer must NOT be flagged by prove.
+        self.assertFalse(prove(oracle_run))
+
+    def test_every_mutant_is_caught(self):
+        # Each planted defect must be individually caught.
+        self.assertEqual(len(TEETH.mutants), 3)
+        for mutant in TEETH.mutants:
+            self.assertTrue(prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
 
 
 # ---------------------------------------------------------------------------

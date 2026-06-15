@@ -10,6 +10,7 @@ import sys
 import time
 import unittest
 
+from harnesses._teeth import verify
 from harnesses.core.fuzz_test_harness import (
     # Constants
     MIN_INT, MAX_INT, SQL_INJECTION_STRINGS, XSS_STRINGS,
@@ -28,6 +29,8 @@ from harnesses.core.fuzz_test_harness import (
     compute_entropy, is_valid_utf8, truncate_repr,
     generate_seed_sequence, quick_fuzz, explore_boundaries,
     _make_fingerprint,
+    # Teeth
+    TEETH, prove, oracle_target,
 )
 
 
@@ -714,6 +717,37 @@ class TestHTTPFuzzClient(unittest.TestCase):
             client = HTTPFuzzClient(server.base_url, seed=42, timeout=3.0)
             results = client.fuzz_bodies(num=5)
             self.assertEqual(len(results), 5)
+
+
+# ─── Tests: Teeth ─────────────────────────────────────────────────────────────
+
+class TestTeeth(unittest.TestCase):
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"],
+                        f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The robust oracle target must NOT be flagged by prove.
+        self.assertFalse(prove(oracle_target))
+        self.assertFalse(prove(TEETH.oracle))
+
+    def test_every_mutant_is_caught(self):
+        # Each planted defect must be individually caught.
+        self.assertEqual(len(TEETH.mutants), 3)
+        for mutant in TEETH.mutants:
+            self.assertTrue(prove(mutant.impl),
+                            f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
+
+    def test_prove_is_deterministic(self):
+        # prove() replays a fixed input list with no RNG -> identical verdicts.
+        for impl in (TEETH.oracle, *(m.impl for m in TEETH.mutants)):
+            self.assertEqual(prove(impl), prove(impl))
 
 
 if __name__ == "__main__":
