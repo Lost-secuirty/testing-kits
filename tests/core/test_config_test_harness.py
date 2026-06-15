@@ -10,6 +10,7 @@ import unittest
 from urllib.request import urlopen, Request
 from urllib.error import URLError
 
+from harnesses._teeth import verify
 from harnesses.core.config_test_harness import (
     FieldSchema,
     ConfigSchema,
@@ -19,6 +20,9 @@ from harnesses.core.config_test_harness import (
     SensitiveValueDetector,
     ConfigReport,
     MockConfigServer,
+    TEETH,
+    prove,
+    load_config,
 )
 
 
@@ -602,6 +606,32 @@ class TestIntegration(unittest.TestCase):
         detector.scan(config, report=report)
         self.assertIn("password", report.warnings)
         self.assertTrue(report.is_valid)  # warnings don't invalidate
+
+
+# ---------------------------------------------------------------------------
+# Teeth — the harness must catch a real planted config bug (campaign contract).
+# ---------------------------------------------------------------------------
+
+class TestTeeth(unittest.TestCase):
+    """The harness must catch a real planted bug (the campaign teeth contract)."""
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct loader must NOT be flagged by prove.
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+        self.assertFalse(prove(load_config))
+
+    def test_every_mutant_is_caught(self):
+        self.assertEqual(len(TEETH.mutants), 3)
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
 
 
 if __name__ == "__main__":

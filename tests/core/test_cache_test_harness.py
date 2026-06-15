@@ -21,7 +21,9 @@ import urllib.request
 import urllib.error
 from urllib.request import urlopen, Request
 
+from harnesses._teeth import verify
 from harnesses.core.cache_test_harness import (
+    TEETH,
     Cache,
     BuggyCache,
     CacheEntry,
@@ -1089,6 +1091,25 @@ class TestCacheThreadSafety(unittest.TestCase):
         # Stats should be non-negative
         self.assertGreaterEqual(self.cache.stats.hits, 0)
         self.assertGreaterEqual(self.cache.stats.misses, 0)
+
+
+class TestTeeth(unittest.TestCase):
+    """The harness must catch a real planted bug (the campaign teeth contract)."""
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+
+    def test_every_mutant_is_caught(self):
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
 
 
 if __name__ == "__main__":

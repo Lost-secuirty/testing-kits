@@ -2,13 +2,18 @@
 Contract / Interface Test Harness (Harness 14 of 36)
 Validates function contracts, interface compliance, and invariants.
 Pure stdlib, zero external dependencies.
+
+Self-test:
+  python harnesses/core/contract_test_harness.py --self-test
 """
 
+import argparse
 import enum
 import inspect
 import json
 import logging
 import socket
+import sys
 import threading
 import time
 import traceback
@@ -16,6 +21,13 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 from urllib.parse import urlparse, parse_qs
+
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -758,8 +770,8 @@ def _find_free_port() -> int:
 # Module-level demo / smoke test
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
-    # Quick smoke test
+def _demo() -> None:
+    """Quick interactive smoke test of the contract + mock-server machinery."""
     def divide(a: float, b: float) -> float:
         return a / b
 
@@ -785,3 +797,436 @@ if __name__ == "__main__":
     time.sleep(0.1)
     server.stop()
     print("Done.")
+
+
+# ===========================================================================
+# TEETH: a backward-compatibility contract checker + planted buggy twins.
+#
+# The harness's real subject is *contract enforcement*: does a checker catch a
+# violation of a declared contract/invariant? The teeth model the single most
+# common contract-testing failure mode in the wild — a consumer-driven /
+# schema-compatibility checker that SILENTLY ACCEPTS a backward-incompatible
+# change (a removed required field, a narrowed/changed type, a newly-required
+# field a producer didn't have to send before, or a tightened enum).
+#
+# The oracle is the CORRECT checker. Each Mutant is a checker that misses one
+# real class of breaking change. prove() judges a checker's verdict against a
+# FROZEN corpus of (old_contract, new_contract) -> expected "compatible" |
+# "incompatible" literals — never by comparing to the oracle object at runtime,
+# so the check is non-circular. prove(impl) is True iff impl's verdict differs
+# from the frozen expectation on any case (i.e. the planted bug is caught).
+#
+# The oracle is also wired through the harness's own Contract/InvariantChecker
+# machinery in the self-test so the existing logic is exercised, not bypassed.
+# ===========================================================================
+
+# A "contract" here is a tiny schema describing the fields a producer promises a
+# consumer. Each field has a declared type and a required flag, plus an optional
+# enum of allowed literal values. Backward compatibility is defined from the
+# CONSUMER's standpoint (the party already coded against `old`):
+#
+#   COMPATIBLE changes (a consumer keeps working):
+#     - adding a new OPTIONAL field
+#     - relaxing a required field to optional
+#     - widening an enum (allowing MORE values)
+#     - keeping a field's type and requiredness the same
+#
+#   INCOMPATIBLE changes (a consumer breaks):
+#     - removing a field the consumer reads
+#     - changing a field's declared type
+#     - making a previously-optional field REQUIRED (producer may omit it... but
+#       more importantly a NEW required field forces every producer to send it)
+#     - adding a NEW required field
+#     - narrowing an enum (removing a previously-allowed value)
+
+_TYPES = ("string", "number", "boolean", "object", "array")
+
+
+@dataclass(frozen=True)
+class FieldSpec:
+    """One field in a contract schema."""
+    type: str
+    required: bool = True
+    enum: Optional[Tuple[Any, ...]] = None  # allowed literal values, if constrained
+
+
+# A contract schema maps field name -> FieldSpec.
+ContractSchema = Dict[str, FieldSpec]
+
+
+def check_compatibility(old: ContractSchema, new: ContractSchema) -> bool:
+    """ORACLE: return True iff ``new`` is backward-compatible with ``old``.
+
+    Backward-compatible == a consumer already coded against ``old`` keeps working
+    against a producer that now emits ``new``. This is the correct contract
+    invariant the harness exists to enforce.
+    """
+    # 1. No field the consumer reads may disappear.
+    for name in old:
+        if name not in new:
+            return False
+
+    for name, new_spec in new.items():
+        old_spec = old.get(name)
+
+        if old_spec is None:
+            # A brand-new field is only safe if it is OPTIONAL — a new required
+            # field forces every existing producer to start sending it.
+            if new_spec.required:
+                return False
+            continue
+
+        # 2. A field's type may not change.
+        if new_spec.type != old_spec.type:
+            return False
+
+        # 3. A previously-optional field may not become required.
+        if new_spec.required and not old_spec.required:
+            return False
+
+        # 4. An enum may be WIDENED but not NARROWED — every value the consumer
+        #    might already accept must still be allowed. Adding an enum to a
+        #    previously unconstrained field also narrows it.
+        if old_spec.enum is None and new_spec.enum is not None:
+            return False
+        if old_spec.enum is not None:
+            if new_spec.enum is None:
+                # Constraint dropped entirely => still allows the old values.
+                continue
+            removed = set(old_spec.enum) - set(new_spec.enum)
+            if removed:
+                return False
+
+    return True
+
+
+# --- Planted buggy twins (each misses one real class of breaking change) -----
+
+def check_ignores_removed_field(old: ContractSchema, new: ContractSchema) -> bool:
+    """BUG: never checks for removed fields.
+
+    Models a compatibility gate that only validates fields present in the NEW
+    schema and forgets that a consumer reading a now-deleted field will break.
+    A classic real-world omission in home-grown schema-diff tooling.
+    """
+    for name, new_spec in new.items():
+        old_spec = old.get(name)
+        if old_spec is None:
+            if new_spec.required:
+                return False
+            continue
+        if new_spec.type != old_spec.type:
+            return False
+        if new_spec.required and not old_spec.required:
+            return False
+        if old_spec.enum is not None and new_spec.enum is not None:
+            if set(old_spec.enum) - set(new_spec.enum):
+                return False
+    return True  # BUG: removed fields never make it incompatible
+
+
+def check_ignores_type_change(old: ContractSchema, new: ContractSchema) -> bool:
+    """BUG: treats a field type change as compatible.
+
+    Models a checker that compares only field *names* (presence/requiredness)
+    and never the declared type, so a producer switching ``id`` from number to
+    string sails through and breaks every consumer that parses it as a number.
+    """
+    for name in old:
+        if name not in new:
+            return False
+    for name, new_spec in new.items():
+        old_spec = old.get(name)
+        if old_spec is None:
+            if new_spec.required:
+                return False
+            continue
+        # BUG: type mismatch is never flagged.
+        if new_spec.required and not old_spec.required:
+            return False
+        if old_spec.enum is not None and new_spec.enum is not None:
+            if set(old_spec.enum) - set(new_spec.enum):
+                return False
+    return True
+
+
+def check_allows_new_required_field(old: ContractSchema, new: ContractSchema) -> bool:
+    """BUG: accepts a newly-added REQUIRED field as compatible.
+
+    Models the off-by-one in a diff tool that only guards EXISTING fields and
+    forgets that adding a brand-new required field forces every producer to
+    start emitting it — a backward-incompatible change that this checker passes.
+    """
+    for name in old:
+        if name not in new:
+            return False
+    for name, new_spec in new.items():
+        old_spec = old.get(name)
+        if old_spec is None:
+            # BUG: a new required field is silently accepted.
+            continue
+        if new_spec.type != old_spec.type:
+            return False
+        if new_spec.required and not old_spec.required:
+            return False
+        if old_spec.enum is not None and new_spec.enum is not None:
+            if set(old_spec.enum) - set(new_spec.enum):
+                return False
+    return True
+
+
+# --- Frozen corpus: (old, new) -> expected compatibility verdict -------------
+
+@dataclass(frozen=True)
+class CompatCase:
+    name: str
+    old: ContractSchema
+    new: ContractSchema
+    expected_compatible: bool  # literal, hand-derived from the contract rules
+    note: str = ""
+
+
+COMPAT_CASES: Tuple[CompatCase, ...] = (
+    # --- compatible changes the oracle must NOT flag ----------------------
+    CompatCase(
+        "identical_schema",
+        {"id": FieldSpec("number"), "name": FieldSpec("string")},
+        {"id": FieldSpec("number"), "name": FieldSpec("string")},
+        expected_compatible=True,
+        note="no change is always compatible",
+    ),
+    CompatCase(
+        "add_optional_field",
+        {"id": FieldSpec("number")},
+        {"id": FieldSpec("number"), "nickname": FieldSpec("string", required=False)},
+        expected_compatible=True,
+        note="adding an optional field is safe",
+    ),
+    CompatCase(
+        "relax_required_to_optional",
+        {"id": FieldSpec("number"), "email": FieldSpec("string", required=True)},
+        {"id": FieldSpec("number"), "email": FieldSpec("string", required=False)},
+        expected_compatible=True,
+        note="loosening a requirement is safe for the consumer",
+    ),
+    CompatCase(
+        "widen_enum",
+        {"role": FieldSpec("string", enum=("admin", "user"))},
+        {"role": FieldSpec("string", enum=("admin", "user", "guest"))},
+        expected_compatible=True,
+        note="allowing more enum values is safe",
+    ),
+    # --- incompatible changes the oracle MUST flag ------------------------
+    CompatCase(
+        "remove_required_field",
+        {"id": FieldSpec("number"), "name": FieldSpec("string")},
+        {"id": FieldSpec("number")},
+        expected_compatible=False,
+        note="removing a field a consumer reads breaks it (catches ignores_removed)",
+    ),
+    CompatCase(
+        "change_field_type",
+        {"id": FieldSpec("number")},
+        {"id": FieldSpec("string")},
+        expected_compatible=False,
+        note="changing a declared type breaks parsers (catches ignores_type_change)",
+    ),
+    CompatCase(
+        "add_new_required_field",
+        {"id": FieldSpec("number")},
+        {"id": FieldSpec("number"), "tenant": FieldSpec("string", required=True)},
+        expected_compatible=False,
+        note="a new required field forces all producers (catches allows_new_required)",
+    ),
+    CompatCase(
+        "narrow_enum",
+        {"role": FieldSpec("string", enum=("admin", "user", "guest"))},
+        {"role": FieldSpec("string", enum=("admin", "user"))},
+        expected_compatible=False,
+        note="removing an allowed enum value rejects payloads the consumer sent",
+    ),
+    CompatCase(
+        "constrain_unbounded_enum",
+        {"role": FieldSpec("string")},
+        {"role": FieldSpec("string", enum=("admin", "user"))},
+        expected_compatible=False,
+        note="adding an enum to a previously unconstrained field narrows it",
+    ),
+    CompatCase(
+        "make_optional_required",
+        {"id": FieldSpec("number"), "phone": FieldSpec("string", required=False)},
+        {"id": FieldSpec("number"), "phone": FieldSpec("string", required=True)},
+        expected_compatible=False,
+        note="promoting an optional field to required is breaking",
+    ),
+)
+
+
+def prove(impl: Callable[[ContractSchema, ContractSchema], bool]) -> bool:
+    """True iff checker ``impl`` MISJUDGES any frozen corpus case.
+
+    Non-circular: each verdict is compared against the case's frozen literal
+    ``expected_compatible`` (never against the oracle object). A checker that
+    raises on a corpus case counts as caught. Deterministic and side-effect
+    free: no RNG, clock, network, or filesystem I/O.
+    """
+    for case in COMPAT_CASES:
+        try:
+            verdict = impl(case.old, case.new)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if bool(verdict) != case.expected_compatible:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=check_compatibility,
+    mutants=(
+        Mutant("ignores_removed_field", check_ignores_removed_field,
+               "compatibility checker never flags a removed field a consumer reads"),
+        Mutant("ignores_type_change", check_ignores_type_change,
+               "compatibility checker accepts a backward-incompatible field type change"),
+        Mutant("allows_new_required_field", check_allows_new_required_field,
+               "compatibility checker accepts a newly-added required field as compatible"),
+    ),
+    corpus_size=len(COMPAT_CASES),
+    kind="oracle_swap",
+    notes="a removed field, a changed type, and a new required field must all be incompatible",
+)
+
+
+def list_scenarios() -> List[str]:
+    """Names of the frozen compatibility corpus cases (the teeth scenarios)."""
+    return [c.name for c in COMPAT_CASES]
+
+
+# ---------------------------------------------------------------------------
+# Oracle wired through the harness's OWN Contract / InvariantChecker machinery,
+# so the self-test exercises the existing contract-enforcement logic rather than
+# only the standalone compatibility function.
+# ---------------------------------------------------------------------------
+
+def _oracle_via_contract(case: CompatCase) -> bool:
+    """Run check_compatibility through a Contract (precond + return-type guard)
+    and an InvariantChecker, returning the compatibility verdict.
+
+    Demonstrates the harness's own primitives enforcing the checker's contract:
+    a precondition on input shape, a bool return-type guard, and an invariant
+    that the verdict matches what a direct call produces.
+    """
+    guarded = Contract(
+        check_compatibility,
+        preconditions=[Condition(lambda b: isinstance(b["old"], dict)
+                                 and isinstance(b["new"], dict),
+                                 "old and new must be dict schemas")],
+        return_type=bool,
+    )
+    verdict = guarded(case.old, case.new)
+
+    inv = InvariantChecker()
+    inv.add_invariant(lambda obj: obj["verdict"] == check_compatibility(obj["old"], obj["new"]),
+                      "Contract-guarded verdict equals direct verdict")
+    inv.check_sequence(
+        {"old": case.old, "new": case.new, "verdict": verdict},
+        [("verify", lambda o: None)],
+    )
+    if not inv.all_hold():
+        raise AssertionError("contract-guarded oracle diverged from direct oracle")
+    return verdict
+
+
+# ---------------------------------------------------------------------------
+# Report-based self-test — fails loud, reports findings, asserts the teeth.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(as_json: bool = False, *, networked: bool = True) -> int:
+    """Report-based self-test.
+
+    1. The correct oracle matches every frozen compatibility expectation, both
+       directly and routed through the harness's Contract/InvariantChecker.
+    2. Teeth: the oracle is clean and every planted mutant is caught.
+    3. (optional) A live socket smoke test of MockContractServer.
+    """
+    report = Report("core/contract")
+
+    # 1. The correct oracle agrees with every frozen expectation.
+    for case in COMPAT_CASES:
+        report.add(f"oracle:{case.name}",
+                   case.expected_compatible,
+                   check_compatibility(case.old, case.new),
+                   detail=case.note)
+        # ...and the same verdict when routed through the harness's own Contract.
+        report.add(f"oracle_via_contract:{case.name}",
+                   case.expected_compatible,
+                   _oracle_via_contract(case),
+                   detail="routed through Contract + InvariantChecker")
+
+    # 2. Teeth: oracle is not flagged and every planted mutant IS flagged.
+    report.assert_teeth(TEETH)
+
+    # 3. Live mock-server smoke test (uses a socket; opt-out for pure runs).
+    if networked:
+        report.record("mock_server_smoke", _mock_server_smoke(),
+                      detail="MockContractServer /health over a socket")
+
+    return report.emit(as_json=as_json)
+
+
+def _mock_server_smoke() -> bool:
+    """Start MockContractServer, hit /health and /check_contract, return ok."""
+    import urllib.request
+    server = MockContractServer()
+    server.start()
+    try:
+        base = server.base_url
+        with urllib.request.urlopen(f"{base}/health", timeout=5) as resp:
+            health = json.loads(resp.read())
+        if health.get("status") != "ok":
+            return False
+        payload = json.dumps({"function": "divide", "args": [1, 0],
+                              "violation": {"type": "PRECONDITION"}}).encode()
+        req = urllib.request.Request(
+            f"{base}/check_contract", data=payload,
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            rec = json.loads(resp.read())
+        return rec.get("status") == "recorded"
+    except Exception:  # noqa: BLE001
+        return False
+    finally:
+        server.stop()
+
+
+# ---------------------------------------------------------------------------
+# CLI — default action is the self-test (repo convention).
+# ---------------------------------------------------------------------------
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Contract / interface controls")
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true",
+                        help="list the frozen compatibility corpus case names")
+    parser.add_argument("--no-network", action="store_true",
+                        help="skip the live socket smoke test (teeth/oracle checks only)")
+    parser.add_argument("--demo", action="store_true",
+                        help="run the interactive contract + mock-server demo")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
+    if args.demo:
+        _demo()
+        return 0
+    if args.self_test or args.json:
+        return _run_self_test(as_json=args.json, networked=not args.no_network)
+    # Default: run the self-test (repo convention).
+    return _run_self_test(networked=not args.no_network)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

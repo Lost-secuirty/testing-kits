@@ -5,6 +5,7 @@ Pure stdlib, zero external dependencies.
 
 from __future__ import annotations
 
+import argparse
 import base64
 import json
 import threading
@@ -13,8 +14,15 @@ import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse, parse_qs
+
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -474,3 +482,250 @@ def demonstrate_offset_insert_bug(store: BackingStore, limit: int = 3) -> Dict[s
         "inserted_id": new_id,
         "page2_ids_bugged": page2_ids_bugged,
     }
+
+
+# ---------------------------------------------------------------------------
+# TEETH: a FROZEN dataset + page-request script with a literal expected
+# concatenation, judged against pure keyset-paging implementations.
+#
+# A paging impl is a function ``page(records, after, limit) -> (items, next_after)``
+# where ``records`` is the (already sorted) full dataset, ``after`` is the keyset
+# position to resume strictly after (None on the first page), and ``next_after`` is
+# the cursor key to resume from on the next call (None when exhausted). prove()
+# drives the impl across the frozen sequence of page sizes, concatenates the pages,
+# and checks the result against a LITERAL expected id list baked into the corpus.
+# It is NON-CIRCULAR: expectations are hand-computed constants, never read back
+# from the oracle object. prove(impl) is True iff the impl diverges (the planted
+# boundary bug is caught). Pure + deterministic: no clock/network/filesystem I/O,
+# no RNG. The contract a correct pager must hold: every dataset item appears
+# exactly once across all pages, in stable order, with no dup/skip at boundaries.
+# ---------------------------------------------------------------------------
+
+# A frozen dataset: ids 1..7 with strictly increasing (sort_key, id) keys. The
+# uneven page-size script (3, 2, 2, 2) crosses every page boundary, including the
+# exact-multiple final boundary, so an off-by-one at the seam is observable.
+_FROZEN_RECORDS: Tuple[Dict[str, Any], ...] = tuple(
+    {"id": i, "sort_key": i * 10, "data": f"item-{i}"} for i in range(1, 8)
+)
+# The page sizes requested, in order. Sum (3+2+2) reaches the end at 7 items; the
+# traversal stops when an impl reports no next cursor.
+_PAGE_SCRIPT: Tuple[int, ...] = (3, 2, 2, 2)
+# The hand-computed, literal expected concatenation: each of ids 1..7 exactly once
+# in stable ascending order. This is the oracle the impl is judged against — a
+# constant, NOT derived from any paginator at runtime.
+_EXPECTED_IDS: Tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7)
+
+
+def _key_of(record: Dict[str, Any]) -> Tuple[Any, Any]:
+    return (record["sort_key"], record["id"])
+
+
+def oracle_page(
+    records: List[Dict[str, Any]],
+    after: Optional[Tuple[Any, Any]],
+    limit: int,
+) -> Tuple[List[Dict[str, Any]], Optional[Tuple[Any, Any]]]:
+    """Correct keyset page: items strictly after `after`, sliced to `limit`.
+
+    Returns (items, next_after). next_after is the key of the last returned item
+    when more records remain, else None. This is the reference behaviour the
+    harness's CursorPaginator implements; reused here as the ORACLE.
+    """
+    if after is None:
+        candidates = records
+    else:
+        candidates = [r for r in records if _key_of(r) > after]
+    items = candidates[:limit]
+    has_next = len(candidates) > limit
+    next_after = _key_of(items[-1]) if (has_next and items) else None
+    return items, next_after
+
+
+# --- Planted buggy twins (each models a real keyset-pagination defect) ------
+
+def page_skip_boundary(
+    records: List[Dict[str, Any]],
+    after: Optional[Tuple[Any, Any]],
+    limit: int,
+) -> Tuple[List[Dict[str, Any]], Optional[Tuple[Any, Any]]]:
+    """BUG: resumes STRICTLY after the wrong key — uses the key of the item one
+    past the page (a fetch-then-advance off-by-one), so the first item of every
+    subsequent page is silently skipped.
+
+    Models the classic keyset off-by-one where the next-cursor is taken from the
+    record *after* the page's last item instead of the last item itself, dropping
+    one record at each page boundary.
+    """
+    if after is None:
+        candidates = records
+    else:
+        candidates = [r for r in records if _key_of(r) > after]
+    items = candidates[:limit]
+    has_next = len(candidates) > limit
+    # BUG: advance past the FIRST item beyond the page, not the last item in it.
+    next_after = _key_of(candidates[limit]) if has_next else None
+    return items, next_after
+
+
+def page_inclusive_boundary(
+    records: List[Dict[str, Any]],
+    after: Optional[Tuple[Any, Any]],
+    limit: int,
+) -> Tuple[List[Dict[str, Any]], Optional[Tuple[Any, Any]]]:
+    """BUG: resumes at records >= the cursor (inclusive) instead of strictly
+    after it, so the boundary item is returned again on the next page.
+
+    Models the very common `>=` vs `>` keyset error, which duplicates the last
+    item of each page as the first item of the following page.
+    """
+    if after is None:
+        candidates = records
+    else:
+        # BUG: `>=` re-includes the cursor record itself.
+        candidates = [r for r in records if _key_of(r) >= after]
+    items = candidates[:limit]
+    has_next = len(candidates) > limit
+    next_after = _key_of(items[-1]) if (has_next and items) else None
+    return items, next_after
+
+
+def page_stuck_cursor(
+    records: List[Dict[str, Any]],
+    after: Optional[Tuple[Any, Any]],
+    limit: int,
+) -> Tuple[List[Dict[str, Any]], Optional[Tuple[Any, Any]]]:
+    """BUG: never advances the cursor — next_after is always None even when more
+    records remain, so traversal returns only the first page and loses the tail.
+
+    Models a pager that forgets to emit a next-page token (or sets has_next but
+    no cursor), silently truncating the result set after page one.
+    """
+    if after is None:
+        candidates = records
+    else:
+        candidates = [r for r in records if _key_of(r) > after]
+    items = candidates[:limit]
+    # BUG: never report a next cursor — position is lost after the first page.
+    return items, None
+
+
+def _traverse(
+    impl: Callable[..., Tuple[List[Dict[str, Any]], Optional[Tuple[Any, Any]]]],
+) -> List[int]:
+    """Drive `impl` across the frozen page script; return the concatenated ids.
+
+    Pure + deterministic: walks _FROZEN_RECORDS (pre-sorted) using each scripted
+    limit in turn, following the impl's own next-cursor, stopping when the impl
+    reports no next cursor or the script is exhausted. A guard caps the loop so a
+    cursor-that-never-advances bug cannot hang prove()."""
+    records = sorted(_FROZEN_RECORDS, key=_key_of)
+    after: Optional[Tuple[Any, Any]] = None
+    collected: List[int] = []
+    max_pages = len(_PAGE_SCRIPT)
+    for i in range(max_pages):
+        limit = _PAGE_SCRIPT[i]
+        items, next_after = impl(records, after, limit)
+        collected.extend(r["id"] for r in items)
+        if next_after is None:
+            break
+        after = next_after
+    return collected
+
+
+def prove(impl: Callable[..., Tuple[List[Dict[str, Any]], Optional[Tuple[Any, Any]]]]) -> bool:
+    """True iff paging `impl` diverges from the frozen expected concatenation
+    (i.e. the planted boundary bug is CAUGHT).
+
+    Non-circular: the traversal is compared to the literal _EXPECTED_IDS constant,
+    never to the oracle object. An impl that raises while paging counts as caught.
+    The contract checked: the concatenation of pages equals the dataset exactly
+    once, in order — so any skip, duplicate, or lost-position at a page boundary
+    makes the lists differ.
+    """
+    try:
+        collected = _traverse(impl)
+    except Exception:  # noqa: BLE001 — raising while paging counts as caught
+        return True
+    return tuple(collected) != _EXPECTED_IDS
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_page,
+    mutants=(
+        Mutant("skip_boundary_item", page_skip_boundary,
+               "next-cursor taken from the item AFTER the page -> skips one record per boundary"),
+        Mutant("duplicate_boundary_item", page_inclusive_boundary,
+               "resumes at `>=` cursor instead of `>` -> duplicates the boundary item across pages"),
+        Mutant("stuck_cursor", page_stuck_cursor,
+               "never emits a next cursor -> traversal truncates after the first page"),
+    ),
+    corpus_size=len(_EXPECTED_IDS),
+    kind="oracle_swap",
+    notes="page concatenation must equal the frozen dataset exactly once, in order, "
+          "with no dup/skip at boundaries",
+)
+
+
+def list_scenarios() -> List[str]:
+    """Names of the planted teeth mutants (the boundary scenarios)."""
+    return [m.name for m in TEETH.mutants]
+
+
+# ---------------------------------------------------------------------------
+# Cross-check: the harness's own CursorPaginator must traverse the frozen
+# dataset to exactly the expected concatenation (proves the oracle models the
+# real paginator, not just an isolated function).
+# ---------------------------------------------------------------------------
+
+def _cursor_paginator_ids(limit: int = 3) -> List[int]:
+    store = BackingStore()
+    for r in _FROZEN_RECORDS:
+        store.add(dict(r))
+    items, _results = CursorPaginator(store).all_pages(limit=limit)
+    return [r["id"] for r in items]
+
+
+# ---------------------------------------------------------------------------
+# Report-based self-test — fails loud, reports findings, asserts the teeth.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(as_json: bool = False) -> int:
+    report = Report("core/pagination")
+
+    # 1. The correct oracle reproduces the frozen expected concatenation exactly.
+    report.add("oracle_concatenation", list(_EXPECTED_IDS), _traverse(oracle_page))
+
+    # 2. The harness's real CursorPaginator traverses the same dataset identically
+    #    (every item once, in order) for several page sizes — no dup/skip.
+    for lim in (1, 2, 3, 7):
+        report.add(f"cursor_paginator_traversal:limit={lim}",
+                   list(_EXPECTED_IDS), _cursor_paginator_ids(limit=lim))
+
+    # 3. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
+
+
+# ---------------------------------------------------------------------------
+# CLI — default action is the self-test (repo convention).
+# ---------------------------------------------------------------------------
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Pagination / cursor consistency controls")
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true",
+                        help="list the planted teeth boundary scenarios")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
+    return _run_self_test(as_json=args.json)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -23,6 +23,13 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -525,6 +532,279 @@ def reset_server_state() -> None:
 
 
 # ---------------------------------------------------------------------------
+# TEETH: in-process oracle handler + planted buggy twins.
+#
+# The networked MockApiHandler above is exercised over a real socket by the
+# legacy self-test and the paired unittest. The teeth, by contrast, run a PURE
+# in-process model of the same REST contract so the gate can verify "this
+# harness catches a real API bug" with zero clock/network/filesystem I/O and
+# full determinism (no autoincrement id race, no port binding).
+#
+# A handler impl maps a frozen ApiRequest to a HandledResponse. The oracle is
+# the correct handler; each Mutant is a faithful real-world API defect. The
+# auditor reuses the harness's own ResponseValidator/SchemaChecker to judge a
+# response against the case's FROZEN expectations -- prove() never compares an
+# impl to the oracle object, so the check is non-circular.
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ApiRequest:
+    method: str
+    path: str
+    body: Optional[Any] = None
+    headers: Optional[Tuple[Tuple[str, str], ...]] = None
+
+    def header(self, key: str) -> Optional[str]:
+        if not self.headers:
+            return None
+        for k, v in self.headers:
+            if k.lower() == key.lower():
+                return v
+        return None
+
+
+@dataclass(frozen=True)
+class HandledResponse:
+    status: int
+    body: Any = None
+    headers: Tuple[Tuple[str, str], ...] = ()
+
+    def header(self, key: str) -> Optional[str]:
+        for k, v in self.headers:
+            if k.lower() == key.lower():
+                return v
+        return None
+
+
+# The handler operates over a tiny in-memory store seeded deterministically so
+# the corpus expectations are stable across runs (no global mutable id counter).
+_SEED_ITEMS: Dict[int, Dict[str, Any]] = {
+    1: {"id": 1, "name": "seed-widget", "value": 7},
+}
+
+
+def oracle_handle(req: ApiRequest) -> HandledResponse:
+    """Correct in-process REST handler — the contract MockApiHandler implements.
+
+    A new item is always assigned id 2 (the store is seeded with id 1) so create
+    responses are deterministic and the corpus can freeze the Location header.
+    """
+    store = dict(_SEED_ITEMS)
+    if req.method == "GET" and req.path == "/health":
+        return HandledResponse(200, {"status": "ok"},
+                               (("Content-Type", "application/json"),))
+
+    if req.method == "POST" and req.path == "/items":
+        data = req.body if isinstance(req.body, dict) else {}
+        if "name" not in data:  # required field
+            return HandledResponse(422, {"error": "name is required"},
+                                   (("Content-Type", "application/json"),))
+        new_id = max(store) + 1
+        item = {"id": new_id, "name": data["name"], "value": data.get("value", 0)}
+        return HandledResponse(
+            201, item,
+            (("Content-Type", "application/json"), ("Location", f"/items/{new_id}")),
+        )
+
+    m = re.match(r"^/items/(\d+)$", req.path)
+    if req.method == "GET" and m:
+        item_id = int(m.group(1))
+        if item_id in store:
+            return HandledResponse(200, store[item_id],
+                                   (("Content-Type", "application/json"),))
+        return HandledResponse(404, {"error": "not found"},
+                               (("Content-Type", "application/json"),))
+
+    if req.method == "DELETE" and m:
+        item_id = int(m.group(1))
+        if item_id in store:
+            return HandledResponse(204, None, ())
+        return HandledResponse(404, {"error": "not found"},
+                               (("Content-Type", "application/json"),))
+
+    return HandledResponse(404, {"error": "not found"},
+                           (("Content-Type", "application/json"),))
+
+
+# --- Planted buggy twins (each models a real, common REST defect) ----------
+
+def handle_status_200_on_create(req: ApiRequest) -> HandledResponse:
+    """BUG: returns 200 OK instead of 201 Created on resource creation.
+
+    A real and common framework misconfiguration (e.g. a controller that returns
+    the object without setting the created status). Breaks clients that key off
+    201 to distinguish create from idempotent replace.
+    """
+    resp = oracle_handle(req)
+    if req.method == "POST" and req.path == "/items" and resp.status == 201:
+        return HandledResponse(200, resp.body, resp.headers)
+    return resp
+
+
+def handle_missing_location_header(req: ApiRequest) -> HandledResponse:
+    """BUG: omits the Location header on 201 Created.
+
+    RFC 7231 requires a 201 to carry Location pointing at the new resource;
+    omitting it is a frequent API regression that breaks redirect-follow clients.
+    """
+    resp = oracle_handle(req)
+    if req.method == "POST" and req.path == "/items" and resp.status == 201:
+        stripped = tuple((k, v) for k, v in resp.headers if k.lower() != "location")
+        return HandledResponse(resp.status, resp.body, stripped)
+    return resp
+
+
+def handle_accepts_missing_required(req: ApiRequest) -> HandledResponse:
+    """BUG: creates an item even when the required 'name' field is absent.
+
+    Missing server-side required-field validation — a classic input-validation
+    gap that lets malformed records into the store with 201 instead of 422.
+    """
+    if req.method == "POST" and req.path == "/items":
+        data = req.body if isinstance(req.body, dict) else {}
+        if "name" not in data:
+            store = dict(_SEED_ITEMS)
+            new_id = max(store) + 1
+            item = {"id": new_id, "name": data.get("name", ""), "value": data.get("value", 0)}
+            return HandledResponse(
+                201, item,
+                (("Content-Type", "application/json"), ("Location", f"/items/{new_id}")),
+            )
+    return oracle_handle(req)
+
+
+# --- Frozen corpus: request -> expected response --------------------------
+
+@dataclass(frozen=True)
+class ApiOracleCase:
+    name: str
+    request: ApiRequest
+    expected_status: int
+    expected_content_type: Optional[str] = None
+    expected_schema: Optional[Dict[str, Any]] = None
+    expected_headers: Optional[Dict[str, str]] = None
+    note: str = ""
+
+
+ORACLE_CASES: Tuple[ApiOracleCase, ...] = (
+    ApiOracleCase(
+        "health",
+        ApiRequest("GET", "/health"),
+        expected_status=200,
+        expected_content_type="application/json",
+        expected_schema={"type": "object", "required": ["status"]},
+        note="liveness endpoint",
+    ),
+    # The teeth case for the 201/Location/required-field mutants: a well-formed
+    # create MUST return 201 + a Location header.
+    ApiOracleCase(
+        "create_returns_201_with_location",
+        ApiRequest("POST", "/items", body={"name": "widget", "value": 42}),
+        expected_status=201,
+        expected_content_type="application/json",
+        expected_schema={"type": "object", "required": ["id", "name", "value"]},
+        expected_headers={"location": "/items/2"},
+        note="RFC 7231: create -> 201 Created + Location header",
+    ),
+    # The teeth case for the missing-required-field mutant: a create with no
+    # 'name' MUST be rejected with 422, not silently accepted.
+    ApiOracleCase(
+        "create_missing_name_rejected",
+        ApiRequest("POST", "/items", body={"value": 5}),
+        expected_status=422,
+        expected_content_type="application/json",
+        note="required-field validation: missing name -> 422",
+    ),
+    ApiOracleCase(
+        "get_seeded_item",
+        ApiRequest("GET", "/items/1"),
+        expected_status=200,
+        expected_content_type="application/json",
+        expected_schema={"type": "object", "required": ["id", "name"]},
+        note="read of the seeded resource",
+    ),
+    ApiOracleCase(
+        "get_missing_item_404",
+        ApiRequest("GET", "/items/9999"),
+        expected_status=404,
+        note="unknown id -> 404",
+    ),
+)
+
+
+def _audit_response(resp: HandledResponse, case: ApiOracleCase) -> List[str]:
+    """Judge a HandledResponse against a frozen case using the harness's own
+    ResponseValidator/SchemaChecker. Returns a list of failure strings (empty
+    means the response satisfies every frozen expectation)."""
+    validator = ResponseValidator()
+    errors: List[str] = []
+
+    e = validator.validate_status(resp.status, case.expected_status)
+    if e:
+        errors.append(e)
+
+    if case.expected_content_type is not None:
+        ct = resp.header("Content-Type") or ""
+        e = validator.validate_content_type(ct, case.expected_content_type)
+        if e:
+            errors.append(e)
+
+    if case.expected_schema is not None:
+        if resp.body is None:
+            errors.append("body missing for expected schema")
+        else:
+            e = validator.validate_schema(resp.body, case.expected_schema)
+            if e:
+                errors.append(e)
+
+    if case.expected_headers is not None:
+        actual = {k.lower(): v for k, v in resp.headers}
+        e = validator.validate_headers(actual, case.expected_headers)
+        if e:
+            errors.append(e)
+
+    return errors
+
+
+def prove(impl: Callable[[ApiRequest], HandledResponse]) -> bool:
+    """True iff handler ``impl`` MISHANDLES any frozen corpus case.
+
+    Non-circular: each impl response is judged against the case's frozen
+    expected status/headers/schema (never against the oracle object). A handler
+    that raises on a corpus case counts as caught.
+    """
+    for case in ORACLE_CASES:
+        try:
+            resp = impl(case.request)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if _audit_response(resp, case):
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_handle,
+    mutants=(
+        Mutant("status_200_on_create", handle_status_200_on_create,
+               "returns 200 OK instead of 201 Created on resource creation"),
+        Mutant("missing_location_header", handle_missing_location_header,
+               "omits the RFC 7231 Location header on a 201 Created"),
+        Mutant("accepts_missing_required", handle_accepts_missing_required,
+               "creates an item without the required 'name' field (201 not 422)"),
+    ),
+    corpus_size=len(ORACLE_CASES),
+    kind="oracle_swap",
+    notes="a create must be 201 + Location and a missing required field must be 422",
+)
+
+
+def list_oracle_cases() -> List[str]:
+    return [c.name for c in ORACLE_CASES]
+
+
+# ---------------------------------------------------------------------------
 # Self-test
 # ---------------------------------------------------------------------------
 
@@ -616,36 +896,66 @@ def _self_test(port: int = 18900) -> bool:
     return ok
 
 
+def _run_self_test(as_json: bool = False, *, networked: bool = True, port: int = 18900) -> int:
+    """Report-based self-test: fail loud, report structured findings.
+
+    1. The pure in-process oracle handler satisfies every frozen corpus case.
+    2. Teeth: the oracle is clean and every planted mutant is caught.
+    3. (optional) A live socket smoke test of MockApiHandler — skipped under
+       --no-network so the teeth/oracle checks stay pure and offline.
+    """
+    report = Report("core/api")
+
+    # 1. The correct oracle handler agrees with every frozen expectation.
+    for case in ORACLE_CASES:
+        resp = oracle_handle(case.request)
+        report.record(f"oracle_case:{case.name}", not _audit_response(resp, case),
+                      detail=case.note)
+
+    # 2. Teeth: oracle is not flagged and every planted mutant IS flagged.
+    report.assert_teeth(TEETH)
+
+    # 3. Live mock-server smoke test (uses a socket; opt-out for pure runs).
+    if networked:
+        report.record("mock_server_smoke", _self_test(port), detail="MockApiHandler over a socket")
+
+    return report.emit(as_json=as_json)
+
+
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="API/REST Test Harness")
     p.add_argument("--self-test", action="store_true", help="Run built-in self-test")
+    p.add_argument("--json", action="store_true",
+                   help="emit machine-readable findings (implies --self-test)")
+    p.add_argument("--list-scenarios", action="store_true",
+                   help="list the frozen oracle corpus case names")
+    p.add_argument("--no-network", action="store_true",
+                   help="skip the live socket smoke test (teeth/oracle checks only)")
     p.add_argument("--port", type=int, default=18900, help="Mock server port")
     p.add_argument("--target", type=str, help="Target base URL to test")
-    return p.parse_args()
+    return p.parse_args(argv)
 
 
-if __name__ == "__main__":
-    args = _parse_args()
-    if args.self_test:
-        ok = _self_test(args.port)
-        sys.exit(0 if ok else 1)
-    elif args.target:
+def main(argv: Optional[List[str]] = None) -> int:
+    args = _parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_oracle_cases()))
+        return 0
+    if args.target:
         suite = ApiTestSuite(args.target)
         report = suite.run()
         print(f"Results: {report.passed}/{report.total} passed")
-        sys.exit(0 if report.failed == 0 else 1)
-    else:
-        print("Start mock server on port", args.port)
-        server, port = start_mock_server(args.port)
-        print(f"Mock API server listening on http://127.0.0.1:{port}")
-        print("Press Ctrl-C to stop.")
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            server.shutdown()
-            server.server_close()
+        return 0 if report.failed == 0 else 1
+    if args.self_test or args.json:
+        return _run_self_test(as_json=args.json, networked=not args.no_network, port=args.port)
+    # Default: run the self-test (repo convention).
+    return _run_self_test(networked=not args.no_network, port=args.port)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

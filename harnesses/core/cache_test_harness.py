@@ -8,6 +8,7 @@ Pure stdlib, zero external dependencies.
 
 from __future__ import annotations
 
+import argparse
 import collections
 import dataclasses
 import json
@@ -15,6 +16,13 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Callable, Dict, Optional, Tuple
+
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +236,141 @@ class BuggyCache:
             now = self._clock.now()
             expires_at = (now + effective_ttl) if effective_ttl is not None else None
             self._store[key] = CacheEntry(value=value, expires_at=expires_at, created_at=now)
+
+    def delete(self, key: str) -> bool:
+        with self._lock:
+            if key in self._store:
+                del self._store[key]
+                return True
+            return False
+
+    def clear(self) -> None:
+        with self._lock:
+            self._store.clear()
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._store)
+
+
+# ---------------------------------------------------------------------------
+# StaleTTLCache — ignores expiry on read (serves stale data past its TTL)
+# ---------------------------------------------------------------------------
+
+class StaleTTLCache:
+    """
+    Intentionally broken cache: get() never checks expiry, so an entry whose TTL
+    has elapsed is still returned as a live hit. Models the common production bug
+    where a cache layer stores an expiry timestamp but forgets to enforce it on
+    read — serving stale data indefinitely.
+    """
+
+    def __init__(
+        self,
+        max_size: int = 0,
+        default_ttl: Optional[float] = None,
+        clock: Optional[Any] = None,
+    ) -> None:
+        self._max_size = max_size
+        self._default_ttl = default_ttl
+        self._clock = clock if clock is not None else RealClock()
+        self._store: collections.OrderedDict[str, CacheEntry] = collections.OrderedDict()
+        self._lock = threading.Lock()
+        self.stats = CacheStats()
+
+    def get(self, key: str) -> Optional[Any]:
+        with self._lock:
+            entry = self._store.get(key)
+            if entry is None:
+                self.stats.misses += 1
+                return None
+            # BUG: no expiry check — expired entries are served as live hits.
+            self._store.move_to_end(key)
+            self.stats.hits += 1
+            return entry.value
+
+    def set(self, key: str, value: Any, ttl: Optional[float] = None) -> None:
+        with self._lock:
+            effective_ttl = ttl if ttl is not None else self._default_ttl
+            now = self._clock.now()
+            expires_at = (now + effective_ttl) if effective_ttl is not None else None
+            entry = CacheEntry(value=value, expires_at=expires_at, created_at=now)
+            self._store[key] = entry
+            self._store.move_to_end(key)
+            if self._max_size > 0:
+                while len(self._store) > self._max_size:
+                    self._store.popitem(last=False)
+                    self.stats.evictions += 1
+
+    def delete(self, key: str) -> bool:
+        with self._lock:
+            if key in self._store:
+                del self._store[key]
+                return True
+            return False
+
+    def clear(self) -> None:
+        with self._lock:
+            self._store.clear()
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._store)
+
+
+# ---------------------------------------------------------------------------
+# NoEvictCache — never evicts under capacity pressure (unbounded growth)
+# ---------------------------------------------------------------------------
+
+class NoEvictCache:
+    """
+    Intentionally broken cache: respects TTL and overwrites correctly, but ignores
+    max_size — it never evicts the least-recently-used entry. Models an LRU bound
+    that is silently not enforced, so a 'bounded' cache grows without limit and
+    keeps entries that should have been evicted.
+    """
+
+    def __init__(
+        self,
+        max_size: int = 0,
+        default_ttl: Optional[float] = None,
+        clock: Optional[Any] = None,
+    ) -> None:
+        self._max_size = max_size
+        self._default_ttl = default_ttl
+        self._clock = clock if clock is not None else RealClock()
+        self._store: collections.OrderedDict[str, CacheEntry] = collections.OrderedDict()
+        self._lock = threading.Lock()
+        self.stats = CacheStats()
+
+    def _is_expired(self, entry: CacheEntry) -> bool:
+        if entry.expires_at is None:
+            return False
+        return self._clock.now() >= entry.expires_at
+
+    def get(self, key: str) -> Optional[Any]:
+        with self._lock:
+            entry = self._store.get(key)
+            if entry is None:
+                self.stats.misses += 1
+                return None
+            if self._is_expired(entry):
+                del self._store[key]
+                self.stats.misses += 1
+                return None
+            self._store.move_to_end(key)
+            self.stats.hits += 1
+            return entry.value
+
+    def set(self, key: str, value: Any, ttl: Optional[float] = None) -> None:
+        with self._lock:
+            effective_ttl = ttl if ttl is not None else self._default_ttl
+            now = self._clock.now()
+            expires_at = (now + effective_ttl) if effective_ttl is not None else None
+            entry = CacheEntry(value=value, expires_at=expires_at, created_at=now)
+            self._store[key] = entry
+            self._store.move_to_end(key)
+            # BUG: max_size is never enforced — no eviction ever happens.
 
     def delete(self, key: str) -> bool:
         with self._lock:
@@ -618,6 +761,112 @@ class MockCacheServer:
 
 
 # ---------------------------------------------------------------------------
+# Teeth: a FROZEN corpus of cache operations with pre-computed expected results.
+#
+# prove(impl) runs `impl` (a cache *factory*: class or callable returning a fresh
+# cache that accepts a `clock=` kwarg) against this scripted corpus under a
+# FakeClock and compares each observable get() to the expected value baked into
+# the corpus. It is NON-CIRCULAR: expectations are literal constants, never read
+# back from the oracle object. prove(impl) is True iff `impl` diverges from any
+# expected outcome (i.e. the planted bug is caught).
+# ---------------------------------------------------------------------------
+
+@dataclasses.dataclass(frozen=True)
+class CacheOp:
+    """One scripted cache operation against a single shared cache instance."""
+    name: str
+    op: str            # "set" | "get" | "delete" | "advance"
+    key: str = ""
+    value: Any = None
+    ttl: Optional[float] = None
+    advance: float = 0.0
+    # For "get" ops only: the value the CORRECT cache must return (a literal
+    # constant, computed by hand from the cache contract — not from the oracle).
+    expected: Any = None
+
+
+# A cache with max_size=2 and a FakeClock starting at t=0. The script exercises
+# overwrite-invalidation, TTL expiry, and LRU eviction — each chosen so that at
+# least one planted mutant returns the WRONG value on a "get".
+CACHE_CORPUS: tuple[CacheOp, ...] = (
+    # --- overwrite must invalidate (catches BuggyCache stale-after-write) ---
+    CacheOp("set_initial", "set", key="k", value="v1"),
+    CacheOp("get_initial", "get", key="k", expected="v1"),
+    CacheOp("overwrite", "set", key="k", value="v2"),
+    CacheOp("get_after_overwrite", "get", key="k", expected="v2"),
+    # --- TTL must expire on read (catches StaleTTLCache serve-expired) ---
+    CacheOp("set_ttl", "set", key="t", value="alive", ttl=10.0),
+    CacheOp("get_ttl_before", "get", key="t", expected="alive"),
+    CacheOp("advance_past_ttl", "advance", advance=10.0),
+    CacheOp("get_ttl_after", "get", key="t", expected=None),
+    # --- LRU must evict the least-recently-used (catches NoEvictCache) ---
+    # max_size=2. After the TTL key expired and was read (removed), the store is
+    # empty. Insert a, b (full), touch a, insert c -> b is the LRU and must go.
+    CacheOp("lru_set_a", "set", key="a", value=1),
+    CacheOp("lru_set_b", "set", key="b", value=2),
+    CacheOp("lru_touch_a", "get", key="a", expected=1),
+    CacheOp("lru_set_c", "set", key="c", value=3),
+    CacheOp("lru_b_evicted", "get", key="b", expected=None),
+    CacheOp("lru_a_kept", "get", key="a", expected=1),
+    CacheOp("lru_c_present", "get", key="c", expected=3),
+)
+
+
+def _run_corpus(factory: Callable[..., Any]) -> list[tuple[str, Any, Any]]:
+    """Drive `factory()` through CACHE_CORPUS; return (name, expected, actual)
+    for every 'get' op. Pure + deterministic: a FakeClock supplies all time."""
+    clock = FakeClock(start=0.0)
+    cache = factory(max_size=2, clock=clock)
+    observed: list[tuple[str, Any, Any]] = []
+    for step in CACHE_CORPUS:
+        if step.op == "set":
+            cache.set(step.key, step.value, ttl=step.ttl)
+        elif step.op == "get":
+            observed.append((step.name, step.expected, cache.get(step.key)))
+        elif step.op == "delete":
+            cache.delete(step.key)
+        elif step.op == "advance":
+            clock.advance(step.advance)
+        else:  # pragma: no cover - guards against a malformed corpus
+            raise ValueError(f"unknown op: {step.op!r}")
+    return observed
+
+
+def prove(impl: Callable[..., Any]) -> bool:
+    """True iff `impl` (a cache factory) diverges from the frozen corpus's
+    pre-computed expected results on any get (i.e. the bug is CAUGHT).
+
+    Deterministic and side-effect-free: no real clock, network, or filesystem;
+    the only RNG is none. Judges against literal expectations, never the oracle.
+    """
+    try:
+        observed = _run_corpus(impl)
+    except Exception:  # noqa: BLE001 — raising while driving the corpus counts as caught
+        return True
+    for _name, expected, actual in observed:
+        if actual != expected:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=Cache,
+    mutants=(
+        Mutant("stale_after_write", BuggyCache,
+               "set() skips overwrite of an existing key -> serves stale data after a write"),
+        Mutant("serves_expired", StaleTTLCache,
+               "get() never checks expiry -> serves data past its TTL"),
+        Mutant("no_lru_eviction", NoEvictCache,
+               "max_size never enforced -> LRU bound silently unbounded"),
+    ),
+    corpus_size=sum(1 for op in CACHE_CORPUS if op.op == "get"),
+    kind="oracle_swap",
+    notes="overwrite must invalidate, TTL must expire on read, and the LRU bound must evict",
+)
+
+
+# ---------------------------------------------------------------------------
 # Harness runner (standalone)
 # ---------------------------------------------------------------------------
 
@@ -723,8 +972,50 @@ def run_harness() -> CacheReport:
     return report
 
 
+def list_scenarios() -> list[str]:
+    """Names of the frozen corpus operations (the teeth scenarios)."""
+    return [op.name for op in CACHE_CORPUS]
+
+
+# ---------------------------------------------------------------------------
+# Report-based self-test — fails loud, reports findings, asserts the teeth.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(as_json: bool = False) -> int:
+    report = Report("core/cache")
+
+    # 1. The legacy correctness harness must still pass end to end.
+    legacy = run_harness()
+    report.record("run_harness_all_pass", legacy.all_passed,
+                  detail=f"{legacy.passed}/{legacy.total} legacy checks passed")
+
+    # 2. The correct oracle (Cache) must match every expected corpus outcome.
+    for name, expected, actual in _run_corpus(Cache):
+        report.add(f"oracle:{name}", expected, actual)
+
+    # 3. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
+
+
+# ---------------------------------------------------------------------------
+# CLI — default action is the self-test (repo convention).
+# ---------------------------------------------------------------------------
+
+def main(argv: Optional[list] = None) -> int:
+    parser = argparse.ArgumentParser(description="Caching correctness controls")
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
+    return _run_self_test(as_json=args.json)
+
+
 if __name__ == "__main__":
-    report = run_harness()
-    print(report.summary())
-    if not report.all_passed:
-        raise SystemExit(1)
+    raise SystemExit(main())

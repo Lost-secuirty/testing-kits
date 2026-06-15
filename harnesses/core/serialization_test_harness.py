@@ -9,6 +9,7 @@ Pure stdlib, zero external dependencies.
 
 from __future__ import annotations
 
+import argparse
 import csv
 import io
 import json
@@ -21,9 +22,16 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import urllib.request
 import urllib.parse
+
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -693,3 +701,286 @@ def make_server(port: int = 0) -> SerializationServer:
     srv = SerializationServer(port=port)
     srv.start()
     return srv
+
+
+# ---------------------------------------------------------------------------
+# TEETH: a FROZEN corpus of (value, format) -> expected roundtrip outcome.
+#
+# A serialization harness only has teeth if it CATCHES a serializer/roundtrip
+# that silently loses data, or a loss-detector that misses a real loss. The
+# networked FormatTester above is the correct ORACLE; each Mutant below is a
+# faithful in-process model of a genuine real-world serialization defect:
+#
+#   * a serializer that silently DROPS a field (the classic "skip falsy values"
+#     optimization that quietly eats 0 / "" / False / None);
+#   * a serializer that silently WIDENS int->float (treats every numeric pair as
+#     equal), corrupting a 54-bit integer beyond float64's exact range while the
+#     coercion-blind detector reports it lossless;
+#   * a loss-detector that only inspects the fixed binary SCHEMA keys, so a field
+#     the struct schema cannot encode is silently dropped yet reported lossless.
+#
+# The teeth run a PURE in-process roundtrip: zero clock/network/filesystem I/O,
+# fully deterministic. An impl is a callable
+#     roundtrip(value: Dict[str, Any], fmt: str) -> Tuple[Any, List[str]]
+# returning (decoded, lossy_fields). prove() judges each impl against the
+# corpus's FROZEN literal expectations (decoded value + which fields MUST be
+# flagged lossy) -- it NEVER compares an impl's output to the oracle object at
+# runtime, so the check is non-circular. prove(impl) is True iff a real loss
+# goes undetected or a roundtrip mismatch is missed.
+# ---------------------------------------------------------------------------
+
+# Sentinel meaning "do not assert on the decoded value for this case" (used when
+# only the lossy-field verdict is the load-bearing expectation).
+_ANY = object()
+
+
+@dataclass(frozen=True)
+class SerCase:
+    """One frozen roundtrip case with literal, hand-computed expectations."""
+    name: str
+    value: Dict[str, Any]
+    fmt: str                       # "json" | "binary"
+    field: str                     # the field whose loss-verdict is asserted
+    expect_lossy: bool             # MUST this field be flagged as lossy?
+    expect_decoded: Any = _ANY     # expected decoded value of `field` (or _ANY)
+    note: str = ""
+
+
+# Cases chosen so the correct oracle agrees with every expectation AND at least
+# one planted mutant gets each one WRONG. All literals are computed by hand from
+# the serialization contract, never read back from the oracle.
+SER_CORPUS: Tuple[SerCase, ...] = (
+    # --- JSON: a present, non-falsy field is preserved losslessly -----------
+    SerCase("json_keeps_string", {"name": "alice"}, "json", "name",
+            expect_lossy=False, expect_decoded="alice",
+            note="JSON preserves a plain string roundtrip"),
+    # --- JSON: a FALSY field (zero) is still present and lossless -----------
+    # This is the teeth case for the drop-field mutant: a serializer that skips
+    # falsy values would silently drop `count=0`, losing the field entirely.
+    SerCase("json_keeps_zero", {"count": 0}, "json", "count",
+            expect_lossy=False, expect_decoded=0,
+            note="JSON must roundtrip an integer 0, not drop it as falsy"),
+    SerCase("json_keeps_empty_string", {"label": ""}, "json", "label",
+            expect_lossy=False, expect_decoded="",
+            note="JSON must roundtrip an empty string, not drop it as falsy"),
+    # --- JSON: tuple -> list coercion IS a real loss and must be flagged ----
+    SerCase("json_tuple_to_list_lossy", {"t": (1, 2, 3)}, "json", "t",
+            expect_lossy=True,
+            note="JSON coerces tuple->list: a real type loss the detector must flag"),
+    # --- JSON: a 54-bit integer survives exactly (no float coercion) --------
+    # Teeth case for the coercion-blind mutant: 2**53+1 is the smallest integer
+    # that float64 cannot represent. A serializer that silently widens ints to
+    # float corrupts it to 2**53, while a coercion-blind detector reports it
+    # lossless. The correct JSON oracle keeps the integer exact.
+    SerCase("json_big_int_preserved", {"n": 2 ** 53 + 1}, "json", "n",
+            expect_lossy=False, expect_decoded=2 ** 53 + 1,
+            note="JSON must keep a 54-bit integer exact, never widen it to float"),
+    # --- BINARY: a 64-bit double survives the 'd' field losslessly ----------
+    SerCase("binary_double_lossless",
+            {"int_val": 0, "double_val": 3.141592653589793,
+             "float_val": 0.0, "bool_val": False},
+            "binary", "double_val", expect_lossy=False,
+            note="the 64-bit 'd' field preserves a full double"),
+    # --- BINARY: a field the fixed struct schema cannot encode is DROPPED ---
+    # Teeth case for the schema-drop-blind detector: the binary schema only has
+    # slots for int/double/float/bool, so a string ``session_id`` is silently
+    # discarded by the roundtrip. The correct detector flags the dropped field;
+    # a detector that only inspects the four schema keys never notices it left.
+    SerCase("binary_drops_unknown_field",
+            {"int_val": 0, "double_val": 0.0, "float_val": 0.0,
+             "bool_val": False, "session_id": "abc-123"},
+            "binary", "session_id", expect_lossy=True,
+            note="fixed binary schema cannot hold an extra field -> silently dropped"),
+)
+
+
+# --- ORACLE: reuse the harness's own correct FormatTester + LossDetector ----
+
+def oracle_roundtrip(value: Dict[str, Any], fmt: str) -> Tuple[Any, List[str]]:
+    """Correct roundtrip + loss detection, delegating to the harness's tested
+    FormatTester. Returns (decoded, lossy_fields)."""
+    tester = FormatTester()
+    if fmt == "json":
+        result = tester.test_json(value)
+    elif fmt == "binary":
+        result = tester.test_binary(value)
+    else:  # pragma: no cover - corpus only uses json/binary
+        raise ValueError(f"unsupported teeth format: {fmt!r}")
+    return result.decoded, list(result.lossy_fields)
+
+
+# --- Planted buggy twins (each models a real serialization defect) ----------
+
+def drop_falsy_roundtrip(value: Dict[str, Any], fmt: str) -> Tuple[Any, List[str]]:
+    """BUG: the serializer silently DROPS any field whose value is falsy.
+
+    A startlingly common 'optimization' (``{k: v for k, v in d.items() if v}``)
+    that quietly eats 0, "", False and None. The decoded dict loses the key
+    entirely, and because this buggy detector only walks the DECODED keys it
+    never notices the field went missing -> silent data loss.
+    """
+    if fmt == "json":
+        pruned = {k: v for k, v in value.items() if v}  # BUG: drops falsy
+        encoded = json.dumps(pruned, allow_nan=True)
+        decoded = json.loads(encoded)
+    elif fmt == "binary":
+        # mirror oracle for binary so this mutant is isolated to the JSON drop
+        return oracle_roundtrip(value, fmt)
+    else:  # pragma: no cover
+        raise ValueError(fmt)
+    # BUG: detector only iterates decoded keys, so a dropped key is invisible.
+    lossy: List[str] = []
+    for key in decoded:
+        if value.get(key) != decoded.get(key):
+            lossy.append(key)
+    return decoded, lossy
+
+
+def int_float_blind_roundtrip(value: Dict[str, Any], fmt: str) -> Tuple[Any, List[str]]:
+    """BUG: the JSON serializer silently widens every int to a float, AND the
+    detector treats any int/float pair as interchangeable.
+
+    Coercing ints to float (a real defect in some 'normalize-before-encode'
+    pipelines) is lossless for small values but silently CORRUPTS any integer
+    above 2**53, which float64 cannot represent exactly (e.g. 2**53+1 -> 2**53).
+    Because the detector exempts all numeric pairs from comparison, the value
+    corruption is never reported -> silent data loss.
+    """
+    if fmt != "json":
+        return oracle_roundtrip(value, fmt)
+    coerced = {k: (float(v) if isinstance(v, int) and not isinstance(v, bool) else v)
+               for k, v in value.items()}  # BUG: int -> float widening
+    encoded = json.dumps(coerced, allow_nan=True)
+    decoded = json.loads(encoded)
+    lossy: List[str] = []
+    for key in value:
+        orig = value[key]
+        dec = decoded.get(key)
+        # BUG: any two numbers are "equal" regardless of type/value/precision.
+        if isinstance(orig, (int, float)) and isinstance(dec, (int, float)):
+            continue
+        if orig != dec:
+            lossy.append(key)
+    return decoded, lossy
+
+
+def schema_drop_blind_roundtrip(value: Dict[str, Any], fmt: str) -> Tuple[Any, List[str]]:
+    """BUG: the binary loss-detector only inspects the four schema keys.
+
+    The fixed struct schema (int/double/float/bool) physically cannot encode any
+    other field, so an extra key is silently discarded on encode. The correct
+    detector flags such dropped fields, but this detector iterates ONLY the known
+    schema keys -- so a field that fell off the edge of the schema is reported
+    lossless. A classic 'we only diff the columns we know about' blind spot.
+    """
+    if fmt != "binary":
+        return oracle_roundtrip(value, fmt)
+    decoded, _ = oracle_roundtrip(value, fmt)
+    lossy: List[str] = []
+    for key in FormatTester.BINARY_KEYS:  # BUG: never looks at non-schema keys
+        if key not in value:
+            continue
+        if not LossDetector._values_equal(value[key], decoded.get(key)):
+            lossy.append(key)
+    return decoded, lossy
+
+
+def prove(impl: Callable[[Dict[str, Any], str], Tuple[Any, List[str]]]) -> bool:
+    """True iff ``impl`` MISHANDLES any frozen corpus case (i.e. the bug is
+    caught): a real loss goes unflagged, a clean field is wrongly flagged, the
+    decoded value diverges from the frozen literal, or a field is dropped.
+
+    Non-circular + deterministic: every expectation is a literal baked into
+    SER_CORPUS, never read from the oracle; there is no RNG, clock, network, or
+    filesystem access. An impl that raises on a corpus case counts as caught.
+    """
+    for case in SER_CORPUS:
+        try:
+            decoded, lossy = impl(case.value, case.fmt)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        # 1. The field's loss verdict must match the frozen expectation.
+        flagged = case.field in lossy
+        if flagged != case.expect_lossy:
+            return True
+        # 2. For lossless cases, the decoded value must survive intact. A
+        #    dropped field shows up here as a missing key -> caught.
+        if case.expect_decoded is not _ANY:
+            if not isinstance(decoded, dict) or case.field not in decoded:
+                return True
+            if decoded[case.field] != case.expect_decoded:
+                return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_roundtrip,
+    mutants=(
+        Mutant("drops_falsy_field", drop_falsy_roundtrip,
+               "serializer silently drops falsy fields (0/''/False) -> field lost, "
+               "detector never notices the missing key"),
+        Mutant("int_float_coercion_blind", int_float_blind_roundtrip,
+               "serializer widens int->float and the detector ignores numeric "
+               "pairs -> a 54-bit integer is silently corrupted (2**53+1 -> 2**53)"),
+        Mutant("schema_drop_blind", schema_drop_blind_roundtrip,
+               "binary loss-detector only inspects the four schema keys -> misses "
+               "a field the fixed struct schema silently dropped"),
+    ),
+    corpus_size=len(SER_CORPUS),
+    kind="oracle_swap",
+    notes="a serializer must not silently drop a field, and the loss-detector "
+          "must flag tuple->list coercion, int->float corruption of a 54-bit "
+          "integer, and a field dropped by the fixed binary schema",
+)
+
+
+def list_scenarios() -> List[str]:
+    """Names of the frozen corpus cases (the teeth scenarios)."""
+    return [c.name for c in SER_CORPUS]
+
+
+# ---------------------------------------------------------------------------
+# Report-based self-test — fails loud, reports findings, asserts the teeth.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(as_json: bool = False) -> int:
+    report = Report("core/serialization")
+
+    # 1. The correct oracle must agree with every frozen corpus expectation.
+    for case in SER_CORPUS:
+        decoded, lossy = oracle_roundtrip(case.value, case.fmt)
+        report.add(f"oracle_lossy:{case.name}", case.expect_lossy,
+                   case.field in lossy, detail=case.note)
+        if case.expect_decoded is not _ANY:
+            actual = decoded.get(case.field) if isinstance(decoded, dict) else None
+            report.add(f"oracle_decoded:{case.name}", case.expect_decoded, actual,
+                       detail=case.note)
+
+    # 2. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
+
+
+# ---------------------------------------------------------------------------
+# CLI — default action is the self-test (repo convention).
+# ---------------------------------------------------------------------------
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Serialization / roundtrip controls")
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true",
+                        help="list the frozen corpus case names")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
+    return _run_self_test(as_json=args.json)
+
+
+if __name__ == "__main__":
+    _sys.exit(main())

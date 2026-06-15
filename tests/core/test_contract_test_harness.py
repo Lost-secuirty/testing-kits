@@ -12,6 +12,7 @@ import urllib.request
 import urllib.error
 from urllib.request import urlopen, Request
 
+from harnesses._teeth import verify
 from harnesses.core.contract_test_harness import (
     ViolationType,
     ContractViolation,
@@ -27,6 +28,10 @@ from harnesses.core.contract_test_harness import (
     InterfaceCheckResult,
     InvariantResult,
     contract,
+    TEETH,
+    FieldSpec,
+    check_compatibility,
+    prove,
 )
 
 
@@ -675,6 +680,41 @@ class TestContractDecorator(unittest.TestCase):
 
         with self.assertRaises(ContractViolation):
             double(-1)
+
+
+# ---------------------------------------------------------------------------
+# 12. Teeth: the harness must catch a real planted contract bug.
+# ---------------------------------------------------------------------------
+
+class TestTeeth(unittest.TestCase):
+    """The harness must catch a real planted bug (the campaign teeth contract)."""
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct compatibility checker must NOT be flagged by prove.
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+        self.assertFalse(prove(check_compatibility))
+
+    def test_every_mutant_is_caught(self):
+        # Each planted defect must be individually caught.
+        self.assertEqual(len(TEETH.mutants), 3)
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl),
+                            f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
+
+    def test_compatibility_oracle_directly(self):
+        # Spot-check the oracle on a known compatible and incompatible change.
+        old = {"id": FieldSpec("number"), "name": FieldSpec("string")}
+        self.assertTrue(check_compatibility(old, old))
+        # Removing a field is incompatible.
+        self.assertFalse(check_compatibility(old, {"id": FieldSpec("number")}))
 
 
 if __name__ == "__main__":

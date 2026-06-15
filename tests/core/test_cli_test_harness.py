@@ -22,7 +22,9 @@ from pathlib import Path
 # Make sure the harness module is importable even when run from a different cwd
 sys.path.insert(0, str(Path(__file__).parent))
 
+from harnesses._teeth import verify
 from harnesses.core.cli_test_harness import (
+    TEETH,
     CliSuiteReport,
     CliTestCase,
     CliTestResult,
@@ -31,6 +33,8 @@ from harnesses.core.cli_test_harness import (
     OutputValidator,
     SampleCliRunner,
     _get_sample_cli_path,
+    oracle_dispatch,
+    prove,
     run_self_test,
 )
 
@@ -527,6 +531,31 @@ class TestSelfTestAndIntegration(unittest.TestCase):
         )
         r = runner.run_case(tc)
         self.assertTrue(r.passed, r.failures)
+
+
+# ---------------------------------------------------------------------------
+# Teeth: the harness must catch a real planted CLI bug (the campaign contract).
+# ---------------------------------------------------------------------------
+
+class TestTeeth(unittest.TestCase):
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct parse/dispatch must NOT be flagged.
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+        self.assertFalse(prove(oracle_dispatch))
+
+    def test_every_mutant_is_caught(self):
+        self.assertEqual(len(TEETH.mutants), 4)
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
 
 
 if __name__ == "__main__":

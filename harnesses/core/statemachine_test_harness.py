@@ -7,14 +7,23 @@ Pure stdlib, zero external dependencies.
 
 from __future__ import annotations
 
+import argparse
 import json
 import socket
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Set, Tuple
 from urllib.parse import urlparse, parse_qs
+
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -570,3 +579,360 @@ class MockStateMachineServer:
 
     def __exit__(self, *_: Any) -> None:
         self.stop()
+
+
+# ---------------------------------------------------------------------------
+# TEETH: a FROZEN corpus of FSM specs with pre-computed expected verdicts.
+#
+# The unit under test is an FSM *checker*: a function mapping a frozen spec to a
+# verdict (reachable set, orphaned set, deterministic flag). The oracle reuses
+# the harness's own correct ReachabilityAnalyzer + DeterminismChecker. Each
+# Mutant is a faithful real-world checker bug:
+#   * nondeterminism not flagged,
+#   * an unreachable (orphaned) state not detected,
+#   * an orphan made to look reachable by following edges backwards.
+#
+# prove(impl) drives `impl` over CHECKER_CORPUS and compares each verdict to the
+# LITERAL expected verdict baked into the corpus. It is NON-CIRCULAR: the
+# expectations are hand-computed constants, never read back from the oracle
+# object at runtime. Pure + deterministic: no clock/network/filesystem I/O, no
+# RNG. prove(impl) is True iff `impl` diverges from any frozen expectation (the
+# planted bug is caught).
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class FsmSpec:
+    """An immutable finite-state-machine specification for the checker corpus."""
+    name: str
+    states: FrozenSet[str]
+    initial: str
+    # (from_state, to_state, trigger) triples — guards/actions are irrelevant to
+    # the structural checks (reachability/determinism), so the corpus omits them.
+    edges: Tuple[Tuple[str, str, str], ...]
+
+    def to_machine(self) -> StateMachine:
+        return StateMachine(
+            states=set(self.states),
+            initial_state=self.initial,
+            transitions=[Transition(f, t, trig) for (f, t, trig) in self.edges],
+        )
+
+
+@dataclass(frozen=True)
+class CheckerVerdict:
+    """The structural verdict a checker returns for one spec."""
+    reachable: FrozenSet[str]
+    orphaned: FrozenSet[str]
+    deterministic: bool
+
+
+@dataclass(frozen=True)
+class CheckerCase:
+    """One spec paired with its hand-computed expected verdict (literal)."""
+    spec: FsmSpec
+    expected: CheckerVerdict
+    note: str = ""
+
+
+def check_fsm(spec: FsmSpec) -> CheckerVerdict:
+    """ORACLE checker — the correct structural analysis of an FSM spec.
+
+    Reuses the harness's own ReachabilityAnalyzer and DeterminismChecker so the
+    teeth exercise the *shipped* logic, not a parallel re-implementation.
+    """
+    machine = spec.to_machine()
+    reach = ReachabilityAnalyzer(machine)
+    det = DeterminismChecker(machine)
+    return CheckerVerdict(
+        reachable=frozenset(reach.reachable_states()),
+        orphaned=frozenset(reach.orphaned_states()),
+        deterministic=det.is_deterministic(),
+    )
+
+
+# --- Planted buggy checkers (each models a real, common FSM-checker defect) ---
+
+def check_fsm_nondeterminism_blind(spec: FsmSpec) -> CheckerVerdict:
+    """BUG: determinism check keys on (from_state, to_state) instead of
+    (from_state, trigger), so two transitions with the *same trigger but
+    different targets* are not recognised as a conflict.
+
+    A real and subtle checker bug: it only flags duplicate *edges*, missing the
+    actual nondeterminism (one event -> two possible next states) that makes the
+    machine ill-defined. Reachability is computed correctly here.
+    """
+    machine = spec.to_machine()
+    reach = ReachabilityAnalyzer(machine)
+    # Wrong grouping key: (from, to) — never collides for distinct targets.
+    seen: Dict[Tuple[str, str], int] = {}
+    for t in machine.transitions:
+        key = (t.from_state, t.to_state)
+        seen[key] = seen.get(key, 0) + 1
+    deterministic = all(c <= 1 for c in seen.values())
+    return CheckerVerdict(
+        reachable=frozenset(reach.reachable_states()),
+        orphaned=frozenset(reach.orphaned_states()),
+        deterministic=deterministic,
+    )
+
+
+def check_fsm_assume_all_reachable(spec: FsmSpec) -> CheckerVerdict:
+    """BUG: reachability assumes every *defined* state is reachable, so it never
+    reports an orphaned (unreachable) state.
+
+    Models the common mistake of validating the declared state set instead of
+    actually traversing the transition graph from the initial state — dead/
+    unreachable states slip through review. Determinism is computed correctly.
+    """
+    machine = spec.to_machine()
+    det = DeterminismChecker(machine)
+    all_states = frozenset(machine.states)
+    return CheckerVerdict(
+        reachable=all_states,        # WRONG: claims everything is reachable
+        orphaned=frozenset(),        # WRONG: never finds an orphan
+        deterministic=det.is_deterministic(),
+    )
+
+
+def check_fsm_undirected_reachability(spec: FsmSpec) -> CheckerVerdict:
+    """BUG: builds the reachability graph as UNDIRECTED (follows edges in both
+    directions), so a state that can only reach the initial state — but is never
+    reached *from* it — is wrongly counted as reachable.
+
+    Models treating a transition table as a symmetric relation: an orphan with an
+    inbound-only path to the start is reported reachable, hiding a genuinely
+    unreachable state. Determinism is computed correctly.
+    """
+    machine = spec.to_machine()
+    det = DeterminismChecker(machine)
+    adj: Dict[str, Set[str]] = {}
+    for t in machine.transitions:
+        adj.setdefault(t.from_state, set()).add(t.to_state)
+        adj.setdefault(t.to_state, set()).add(t.from_state)  # BUG: reverse edge
+
+    visited: Set[str] = set()
+    queue = [machine.initial_state]
+    while queue:
+        node = queue.pop()
+        if node in visited:
+            continue
+        visited.add(node)
+        for nb in adj.get(node, set()):
+            if nb not in visited:
+                queue.append(nb)
+    reachable = frozenset(visited)
+    return CheckerVerdict(
+        reachable=reachable,
+        orphaned=frozenset(machine.states) - reachable,
+        deterministic=det.is_deterministic(),
+    )
+
+
+# --- Frozen corpus: spec -> expected verdict (literal, hand-computed) -------
+
+CHECKER_CORPUS: Tuple[CheckerCase, ...] = (
+    # Linear A->B->C: fully reachable, deterministic.
+    CheckerCase(
+        FsmSpec(
+            "linear",
+            frozenset({"A", "B", "C"}),
+            "A",
+            (("A", "B", "go"), ("B", "C", "go")),
+        ),
+        CheckerVerdict(
+            reachable=frozenset({"A", "B", "C"}),
+            orphaned=frozenset(),
+            deterministic=True,
+        ),
+        note="clean linear machine: no orphans, deterministic",
+    ),
+    # Nondeterministic: A --go--> B and A --go--> C (same trigger, two targets).
+    # Catches nondeterminism-blind. Both targets reachable.
+    CheckerCase(
+        FsmSpec(
+            "nondeterministic",
+            frozenset({"A", "B", "C"}),
+            "A",
+            (("A", "B", "go"), ("A", "C", "go")),
+        ),
+        CheckerVerdict(
+            reachable=frozenset({"A", "B", "C"}),
+            orphaned=frozenset(),
+            deterministic=False,
+        ),
+        note="one event with two targets must be flagged nondeterministic",
+    ),
+    # Orphaned state: C is defined but never targeted. Catches assume-all-reachable.
+    CheckerCase(
+        FsmSpec(
+            "orphan",
+            frozenset({"A", "B", "C"}),
+            "A",
+            (("A", "B", "go"),),
+        ),
+        CheckerVerdict(
+            reachable=frozenset({"A", "B"}),
+            orphaned=frozenset({"C"}),
+            deterministic=True,
+        ),
+        note="a defined-but-untargeted state must be reported orphaned",
+    ),
+    # Inbound-only orphan: X --back--> A reaches the start, but nothing reaches X.
+    # A directed BFS from A finds only {A}; an undirected one wrongly adds X.
+    # Catches undirected-reachability.
+    CheckerCase(
+        FsmSpec(
+            "inbound_only_orphan",
+            frozenset({"A", "X"}),
+            "A",
+            (("X", "A", "back"),),
+        ),
+        CheckerVerdict(
+            reachable=frozenset({"A"}),
+            orphaned=frozenset({"X"}),
+            deterministic=True,
+        ),
+        note="a state with only an inbound-to-start edge is still unreachable",
+    ),
+    # Order-lifecycle machine: all reachable, deterministic (a realistic spec).
+    CheckerCase(
+        FsmSpec(
+            "order_lifecycle",
+            frozenset({"CREATED", "PAID", "SHIPPED", "DELIVERED", "CANCELLED"}),
+            "CREATED",
+            (
+                ("CREATED", "PAID", "pay"),
+                ("PAID", "SHIPPED", "ship"),
+                ("SHIPPED", "DELIVERED", "deliver"),
+                ("CREATED", "CANCELLED", "cancel"),
+                ("PAID", "CANCELLED", "cancel"),
+                ("SHIPPED", "CANCELLED", "cancel"),
+            ),
+        ),
+        CheckerVerdict(
+            reachable=frozenset(
+                {"CREATED", "PAID", "SHIPPED", "DELIVERED", "CANCELLED"}
+            ),
+            orphaned=frozenset(),
+            deterministic=True,
+        ),
+        note="realistic order machine: all reachable, deterministic",
+    ),
+)
+
+
+def _diverges(impl: Callable[[FsmSpec], CheckerVerdict], case: CheckerCase) -> bool:
+    """True iff ``impl`` produces a verdict differing from the case's frozen
+    expectation on any of the three structural checks. Never compares to the
+    oracle object — only to literal constants."""
+    got = impl(case.spec)
+    return (
+        got.reachable != case.expected.reachable
+        or got.orphaned != case.expected.orphaned
+        or got.deterministic != case.expected.deterministic
+    )
+
+
+def prove(impl: Callable[[FsmSpec], CheckerVerdict]) -> bool:
+    """True iff FSM checker ``impl`` MISHANDLES any frozen corpus case (the
+    planted bug is caught).
+
+    Deterministic and side-effect-free: drives ``impl`` over the frozen specs and
+    compares each verdict to literal expectations. An impl that raises on a
+    corpus case counts as caught.
+    """
+    for case in CHECKER_CORPUS:
+        try:
+            if _diverges(impl, case):
+                return True
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=check_fsm,
+    mutants=(
+        Mutant(
+            "nondeterminism_blind",
+            check_fsm_nondeterminism_blind,
+            "determinism check keys on (from,to) not (from,trigger) -> one event "
+            "with two targets is not flagged nondeterministic",
+        ),
+        Mutant(
+            "assume_all_reachable",
+            check_fsm_assume_all_reachable,
+            "reachability validates the declared state set instead of traversing "
+            "from initial -> an orphaned/dead state is never detected",
+        ),
+        Mutant(
+            "undirected_reachability",
+            check_fsm_undirected_reachability,
+            "reachability follows edges in both directions -> an inbound-only "
+            "orphan is wrongly counted reachable",
+        ),
+    ),
+    corpus_size=len(CHECKER_CORPUS),
+    kind="oracle_swap",
+    notes="reachability must be directed-from-initial and one event with two "
+          "targets must be flagged nondeterministic",
+)
+
+
+def list_scenarios() -> List[str]:
+    """Names of the frozen checker-corpus specs (the teeth scenarios)."""
+    return [c.spec.name for c in CHECKER_CORPUS]
+
+
+# ---------------------------------------------------------------------------
+# Report-based self-test — fails loud, reports findings, asserts the teeth.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(as_json: bool = False) -> int:
+    report = Report("core/statemachine")
+
+    # 1. The correct oracle checker must match every frozen corpus verdict.
+    for case in CHECKER_CORPUS:
+        report.record(f"oracle_case:{case.spec.name}",
+                      not _diverges(check_fsm, case), detail=case.note)
+
+    # 2. Harness-specific smoke checks of the shipped FSM logic.
+    order = make_order_machine()
+    report.record("order_happy_path",
+                  TransitionTester(order).run(
+                      [("pay", "PAID"), ("ship", "SHIPPED"), ("deliver", "DELIVERED")]
+                  )[-1]["passed"],
+                  detail="CREATED -> PAID -> SHIPPED -> DELIVERED")
+    order.reset()
+    report.record("order_invalid_rejected",
+                  InvalidTransitionTester(order).test("ship")["passed"],
+                  detail="'ship' from CREATED must raise and leave state unchanged")
+
+    # 3. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
+
+
+# ---------------------------------------------------------------------------
+# CLI — default action is the self-test (repo convention).
+# ---------------------------------------------------------------------------
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="State machine correctness controls")
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true",
+                        help="list the frozen checker-corpus spec names")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
+    return _run_self_test(as_json=args.json)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

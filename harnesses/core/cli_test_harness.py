@@ -18,7 +18,14 @@ import time
 import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Pattern, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -493,6 +500,283 @@ class SampleCliRunner(CliTestRunner):
 
 
 # ---------------------------------------------------------------------------
+# TEETH: a PURE in-process CLI parse/dispatch oracle + planted buggy twins.
+#
+# The CliTestRunner above drives real subprocesses over a real CLI — fine for
+# the legacy self-test and the paired unittest, but non-deterministic and
+# side-effecting. The teeth, by contrast, exercise a PURE in-process model of
+# the *parse -> dispatch -> exit-code* contract that a well-behaved CLI must
+# honour, so the gate can verify "this harness catches a real CLI bug" with
+# zero subprocess/clock/network/filesystem I/O and full determinism.
+#
+# An impl is a parse/dispatch FUNCTION: argv (a tuple of args) -> CliOutcome
+# (exit_code + dispatched action + emitted text). The oracle is the correct
+# parser; each Mutant models a genuine real-world CLI defect (wrong exit code on
+# a usage error, accepting a mutually-exclusive flag combo, mis-dispatching a
+# subcommand). prove() judges an impl against a FROZEN corpus of literal
+# expected outcomes — never against the oracle object — so the check is
+# non-circular.
+# ---------------------------------------------------------------------------
+
+# Conventional CLI exit codes (BSD sysexits-flavoured, as argparse uses).
+EXIT_OK = 0
+EXIT_RUNTIME_ERROR = 1
+EXIT_USAGE_ERROR = 2
+
+
+@dataclass(frozen=True)
+class CliOutcome:
+    """The observable result of parsing+dispatching one argv.
+
+    ``action`` is the subcommand actually dispatched (or a sentinel like
+    "help"/"version"/"usage_error"); ``stream`` records which stream the
+    primary text went to. Equality across all three fields is what the corpus
+    freezes — so a wrong exit code, a mis-dispatch, or output on the wrong
+    stream are all individually observable.
+    """
+
+    exit_code: int
+    action: str
+    stream: str = "stdout"  # "stdout" | "stderr" | "none"
+
+
+# The CLI under model: a tiny tool with two subcommands (`add`, `list`), a
+# global `--verbose` flag, and a `--format {text,json}` option on `list`. The
+# rules the oracle enforces (and each mutant breaks one of):
+#   * no subcommand            -> usage error, exit 2, stderr
+#   * unknown subcommand       -> usage error, exit 2, stderr
+#   * `--help` / `-h`          -> help, exit 0, stdout
+#   * `--version`              -> version, exit 0, stdout
+#   * `add` with < 2 operands  -> usage error, exit 2, stderr
+#   * `list --format bogus`    -> usage error, exit 2 (invalid choice), stderr
+#   * `list --json --format …` -> usage error (mutually exclusive), exit 2
+#   * otherwise dispatch the subcommand -> exit 0, stdout
+
+_SUBCOMMANDS = ("add", "list")
+_FORMATS = ("text", "json")
+
+
+def oracle_dispatch(argv: Tuple[str, ...]) -> CliOutcome:
+    """Correct parse + dispatch + exit-code logic — the contract a real CLI
+    parser (argparse-style) must honour."""
+    args = list(argv)
+
+    # Global help / version take precedence and exit 0 on stdout.
+    if "--help" in args or "-h" in args:
+        return CliOutcome(EXIT_OK, "help", "stdout")
+    if "--version" in args:
+        return CliOutcome(EXIT_OK, "version", "stdout")
+
+    if not args:
+        return CliOutcome(EXIT_USAGE_ERROR, "usage_error", "stderr")
+
+    sub = args[0]
+    rest = args[1:]
+
+    if sub not in _SUBCOMMANDS:
+        return CliOutcome(EXIT_USAGE_ERROR, "usage_error", "stderr")
+
+    if sub == "add":
+        # `add` requires at least two positional operands.
+        operands = [a for a in rest if not a.startswith("-")]
+        if len(operands) < 2:
+            return CliOutcome(EXIT_USAGE_ERROR, "usage_error", "stderr")
+        return CliOutcome(EXIT_OK, "add", "stdout")
+
+    # sub == "list"
+    fmt = "text"
+    json_flag = False
+    i = 0
+    while i < len(rest):
+        tok = rest[i]
+        if tok == "--json":
+            json_flag = True
+            i += 1
+        elif tok == "--format":
+            if i + 1 >= len(rest):
+                return CliOutcome(EXIT_USAGE_ERROR, "usage_error", "stderr")
+            fmt = rest[i + 1]
+            i += 2
+        else:
+            # Unknown option to `list`.
+            return CliOutcome(EXIT_USAGE_ERROR, "usage_error", "stderr")
+    # --json and --format are mutually exclusive.
+    if json_flag and "--format" in rest:
+        return CliOutcome(EXIT_USAGE_ERROR, "usage_error", "stderr")
+    if fmt not in _FORMATS:
+        return CliOutcome(EXIT_USAGE_ERROR, "usage_error", "stderr")
+    return CliOutcome(EXIT_OK, "list", "stdout")
+
+
+# --- Planted buggy twins (each models a real, common CLI defect) -----------
+
+def dispatch_usage_error_exits_zero(argv: Tuple[str, ...]) -> CliOutcome:
+    """BUG: a usage error exits 0 instead of 2.
+
+    A pervasive real defect — a CLI that prints an error to stderr but forgets
+    ``sys.exit(2)`` (or swallows argparse's SystemExit) so the shell, CI, or a
+    calling script sees success and proceeds on a failed invocation.
+    """
+    out = oracle_dispatch(argv)
+    if out.action == "usage_error":
+        return CliOutcome(EXIT_OK, out.action, out.stream)
+    return out
+
+
+def dispatch_accepts_mutually_exclusive(argv: Tuple[str, ...]) -> CliOutcome:
+    """BUG: accepts the mutually-exclusive `list --json --format …` combo.
+
+    Models a CLI that declares two conflicting options but never enforces the
+    exclusion, silently honouring one and ignoring the other instead of failing
+    with a usage error.
+    """
+    args = list(argv)
+    if args[:1] == ["list"] and "--json" in args and "--format" in args:
+        return CliOutcome(EXIT_OK, "list", "stdout")
+    return oracle_dispatch(argv)
+
+
+def dispatch_misroutes_subcommand(argv: Tuple[str, ...]) -> CliOutcome:
+    """BUG: mis-dispatches `list` to the `add` handler.
+
+    Models a subcommand routing table wired to the wrong handler (a copy-paste
+    or fall-through bug) — the command 'succeeds' but runs the wrong action.
+    """
+    out = oracle_dispatch(argv)
+    if out.action == "list":
+        return CliOutcome(out.exit_code, "add", out.stream)
+    return out
+
+
+def dispatch_skips_required_operands(argv: Tuple[str, ...]) -> CliOutcome:
+    """BUG: `add` with too few operands runs anyway (exit 0) instead of erroring.
+
+    Models missing required-argument validation — the handler dispatches with
+    incomplete input rather than rejecting it with a usage error.
+    """
+    args = list(argv)
+    if args[:1] == ["add"] and "--help" not in args and "-h" not in args:
+        return CliOutcome(EXIT_OK, "add", "stdout")
+    return oracle_dispatch(argv)
+
+
+# --- Frozen corpus: argv -> expected outcome -------------------------------
+
+@dataclass(frozen=True)
+class CliOracleCase:
+    name: str
+    argv: Tuple[str, ...]
+    expected: CliOutcome
+    note: str = ""
+
+
+CLI_CORPUS: Tuple[CliOracleCase, ...] = (
+    CliOracleCase(
+        "no_subcommand_usage_error",
+        (),
+        CliOutcome(EXIT_USAGE_ERROR, "usage_error", "stderr"),
+        note="no subcommand -> exit 2 on stderr (catches usage_error_exits_zero)",
+    ),
+    CliOracleCase(
+        "unknown_subcommand_usage_error",
+        ("frobnicate",),
+        CliOutcome(EXIT_USAGE_ERROR, "usage_error", "stderr"),
+        note="unknown subcommand -> exit 2 (catches usage_error_exits_zero)",
+    ),
+    CliOracleCase(
+        "help_exits_zero",
+        ("--help",),
+        CliOutcome(EXIT_OK, "help", "stdout"),
+        note="--help -> exit 0 on stdout",
+    ),
+    CliOracleCase(
+        "version_exits_zero",
+        ("--version",),
+        CliOutcome(EXIT_OK, "version", "stdout"),
+        note="--version -> exit 0 on stdout",
+    ),
+    CliOracleCase(
+        "add_two_operands_ok",
+        ("add", "1", "2"),
+        CliOutcome(EXIT_OK, "add", "stdout"),
+        note="well-formed add dispatches and succeeds",
+    ),
+    CliOracleCase(
+        "add_one_operand_usage_error",
+        ("add", "1"),
+        CliOutcome(EXIT_USAGE_ERROR, "usage_error", "stderr"),
+        note="add with < 2 operands -> exit 2 (catches skips_required_operands)",
+    ),
+    CliOracleCase(
+        "list_plain_ok",
+        ("list",),
+        CliOutcome(EXIT_OK, "list", "stdout"),
+        note="bare list dispatches to the list handler (catches misroutes_subcommand)",
+    ),
+    CliOracleCase(
+        "list_format_json_ok",
+        ("list", "--format", "json"),
+        CliOutcome(EXIT_OK, "list", "stdout"),
+        note="list --format json is valid",
+    ),
+    CliOracleCase(
+        "list_bad_format_usage_error",
+        ("list", "--format", "xml"),
+        CliOutcome(EXIT_USAGE_ERROR, "usage_error", "stderr"),
+        note="invalid --format choice -> exit 2",
+    ),
+    CliOracleCase(
+        "list_mutually_exclusive_usage_error",
+        ("list", "--json", "--format", "json"),
+        CliOutcome(EXIT_USAGE_ERROR, "usage_error", "stderr"),
+        note="--json and --format conflict -> exit 2 (catches accepts_mutually_exclusive)",
+    ),
+)
+
+
+def prove(impl: Callable[[Tuple[str, ...]], CliOutcome]) -> bool:
+    """True iff parse/dispatch ``impl`` MISHANDLES any frozen corpus case.
+
+    Non-circular and deterministic: each impl outcome is compared to the case's
+    frozen expected ``CliOutcome`` (literal constant), never to the oracle
+    object. No subprocess, clock, network, or filesystem I/O; no RNG. An impl
+    that raises on a corpus case counts as caught.
+    """
+    for case in CLI_CORPUS:
+        try:
+            outcome = impl(case.argv)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if outcome != case.expected:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_dispatch,
+    mutants=(
+        Mutant("usage_error_exits_zero", dispatch_usage_error_exits_zero,
+               "usage error exits 0 instead of 2 — callers see success on a failed invocation"),
+        Mutant("accepts_mutually_exclusive", dispatch_accepts_mutually_exclusive,
+               "accepts the mutually-exclusive --json/--format combo instead of erroring"),
+        Mutant("misroutes_subcommand", dispatch_misroutes_subcommand,
+               "dispatches `list` to the `add` handler — runs the wrong action"),
+        Mutant("skips_required_operands", dispatch_skips_required_operands,
+               "`add` runs with too few operands instead of a usage error"),
+    ),
+    corpus_size=len(CLI_CORPUS),
+    kind="oracle_swap",
+    notes="a usage error must exit 2, conflicting flags must be rejected, and each "
+          "subcommand must dispatch to its own handler",
+)
+
+
+def list_oracle_cases() -> List[str]:
+    return [c.name for c in CLI_CORPUS]
+
+
+# ---------------------------------------------------------------------------
 # Built-in self-test suite
 # ---------------------------------------------------------------------------
 
@@ -591,12 +875,50 @@ def _build_self_test_suite(runner: SampleCliRunner) -> List[CliTestCase]:
 
 
 def run_self_test(verbose: bool = False) -> int:
-    """Run built-in self-tests. Returns 0 on all pass, 1 on any failure."""
+    """Legacy subprocess-driven self-test: spawns the sample CLI and validates
+    its behaviour. Returns 0 on all pass, 1 on any failure.
+
+    Retained as a real end-to-end smoke test, but it is NOT the teeth: it uses
+    subprocesses (non-deterministic, side-effecting), so the campaign self-test
+    below gates on the pure in-process oracle/teeth instead and only runs this
+    when subprocess execution is requested.
+    """
     runner = SampleCliRunner()
     cases = _build_self_test_suite(runner)
     report = runner.run_suite(cases)
     print(report.summary())
     return 0 if report.success else 1
+
+
+# ---------------------------------------------------------------------------
+# Report-based self-test — fails loud, reports findings, asserts the teeth.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(as_json: bool = False, *, subprocess_smoke: bool = False) -> int:
+    """Campaign self-test.
+
+    1. The correct oracle parser agrees with every frozen corpus expectation.
+    2. Teeth: the oracle is clean and every planted mutant IS caught.
+    3. (optional) The legacy subprocess smoke test of the sample CLI — skipped
+       by default so the teeth/oracle checks stay pure, deterministic, and
+       side-effect-free.
+    """
+    report = Report("core/cli")
+
+    # 1. The correct oracle dispatch agrees with every frozen expectation.
+    for case in CLI_CORPUS:
+        report.add(f"oracle_case:{case.name}", case.expected,
+                   oracle_dispatch(case.argv), detail=case.note)
+
+    # 2. Teeth: oracle is not flagged and every planted mutant IS flagged.
+    report.assert_teeth(TEETH)
+
+    # 3. Optional live subprocess smoke test of the sample CLI.
+    if subprocess_smoke:
+        report.record("subprocess_smoke", run_self_test() == 0,
+                      detail="sample CLI driven over real subprocesses")
+
+    return report.emit(as_json=as_json)
 
 
 # ---------------------------------------------------------------------------
@@ -613,7 +935,22 @@ def _parse_args(argv: Optional[List[str]] = None) -> Any:
     p.add_argument(
         "--self-test",
         action="store_true",
-        help="Run built-in self-test suite against sample CLI",
+        help="Run the campaign self-test (oracle + teeth)",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        help="emit machine-readable findings (implies --self-test)",
+    )
+    p.add_argument(
+        "--list-scenarios",
+        action="store_true",
+        help="list the frozen oracle corpus case names",
+    )
+    p.add_argument(
+        "--subprocess-smoke",
+        action="store_true",
+        help="also run the legacy subprocess-driven sample-CLI smoke test",
     )
     p.add_argument(
         "--verbose",
@@ -625,10 +962,11 @@ def _parse_args(argv: Optional[List[str]] = None) -> Any:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv)
-    if args.self_test:
-        return run_self_test(verbose=args.verbose)
-    print("CLI Test Harness ready. Use --self-test to run the built-in suite.")
-    return 0
+    if args.list_scenarios:
+        print("\n".join(list_oracle_cases()))
+        return 0
+    # Default action (and --self-test/--json) is the campaign self-test.
+    return _run_self_test(as_json=args.json, subprocess_smoke=args.subprocess_smoke)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ import unittest
 import urllib.request
 import urllib.error
 
+from harnesses._teeth import verify
 from harnesses.core.serialization_test_harness import (
     SerializationFormat,
     RoundtripResult,
@@ -20,6 +21,9 @@ from harnesses.core.serialization_test_harness import (
     MockSerializationHandler,
     SerializationServer,
     make_server,
+    TEETH,
+    prove,
+    oracle_roundtrip,
 )
 
 
@@ -909,6 +913,33 @@ class TestEdgeCases(unittest.TestCase):
         result = self.tester.test_json(data)
         self.assertTrue(result.passed)
         self.assertEqual(result.decoded["a"]["b"]["c"]["d"], 42)
+
+
+# ===========================================================================
+# Teeth: the harness must catch a real planted serialization bug.
+# ===========================================================================
+
+class TestTeeth(unittest.TestCase):
+    """The harness must catch a real planted bug (the campaign teeth contract)."""
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct oracle roundtrip must NOT be flagged by prove.
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+        self.assertFalse(prove(oracle_roundtrip))
+
+    def test_every_mutant_is_caught(self):
+        # Each planted defect must be individually caught.
+        self.assertEqual(len(TEETH.mutants), 3)
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
 
 
 if __name__ == "__main__":
