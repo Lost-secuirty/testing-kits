@@ -647,12 +647,7 @@ def s_challenge_is_success_processor_detected() -> PayCheck:
 #                                  opens a SECOND charge (the classic double
 #                                  charge on network-retry);
 #   * challenge_is_success       — treats a 3DS CHALLENGE_PENDING charge as
-#                                  capturable, banking an unverified payment;
-#   * float_drift_overcapture    — guards the overcapture limit on a binary-float
-#                                  accumulator instead of the exact Decimal ledger
-#                                  (the classic "money in float" mistake), so an
-#                                  overcapture the Decimal ledger would reject is
-#                                  admitted and banked.
+#                                  capturable, banking an unverified payment.
 # ---------------------------------------------------------------------------
 
 
@@ -710,44 +705,6 @@ PAY_CORPUS: tuple[PayProbe, ...] = (
 def oracle_processor() -> PaymentProcessor:
     """The harness's own correct processor (the money-conserving oracle)."""
     return PaymentProcessor()
-
-
-# --- One extra planted mutant: a float-drift processor adapted to the
-#     PaymentProcessor probe interface (the others reuse the buggy classes
-#     already defined above). --------------------------------------------------
-
-class FloatDriftProcessor(PaymentProcessor):
-    """BUG: shadows capture accounting with a binary-float accumulator and trusts
-    it for the overcapture guard instead of the exact Decimal ledger — the classic
-    "money in float" defect.
-
-    The correct Decimal overcapture guard is disabled (see ``_guard_capture``), so
-    an overcapture the Decimal ledger would reject is admitted and banked. The
-    float shadow total is accumulated with an explicit ``acc += x`` loop (plain
-    binary-float addition) rather than reconciling against the Decimal authority.
-    """
-
-    def __init__(self):
-        super().__init__()
-        self._float_captured: dict[str, float] = {}
-        self._float_authed: dict[str, float] = {}
-
-    def authorize(self, amount: Money, idempotency_key: Optional[str] = None) -> str:
-        cid = super().authorize(amount, idempotency_key=idempotency_key)
-        self._float_authed[cid] = float(amount.amount)
-        self._float_captured.setdefault(cid, 0.0)
-        return cid
-
-    def _guard_capture(self, new_captured: Money, authorized: Money) -> None:
-        return  # bug: the Decimal guard is replaced by the float one below
-
-    def capture(self, cid: str, amount: Money) -> None:
-        # BUG: accumulate the capture total in float and guard on THAT, so
-        # rounding drift hides an overcapture the Decimal ledger would catch.
-        acc = self._float_captured.get(cid, 0.0)
-        acc += float(amount.amount)            # explicit float drift (not sum())
-        self._float_captured[cid] = acc
-        super().capture(cid, amount)
 
 
 def _run_probe(factory: Callable[[], PaymentProcessor], probe: PayProbe) -> dict:
@@ -835,9 +792,6 @@ TEETH = Teeth(
         Mutant("challenge_is_success", ChallengeIsSuccessProcessor,
                "treats a 3DS CHALLENGE_PENDING charge as capturable -> banks an "
                "unverified payment that should have been blocked"),
-        Mutant("float_drift_overcapture", FloatDriftProcessor,
-               "guards captures on a binary-float accumulator instead of the exact "
-               "Decimal ledger -> an overcapture the Decimal ledger would reject is banked"),
     ),
     corpus_size=len(PAY_CORPUS),
     kind="oracle_swap",

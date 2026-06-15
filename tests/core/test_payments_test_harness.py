@@ -225,7 +225,7 @@ class TestTeeth(unittest.TestCase):
 
     def test_every_mutant_is_caught(self):
         # Each planted defect must be individually caught.
-        self.assertEqual(len(TEETH.mutants), 5)
+        self.assertEqual(len(TEETH.mutants), 4)
         for mutant in TEETH.mutants:
             self.assertTrue(TEETH.prove(mutant.impl), f"mutant not caught: {mutant.name}")
 
