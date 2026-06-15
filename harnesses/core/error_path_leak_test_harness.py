@@ -30,7 +30,7 @@ import argparse
 import random
 import sys
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable
 
 # Make the shared teeth contract importable whether run as a module or a script.
@@ -234,7 +234,6 @@ def _make_leaky_pool() -> TargetSpec:
         return {"id": id(object()), "_tracker": tracker, "_released": False}
 
     def operation_bad(resource: dict) -> None:
-        tracker = resource["_tracker"]
         # BUG: this raises before releasing on the error path, and the
         # caller doesn't release in finally.
         raise TransientError("downstream failure")

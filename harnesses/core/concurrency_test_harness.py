@@ -13,7 +13,6 @@ on every run with zero real thread timing, clock, network, or filesystem I/O.
 import threading
 import queue
 import time
-import socket
 import json
 import random
 import logging
@@ -1124,7 +1123,7 @@ class ConcurrentHTTPTest:
     def run_counter_test(self) -> Dict[str, Any]:
         """Send N requests to /counter and check total count."""
         # Reset first
-        with urllib.request.urlopen(f"{self.base_url}/reset", timeout=5) as r:
+        with urllib.request.urlopen(f"{self.base_url}/reset", timeout=5):
             pass
 
         results: List = []

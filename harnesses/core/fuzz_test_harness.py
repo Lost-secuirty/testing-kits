@@ -13,12 +13,9 @@ import traceback
 import hashlib
 import threading
 import time
-import json
 import socket
-import io
-import struct
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from collections import defaultdict

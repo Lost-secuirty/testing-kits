@@ -13,12 +13,9 @@ import hmac
 import http.server
 import json
 import re
-import socket
 import sys
 import threading
-import time
 import urllib.request
-from collections import defaultdict
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Set, Tuple
 

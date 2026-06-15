@@ -5,22 +5,16 @@ Pure stdlib, zero external dependencies.
 
 import argparse
 import gzip
-import hashlib
 import io
-import ipaddress
 import os
 import re
-import socket
-import struct
 import sys
 import threading
-import time
 import zlib
 import zipfile
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Callable, Dict, List, Optional, Tuple
-from urllib.parse import parse_qs
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys

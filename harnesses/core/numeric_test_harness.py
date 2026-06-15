@@ -11,7 +11,6 @@ import math
 import threading
 import json
 import http.server
-import socket
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_EVEN, ROUND_HALF_UP, ROUND_FLOOR, ROUND_CEILING, InvalidOperation
 from typing import Callable, List, Optional, Tuple

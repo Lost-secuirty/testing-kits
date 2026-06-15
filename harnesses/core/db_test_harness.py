@@ -20,8 +20,6 @@ import queue
 import logging
 import argparse
 import sys
-import os
-import traceback
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -425,7 +423,7 @@ class MigrationChecker:
         """Run apply_all twice; second run must return no newly applied migrations."""
         if migrations is None:
             migrations = MIGRATIONS
-        first_run = self.apply_all(migrations)
+        self.apply_all(migrations)
         second_run = self.apply_all(migrations)
         return len(second_run) == 0
 
@@ -500,8 +498,8 @@ class TransactionTester:
 
     def test_rollback_on_error(self) -> Dict[str, Any]:
         """Return a dict describing rollback test results."""
-        alice_id = self.seed("alice_txn", 1000.0)
-        bob_id = self.seed("bob_txn", 500.0)
+        self.seed("alice_txn", 1000.0)
+        self.seed("bob_txn", 500.0)
 
         success = self.transfer("alice_txn", "bad_account", 200.0)
         alice_balance = self.get_balance("alice_txn")
@@ -813,7 +811,7 @@ class DbTestRunner:
             res.record("NOT NULL raises IntegrityError", not_null_raised)
 
             # UNIQUE constraint
-            uid = db.insert_user("Bob", "bob@example.com")
+            db.insert_user("Bob", "bob@example.com")
             unique_raised = False
             try:
                 db._conn.execute(

@@ -7,7 +7,6 @@ Default mock server port: 18910
 
 import argparse
 import html
-import http.server
 import re
 import socket
 import sys
@@ -276,7 +275,6 @@ class PaginationTester:
         links = parser.get_links(base_url=current_url)
         for link in links:
             text = link.get('text', '')
-            rel = SimpleHTMLParser._get_attr(link.get('_raw', ''), 'rel') or ''
             # Check link text
             for pat in self.NEXT_PATTERNS:
                 if re.search(pat, text):
@@ -501,7 +499,7 @@ def _http_get(url: str, timeout: int = 10, follow_redirects: bool = True,
                 'redirect_chain': redirect_chain,
                 'error': str(e),
             }
-        except urllib.error.URLError as e:
+        except urllib.error.URLError:
             # May be a redirect that urllib didn't follow (shouldn't happen normally)
             raise
 
@@ -699,7 +697,6 @@ class MockScraperHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
-        query = urllib.parse.parse_qs(parsed.query)
 
         # Route requests
         if path == '/robots.txt':
