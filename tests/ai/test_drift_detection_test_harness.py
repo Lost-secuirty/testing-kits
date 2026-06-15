@@ -1,12 +1,15 @@
 """Test suite for drift_detection_test_harness."""
 
+import dataclasses
 import unittest
 
+from harnesses._teeth import verify
 from harnesses.ai.drift_detection_test_harness import (
     CENTROID_ALERT,
     COSINE_DROP_ALERT,
     DRIFT_BASE_DIST,
     DRIFT_CUR_DIST,
+    DRIFT_VERDICT_CORPUS,
     DRIFTED_CASE,
     EMB_BASE,
     EMB_CUR,
@@ -21,6 +24,7 @@ from harnesses.ai.drift_detection_test_harness import (
     SCENARIOS,
     SPEARMAN_ALERT,
     STABLE_CASE,
+    TEETH,
     VERSION_MISMATCH_CASE,
     DriftReport,
     _run_self_test,
@@ -36,6 +40,8 @@ from harnesses.ai.drift_detection_test_harness import (
     js_div,
     kl_div,
     list_scenarios,
+    oracle_drift_detector,
+    prove,
     psi,
     psi_zero_floor,
     rank_overlap_only,
@@ -128,6 +134,61 @@ class TestSelfTest(unittest.TestCase):
 
     def test_self_test_passes(self):
         self.assertEqual(_run_self_test(), 0)
+
+
+# ===========================================================================
+# Teeth — the harness must catch a real planted drift-detector bug
+# ===========================================================================
+
+class TestTeeth(unittest.TestCase):
+    """The harness must catch a real planted bug (the campaign teeth contract)."""
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct PSI@0.25 detector must NOT be flagged by prove.
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+        self.assertFalse(prove(oracle_drift_detector))
+
+    def test_every_mutant_is_caught(self):
+        # Each planted asleep-/trigger-happy detector must be individually caught.
+        self.assertEqual(len(TEETH.mutants), 3)
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
+        self.assertEqual(TEETH.corpus_size, len(DRIFT_VERDICT_CORPUS))
+
+    def test_oracle_matches_frozen_literals(self):
+        # The frozen verdicts are non-circular constants the oracle must reproduce.
+        for case in DRIFT_VERDICT_CORPUS:
+            self.assertEqual(
+                oracle_drift_detector(case.base_dist, case.cur_dist),
+                case.expected_drift, case.name)
+
+    def test_noncircular_corpus(self):
+        # Corrupt ONE frozen verdict literal and confirm prove(oracle) flips
+        # False -> True. If it does not flip, the corpus is circular (re-derived
+        # from the oracle at runtime) rather than judged against frozen literals.
+        self.assertFalse(prove(oracle_drift_detector))
+        original = DRIFT_VERDICT_CORPUS[0]
+        corrupted = dataclasses.replace(original, expected_drift=not original.expected_drift)
+        patched = (corrupted,) + DRIFT_VERDICT_CORPUS[1:]
+        import harnesses.ai.drift_detection_test_harness as mod
+        saved = mod.DRIFT_VERDICT_CORPUS
+        try:
+            mod.DRIFT_VERDICT_CORPUS = patched
+            self.assertTrue(prove(oracle_drift_detector),
+                            "prove(oracle) must flip to True when a frozen verdict "
+                            "literal is corrupted; otherwise the corpus is circular")
+        finally:
+            mod.DRIFT_VERDICT_CORPUS = saved
+        # restored: the oracle is clean again
+        self.assertFalse(prove(oracle_drift_detector))
 
 
 if __name__ == "__main__":
