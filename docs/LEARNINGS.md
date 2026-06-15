@@ -116,3 +116,29 @@ Append-only log of gotchas, fixes, API surprises, tool behavior, and verificatio
 - The network/post_path test (`test_network_test_harness`) is a PRE-EXISTING flaky
   localhost-timeout (2s) test — fires ~1/7 under CPU load on native Windows, green on Linux
   CI; tracked as a separate fix, NOT a Batch 1 regression.
+
+## 2026-06-15 - Batch 2: real TEETH for 10 heavy-rewrite harnesses (branch feat/batch2-teeth)
+
+- Flipped 10 more harnesses pending → required (gate now **29 required / 40 pending / 8
+  legacy / 0 failing**, full suite 4539 OK): core/{db,scraper,fuzz,numeric,concurrency,
+  error_path_leak,schema_evolution}, security/{supplychain,upload}, ai/agent_memory_context.
+  Two waves (7 core, then 2 security + 1 ai) via bounded agent workflows + adversarial
+  verify + independent ground-truth re-run.
+- **numeric trap:** Python 3.12+ built-in `sum()` uses Neumaier compensation, so a "naive
+  sum" mutant calling `sum()` would NOT diverge on 3.12-3.14 (a false-green teeth). The
+  buggy mutant must accumulate with an explicit `+=` loop. (Same root cause as the Batch-6
+  numeric fix.)
+- **concurrency trap:** real thread races are flaky/non-deterministic — prove() must model
+  the bad interleaving deterministically (forced ordering / single-thread sim), never spawn
+  threads. Verified prove() is thread-free.
+- **ai circularity trap (the failure the gate cannot catch):** agent_memory_context prove()
+  judges retriever output against FROZEN `EXPECTED_RETRIEVED` id-tuples — never a model
+  output / embedding / the oracle. Confirmed independent by corrupting a literal →
+  prove(oracle) flips. This is exactly the answer-leak / stable-by-construction failure the
+  DEP-TEST-KIT retro flagged for AI harnesses; the frozen-literal corpus avoids it.
+- Corrected an over-claiming comment in the db injection mutant: the stacked
+  `'); DROP TABLE users;--` payload may abort on the malformed first INSERT before the DROP
+  runs — the bug is still caught (no clean row stored), just via a different path.
+- Security harnesses got real teeth without a separate `test_*_proof.py`: the modern
+  TEETH + paired `TestTeeth` + `assert_teeth` self-test supersedes the older proof-test
+  convention.
