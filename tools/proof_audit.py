@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -106,8 +107,14 @@ def _teeth_failure_reasons(teeth: dict) -> list[str]:
     return reasons
 
 
+# A real module-level ``TEETH = ...`` / ``TEETH: ... = ...`` declaration at column 0
+# — not e.g. ``TEETH_VERSION`` or the letters TEETH inside a docstring. Mirrored in
+# tools/mutmut_lane.py; keep both in sync.
+_TEETH_DECL = re.compile(r"^TEETH\s*[:=]", re.MULTILINE)
+
+
 def _declares_teeth(path: Path) -> bool:
-    """Source-level check: does this harness textually declare a module-level TEETH?
+    """Source-level check: does this harness declare a module-level ``TEETH`` object?
 
     Used only to tell a *broken* required harness (declares TEETH but failed to
     import -> blocks) apart from a still-pending one (no TEETH -> an import/runner
@@ -118,7 +125,7 @@ def _declares_teeth(path: Path) -> bool:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return False
-    return "\nTEETH" in text or text.startswith("TEETH")
+    return _TEETH_DECL.search(text) is not None
 
 
 def audit_harnesses(

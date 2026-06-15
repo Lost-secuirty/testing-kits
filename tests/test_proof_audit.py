@@ -148,10 +148,15 @@ class ProofAuditToolTests(unittest.TestCase):
             root = Path(tmp)
             has = root / "harnesses/core/has_test_harness.py"
             none = root / "harnesses/core/none_test_harness.py"
+            lookalike = root / "harnesses/core/lookalike_test_harness.py"
             _write(has, "import json\nTEETH = object()\n")
             _write(none, "import json\n# no teeth declared yet\n")
+            # A column-0 look-alike (TEETH_VERSION, or TEETH in a comment/docstring)
+            # must NOT count as a real declaration, or it could wrongly block main.
+            _write(lookalike, "TEETH_VERSION = '1'\n# mentions TEETH in a comment\n")
             self.assertTrue(_declares_teeth(has))
             self.assertFalse(_declares_teeth(none))
+            self.assertFalse(_declares_teeth(lookalike))
 
     def test_unicode_selftest_output_does_not_crash_runner(self):
         with self._fixture_root() as tmp:

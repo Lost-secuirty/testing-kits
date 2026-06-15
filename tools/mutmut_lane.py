@@ -23,6 +23,7 @@ on any platform; the live mutmut run is exercised by the advisory CI job.
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
@@ -30,6 +31,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LEGACY_CATEGORIES = {"pharmacy"}
+
+# A real module-level TEETH assignment/annotation at column 0 (mirrors
+# tools/proof_audit.py._TEETH_DECL — keep both in sync).
+_TEETH_DECL = re.compile(r"^TEETH\s*[:=]", re.MULTILINE)
 
 
 def _skip(reason: str) -> int:
@@ -44,7 +49,7 @@ def teeth_harnesses() -> list[str]:
         if path.name == "__init__.py" or path.parts[-2] in LEGACY_CATEGORIES:
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
-        if "\nTEETH" in text or text.startswith("TEETH"):
+        if _TEETH_DECL.search(text):
             found.append(path.relative_to(REPO_ROOT).as_posix())
     return found
 
