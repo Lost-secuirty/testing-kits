@@ -88,3 +88,31 @@ Append-only log of gotchas, fixes, API surprises, tool behavior, and verificatio
   **4420 tests OK** (153s). The proof_audit tool's own tests were rewritten in lockstep
   (the 3 keyword-era tests moved to the legacy path; added swap-check + real-repo
   required-path coverage).
+
+## 2026-06-15 - Batch 1: real TEETH for 10 BRONZE/near-GOLD harnesses (branch feat/batch1-teeth)
+
+- Flipped 10 harnesses pending → required (gate now **19 required / 50 pending / 8 legacy
+  / 0 failing**): core/{api,cache,cli,config,contract,null_propagation,pagination,
+  serialization,statemachine}, security/authz. Done in two waves via bounded agent
+  workflows (3 near-GOLD, then 7 BRONZE); each agent's work was adversarially verified by
+  a second agent plus an independent ground-truth re-run (teeth_check + --self-test + paired
+  unittest + gate).
+- The 3 "near-empty stubs" from the Batch 0 plan (authz/config/contract) were NOT empty —
+  they were 420-660 line functional BRONZE harnesses. Survey the real file before trusting
+  a plan's characterization.
+- **Circularity is the failure mode the gate CANNOT catch.** `teeth_verified` only asserts
+  prove(oracle)=False and prove(mutant)=True — a CIRCULAR prove() (comparing impl to the
+  oracle at runtime) satisfies both and is vacuous. Every prove() here judges impl against a
+  FROZEN literal corpus instead; confirmed by corrupting one literal and watching
+  prove(oracle) flip False→True (authz). This is now the standard adversarial check.
+- Reused each harness's existing correct logic as the oracle and planted faithful mutants
+  modelling real bugs (RBAC fail-open / deny-precedence / ownership over-grant; env-not-
+  overriding-file; 2**53+1 int→float serialization corruption; `>=` vs `>` page-boundary
+  duplication; nondeterministic transition not flagged) — not trivial syntactic breaks.
+- Non-blocking notes carried forward: core/cli has 2 mutants each caught by a single
+  load-bearing corpus case (teeth hold; add redundancy when convenient); core/config's own
+  EnvOverrideChecker has a dead `config_key` var (pre-existing; teeth use an independent
+  helper); core/contract emits DEBUG logging during its socket smoke test (cosmetic).
+- The network/post_path test (`test_network_test_harness`) is a PRE-EXISTING flaky
+  localhost-timeout (2s) test — fires ~1/7 under CPU load on native Windows, green on Linux
+  CI; tracked as a separate fix, NOT a Batch 1 regression.

@@ -19,25 +19,30 @@ and **reports its findings** (structured). Gate + contract are documented in
   → `--self-test`/`--json` `Report` → pair unittest → (security/ai: proof test) →
   flip `pending → required` → draft PR (operator merges).
 
-## Status snapshot (Batch 0, 2026-06-14)
+## Status snapshot (Batch 1, 2026-06-15)
 
 | Scope | Count | Meaning |
 |---|---:|---|
-| required (teeth verified) | 9 | proven by the swap-check; gate blocks on these |
-| pending | 60 | in scope, no `TEETH` yet — counted, non-blocking |
+| required (teeth verified) | 19 | proven by the swap-check; gate blocks on these |
+| pending | 50 | in scope, no `TEETH` yet — counted, non-blocking |
 | legacy (pharmacy) | 8 | older soft gate, out of campaign |
 
-**required (9):** core/check_digit_identifier, core/feature_flag, core/graphql,
+**required (19):** core/check_digit_identifier, core/feature_flag, core/graphql,
 core/grpc_contract, core/idempotency, core/queue, core/tracing,
-security/ci_workflow_hardening, security/diff_secret_gate.
+security/ci_workflow_hardening, security/diff_secret_gate · **+Batch 1:** core/api,
+core/cache, core/cli, core/config, core/contract, core/null_propagation,
+core/pagination, core/serialization, core/statemachine, security/authz.
 
 ## Batch roadmap (provisional; exact membership ranked at each batch start)
 
 - **Batch 0 — Foundation (this PR):** teeth machinery, hardened gate, advisory
   mutmut lane, GOLD template, 9 GOLD anchors, docs. No non-GOLD harness rewrites.
-- **Batch 1 — BRONZE, establish rewrite+TEETH pipeline:** security/authz, core/config,
-  core/contract (the 3 near-empty stubs) + core/api, core/cache, core/cli,
-  core/serialization, core/pagination, core/statemachine, core/null_propagation.
+- **Batch 1 — DONE (2026-06-15):** real TEETH wired into 10 BRONZE/near-GOLD harnesses,
+  all flipped pending → required: security/authz, core/config, core/contract (these 3
+  were substantial BRONZE, NOT "near-empty stubs" as first assumed), core/api, core/cache,
+  core/cli, core/serialization, core/pagination, core/statemachine, core/null_propagation.
+  Pattern: frozen literal corpus + reused-correct-logic oracle + faithful planted
+  mutant(s) + Report `--self-test` + paired `TestTeeth`; adversarially verified non-circular.
 - **Batch 2 — BRONZE heavy rewrites:** core/db, core/scraper, core/fuzz, core/numeric,
   core/concurrency, core/error_path_leak, core/schema_evolution, security/supplychain,
   security/upload, ai/agent_memory_context.
@@ -72,16 +77,16 @@ security/ci_workflow_hardening, security/diff_secret_gate.
 ## Full in-scope status
 Legend: `R` required · `P` pending · (pharmacy = legacy, omitted).
 
-**core (52):** R check_digit_identifier, feature_flag, graphql, grpc_contract,
-idempotency, queue, tracing · P a11y, api, browser_e2e, cache, canvas_scene_state,
-cardinality, chaos, circuitbreaker, cli, clock_skew, complexity, concurrency, config,
-contract, datetime, db, dormant_code, error_path_leak, errorpath, fuzz,
-game_loop_simulation, hermeticity, i18n, iot_telemetry, lexical_date_canonicalization,
-logging, memory, mutation, network, null_propagation, numeric, pagination, payments,
+**core (52):** R api, cache, check_digit_identifier, cli, config, contract, feature_flag,
+graphql, grpc_contract, idempotency, null_propagation, pagination, queue, serialization,
+statemachine, tracing · P a11y, browser_e2e, canvas_scene_state, cardinality, chaos,
+circuitbreaker, clock_skew, complexity, concurrency, datetime, db, dormant_code,
+error_path_leak, errorpath, fuzz, game_loop_simulation, hermeticity, i18n, iot_telemetry,
+lexical_date_canonicalization, logging, memory, mutation, network, numeric, payments,
 pipeline, property, ratelimit, regression_snapshot, schema_evolution, scraper,
-search_relevance, serialization, statemachine, statistical_rng_oracle, stress, webhook
+search_relevance, statistical_rng_oracle, stress, webhook
 
-**security (10):** R ci_workflow_hardening, diff_secret_gate · P appsec, authz,
+**security (10):** R authz, ci_workflow_hardening, diff_secret_gate · P appsec,
 cwe_kev_regression, jwt, pii_redaction, security, supplychain, upload
 
 **ai (7):** P agent_eval, agent_memory_context, agentic, drift_detection, llm_eval,
