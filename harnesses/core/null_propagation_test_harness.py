@@ -612,7 +612,7 @@ def list_scenarios() -> list[str]:
     return [t.name for t in _self_test_targets()]
 
 
-def _run_self_test(config: NullProbeConfig, verbose: bool = False) -> int:
+def _run_self_test(config: NullProbeConfig, verbose: bool = False, as_json: bool = False) -> int:
     runner = NullProbeRunner(config)
     targets = _self_test_targets()
     results = runner.run(targets)
@@ -621,35 +621,34 @@ def _run_self_test(config: NullProbeConfig, verbose: bool = False) -> int:
     if verbose:
         for r in results:
             print(f"  [{r.outcome.value:14s}] {r.target}/{r.param_path}/{r.mutation}: {r.detail}")
+    if not as_json:
+        print(f"Probed {summary['total']} mutations across {len(targets)} targets: "
+              f"handled={summary['handled']} silently_wrong={summary['silently_wrong']} "
+              f"crash={summary['crash']}")
 
-    print(f"Probed {summary['total']} mutations across {len(targets)} targets:")
-    print(f"  handled:        {summary['handled']}")
-    print(f"  silently_wrong: {summary['silently_wrong']}")
-    print(f"  crash:          {summary['crash']}")
+    report = Report("core/null_propagation")
 
     # Acceptance: good_* targets must have 0 crashes; bad_* must surface at least one issue.
-    failures: list[str] = []
     by_target: dict[str, list[ProbeResult]] = {}
     for r in results:
         by_target.setdefault(r.target, []).append(r)
-
     for name, rs in by_target.items():
         crashes = [r for r in rs if r.outcome == Outcome.CRASH]
         bad = [r for r in rs if r.outcome == Outcome.SILENTLY_WRONG]
-        if name.startswith("good_") and crashes:
-            failures.append(f"{name}: {len(crashes)} crash(es) — should have been typed errors")
-        if name.startswith("bad_") and not (crashes or bad):
-            failures.append(f"{name}: harness did not detect the planted bug")
-        if name == "silently_wrong_format" and not bad:
-            failures.append(f"{name}: harness did not detect silent coercion")
+        if name.startswith("good_"):
+            report.record(f"good_no_crash:{name}", not crashes,
+                          detail=f"{len(crashes)} crash(es) — should have been typed errors")
+        if name.startswith("bad_"):
+            report.record(f"bad_detected:{name}", bool(crashes or bad),
+                          detail="harness must detect the planted bug")
+        if name == "silently_wrong_format":
+            report.record("silent_coercion_detected", bool(bad),
+                          detail="harness must detect silent coercion")
 
-    if failures:
-        print("FAILED:", file=sys.stderr)
-        for f in failures:
-            print(f"  - {f}", file=sys.stderr)
-        return 1
-    print("OK: all acceptance criteria met.")
-    return 0
+    # Teeth: the oracle is clean and every planted mutant IS caught (fail loud here too).
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
 
 
 # ---------------------------------------------------------------------------
@@ -663,6 +662,8 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--self-test", action="store_true", help="Run built-in self-test")
+    p.add_argument("--json", action="store_true",
+                   help="emit machine-readable findings (implies --self-test)")
     p.add_argument("--list-scenarios", action="store_true", help="List built-in target scenarios")
     p.add_argument("--depth", type=int, default=3, help="Max recursion depth (default 3)")
     p.add_argument("--verbose", action="store_true", help="Print every probe result")
@@ -676,8 +677,8 @@ def main() -> int:
             print(s)
         return 0
     config = NullProbeConfig(depth=args.depth)
-    if args.self_test:
-        return _run_self_test(config, verbose=args.verbose)
+    if args.self_test or args.json:
+        return _run_self_test(config, verbose=args.verbose, as_json=args.json)
     # Default: print help.
     build_parser().print_help()
     return 0

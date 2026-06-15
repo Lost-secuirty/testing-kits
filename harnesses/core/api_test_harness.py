@@ -749,10 +749,13 @@ def _audit_response(resp: HandledResponse, case: ApiOracleCase) -> List[str]:
         if e:
             errors.append(e)
 
-    if case.expected_schema is not None and resp.body is not None:
-        e = validator.validate_schema(resp.body, case.expected_schema)
-        if e:
-            errors.append(e)
+    if case.expected_schema is not None:
+        if resp.body is None:
+            errors.append("body missing for expected schema")
+        else:
+            e = validator.validate_schema(resp.body, case.expected_schema)
+            if e:
+                errors.append(e)
 
     if case.expected_headers is not None:
         actual = {k.lower(): v for k, v in resp.headers}
@@ -893,7 +896,7 @@ def _self_test(port: int = 18900) -> bool:
     return ok
 
 
-def _run_self_test(as_json: bool = False, *, networked: bool = True) -> int:
+def _run_self_test(as_json: bool = False, *, networked: bool = True, port: int = 18900) -> int:
     """Report-based self-test: fail loud, report structured findings.
 
     1. The pure in-process oracle handler satisfies every frozen corpus case.
@@ -914,7 +917,7 @@ def _run_self_test(as_json: bool = False, *, networked: bool = True) -> int:
 
     # 3. Live mock-server smoke test (uses a socket; opt-out for pure runs).
     if networked:
-        report.record("mock_server_smoke", _self_test(), detail="MockApiHandler over a socket")
+        report.record("mock_server_smoke", _self_test(port), detail="MockApiHandler over a socket")
 
     return report.emit(as_json=as_json)
 
@@ -949,9 +952,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"Results: {report.passed}/{report.total} passed")
         return 0 if report.failed == 0 else 1
     if args.self_test or args.json:
-        return _run_self_test(as_json=args.json, networked=not args.no_network)
+        return _run_self_test(as_json=args.json, networked=not args.no_network, port=args.port)
     # Default: run the self-test (repo convention).
-    return _run_self_test(networked=not args.no_network)
+    return _run_self_test(networked=not args.no_network, port=args.port)
 
 
 if __name__ == "__main__":

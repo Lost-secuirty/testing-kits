@@ -279,7 +279,6 @@ class EnvOverrideChecker:
         Return a new config dict with env-var overrides applied.
         If *env* is None, os.environ is used.
         """
-        import copy
         result = copy.deepcopy(config)
         env_source = env if env is not None else os.environ
 

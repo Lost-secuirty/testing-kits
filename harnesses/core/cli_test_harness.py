@@ -18,7 +18,7 @@ import time
 import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Pattern, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys

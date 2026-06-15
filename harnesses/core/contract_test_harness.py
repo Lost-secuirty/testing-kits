@@ -885,7 +885,10 @@ def check_compatibility(old: ContractSchema, new: ContractSchema) -> bool:
             return False
 
         # 4. An enum may be WIDENED but not NARROWED — every value the consumer
-        #    might already accept must still be allowed.
+        #    might already accept must still be allowed. Adding an enum to a
+        #    previously unconstrained field also narrows it.
+        if old_spec.enum is None and new_spec.enum is not None:
+            return False
         if old_spec.enum is not None:
             if new_spec.enum is None:
                 # Constraint dropped entirely => still allows the old values.
@@ -1041,6 +1044,13 @@ COMPAT_CASES: Tuple[CompatCase, ...] = (
         {"role": FieldSpec("string", enum=("admin", "user"))},
         expected_compatible=False,
         note="removing an allowed enum value rejects payloads the consumer sent",
+    ),
+    CompatCase(
+        "constrain_unbounded_enum",
+        {"role": FieldSpec("string")},
+        {"role": FieldSpec("string", enum=("admin", "user"))},
+        expected_compatible=False,
+        note="adding an enum to a previously unconstrained field narrows it",
     ),
     CompatCase(
         "make_optional_required",
