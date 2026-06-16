@@ -19,15 +19,15 @@ and **reports its findings** (structured). Gate + contract are documented in
   → `--self-test`/`--json` `Report` → pair unittest → (security/ai: proof test) →
   flip `pending → required` → draft PR (operator merges).
 
-## Status snapshot (Batch 4, 2026-06-16)
+## Status snapshot (Batch 5, 2026-06-16)
 
 | Scope | Count | Meaning |
 |---|---:|---|
-| required (teeth verified) | 45 | proven by the swap-check; gate blocks on these |
-| pending | 24 | in scope, no `TEETH` yet — counted, non-blocking |
+| required (teeth verified) | 51 | proven by the swap-check; gate blocks on these |
+| pending | 18 | in scope, no `TEETH` yet — counted, non-blocking |
 | legacy (pharmacy) | 8 | older soft gate, out of campaign |
 
-**required (45):** Batch 0 (9) core/{check_digit_identifier,feature_flag,graphql,
+**required (51):** Batch 0 (9) core/{check_digit_identifier,feature_flag,graphql,
 grpc_contract,idempotency,queue,tracing}, security/{ci_workflow_hardening,diff_secret_gate}
 · Batch 1 (10) core/{api,cache,cli,config,contract,null_propagation,pagination,serialization,
 statemachine}, security/authz · Batch 2 (10) core/{db,scraper,fuzz,numeric,concurrency,
@@ -35,7 +35,8 @@ error_path_leak,schema_evolution}, security/{supplychain,upload}, ai/agent_memor
 Batch 3 (10) core/{statistical_rng_oracle,payments,canvas_scene_state,game_loop_simulation,
 iot_telemetry,browser_e2e,lexical_date_canonicalization}, security/cwe_kev_regression,
 ai/{agent_eval,drift_detection} · Batch 4 (6) core/{chaos,datetime,errorpath,pipeline,
-property}, ai/llm_eval.
+property}, ai/llm_eval · Batch 5 (6) core/{logging,memory,ratelimit,regression_snapshot,
+webhook}, security/appsec.
 
 ## Batch roadmap (provisional; exact membership ranked at each batch start)
 
@@ -68,7 +69,16 @@ property}, ai/llm_eval.
   deferred — its headline socket/DNS/timeout behavior is non-deterministic, so it earns its own
   extraction batch (the `prompt_injection` rationale). Built via a bounded 6-agent Workflow;
   gate 39 → 45 required / 24 pending / 8 legacy / 0 failing.
-- **Batch 5+ — drain the remaining 24 pending → SILVER, then GOLD enrich**, plus the NEW
+- **Batch 5 — DONE (2026-06-16):** real TEETH wired into 6 more pending harnesses, all
+  flipped pending → required: core/{logging,memory,ratelimit,regression_snapshot,webhook},
+  security/appsec. Mostly `oracle_swap`; security/appsec is an `auditor` (SSRF allow/deny over
+  a frozen target corpus). webhook + ratelimit drive a deterministic `FakeClock` (HMAC replay
+  window, token-bucket refill) so no wall-clock enters `prove`. Each `prove` judges a
+  frozen-literal corpus (non-circular, swap-verified; confirmed by reading every `prove` body
+  + a flip-a-literal test per harness). Built via a bounded 6-agent Workflow; gate 45 → 51
+  required / 18 pending / 8 legacy / 0 failing. Known future-hardening item: memory's
+  `threshold_boundary` mutant is single-case (inherent to a `>=`/`>` slope bug).
+- **Batch 6+ — drain the remaining 18 pending → SILVER, then GOLD enrich**, plus the NEW
   NOVEL_COMPOSITION candidates below.
 - **Candidate NEW harnesses (NOVEL_COMPOSITION; from the 2026-06-15 Gemini Deep Research
   docs — vet before building; keep pure-stdlib + a frozen-literal corpus + non-circular
@@ -117,14 +127,14 @@ Legend: `R` required · `P` pending · (pharmacy = legacy, omitted).
 **core (52):** R api, browser_e2e, cache, canvas_scene_state, chaos, check_digit_identifier,
 cli, concurrency, config, contract, datetime, db, error_path_leak, errorpath, feature_flag,
 fuzz, game_loop_simulation, graphql, grpc_contract, idempotency, iot_telemetry,
-lexical_date_canonicalization, null_propagation, numeric, pagination, payments, pipeline,
-property, queue, schema_evolution, scraper, serialization, statemachine,
-statistical_rng_oracle, tracing · P a11y, cardinality, circuitbreaker, clock_skew, complexity,
-dormant_code, hermeticity, i18n, logging, memory, mutation, network, ratelimit,
-regression_snapshot, search_relevance, stress, webhook
+lexical_date_canonicalization, logging, memory, null_propagation, numeric, pagination,
+payments, pipeline, property, queue, ratelimit, regression_snapshot, schema_evolution,
+scraper, serialization, statemachine, statistical_rng_oracle, tracing, webhook · P a11y,
+cardinality, circuitbreaker, clock_skew, complexity, dormant_code, hermeticity, i18n,
+mutation, network, search_relevance, stress
 
-**security (10):** R authz, ci_workflow_hardening, cwe_kev_regression, diff_secret_gate,
-supplychain, upload · P appsec, jwt, pii_redaction, security
+**security (10):** R appsec, authz, ci_workflow_hardening, cwe_kev_regression, diff_secret_gate,
+supplychain, upload · P jwt, pii_redaction, security
 
 **ai (7):** R agent_eval, agent_memory_context, drift_detection, llm_eval · P agentic,
 prompt_injection, rag_eval
