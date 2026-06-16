@@ -950,10 +950,11 @@ def prove(impl: Callable[[list[dict[str, Any]]], tuple[GroupAgg, ...]]) -> bool:
     RNG/clock/threads/network/filesystem. An impl that raises counts as caught.
     """
     try:
-        produced = impl([dict(r) for r in AGG_RECORDS])
+        produced = tuple(sorted(impl([dict(r) for r in AGG_RECORDS]),
+                                key=lambda g: g.key))
     except Exception:  # noqa: BLE001 — raising on the corpus counts as caught
         return True
-    return tuple(produced) != AGG_CORPUS
+    return produced != AGG_CORPUS
 
 
 TEETH = Teeth(
