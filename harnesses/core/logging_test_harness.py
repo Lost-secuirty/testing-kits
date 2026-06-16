@@ -5,15 +5,24 @@ Pure stdlib, zero external dependencies.
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
+import sys
 import threading
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path as _Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+
+# Make the shared teeth contract importable whether run as a module or a script.
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -674,3 +683,249 @@ class MockLoggingHandler:
 
     def __exit__(self, *_: Any) -> None:
         self.stop()
+
+
+# ---------------------------------------------------------------------------
+# TEETH: a FROZEN corpus of (structured log entry) -> the exact "is this entry
+# a VALID structured log line" verdict a CORRECT validator MUST produce.
+#
+# A log-format harness only has teeth if it CATCHES a validator that waves
+# through malformed log lines. The contract every correct structured-log
+# validator must hold — an entry is VALID iff ALL THREE hold:
+#
+#   * it carries every required field (timestamp, level, message);
+#   * its level is one of the allowed set (DEBUG/INFO/WARNING/ERROR/CRITICAL);
+#   * its timestamp parses as ISO-8601.
+#
+# An impl is a callable ``validate(entry_dict) -> bool`` returning the verdict.
+# prove() judges each impl against the corpus's FROZEN LITERAL expectations
+# (hand-decided from the contract above, NEVER read back from the oracle at
+# runtime), so the check is non-circular. prove(impl) is True iff any verdict
+# diverges from the frozen literal — i.e. the planted validator bug is caught.
+#
+# Pure + deterministic: dict/string/regex work over frozen literals only, no
+# real clock (the entries' timestamps are frozen strings, the report's
+# ``generated_at`` clock is never touched), no RNG, no threads, no network, no
+# filesystem (the MockLoggingHandler HTTP server is never bound here). The two
+# planted mutants model genuine real-world validator defects (per the campaign
+# hint):
+#
+#   * skips_level_allowlist — accepts ANY non-empty level string instead of
+#     checking membership in the allowed set, so a typo'd or attacker-supplied
+#     level ("TRACE", "FATAL", "haxx") slips through as VALID;
+#   * skips_required_fields — checks only the level, never that timestamp and
+#     message are present, so a half-built entry missing its message is
+#     wrongly accepted.
+# ---------------------------------------------------------------------------
+
+ALLOWED_LOG_LEVELS = frozenset(LOG_LEVEL_ORDER)  # {DEBUG, INFO, WARNING, ERROR, CRITICAL}
+
+
+@dataclass(frozen=True)
+class LogCase:
+    """One frozen structured-log entry with a literal, hand-decided verdict."""
+    name: str
+    entry: dict[str, Any]
+    expected_valid: bool   # the EXACT verdict a correct validator must return
+    note: str = ""
+
+
+# Cases chosen so the correct oracle matches every literal AND each planted
+# mutant gets at least two of them wrong (avoiding single-load-bearing
+# fixtures). Every ``expected_valid`` is a constant decided from the validity
+# contract, never derived at runtime.
+LOG_CORPUS: tuple[LogCase, ...] = (
+    # Fully valid: all fields present, allowed level, ISO-8601 timestamp.
+    # Both mutants also accept this, so it pins the oracle (not a teeth case).
+    LogCase(
+        "valid_info",
+        {"timestamp": "2024-01-15T10:30:00Z", "level": "INFO", "message": "ok"},
+        True,
+        "well-formed entry: every impl must accept",
+    ),
+    # Second fully valid line (different allowed level + offset timestamp) so
+    # the oracle is pinned by more than one positive.
+    LogCase(
+        "valid_error_offset",
+        {"timestamp": "2024-01-15T10:30:00+05:30", "level": "ERROR", "message": "boom"},
+        True,
+        "second well-formed entry pins the oracle on a different level/ts",
+    ),
+    # Missing the required 'message' field. Correct -> INVALID. The
+    # skips_required_fields mutant (level-only) wrongly accepts it.
+    LogCase(
+        "missing_message",
+        {"timestamp": "2024-01-15T10:30:00Z", "level": "INFO"},
+        False,
+        "no message -> invalid; skips_required_fields wrongly accepts",
+    ),
+    # Missing the required 'timestamp' field. Correct -> INVALID. Also caught
+    # by skips_required_fields (second teeth case for that mutant).
+    LogCase(
+        "missing_timestamp",
+        {"level": "WARNING", "message": "where is my ts"},
+        False,
+        "no timestamp -> invalid; skips_required_fields wrongly accepts",
+    ),
+    # Bad level ('TRACE' is not in the allowed set) but otherwise well-formed.
+    # Correct -> INVALID. The skips_level_allowlist mutant wrongly accepts it.
+    LogCase(
+        "bad_level_trace",
+        {"timestamp": "2024-01-15T10:30:00Z", "level": "TRACE", "message": "hi"},
+        False,
+        "level not in allowlist -> invalid; skips_level_allowlist wrongly accepts",
+    ),
+    # Second bad-level line ('haxx') so skips_level_allowlist is caught by two
+    # cases, not one.
+    LogCase(
+        "bad_level_haxx",
+        {"timestamp": "2024-01-15T10:30:00Z", "level": "haxx", "message": "spoofed"},
+        False,
+        "junk level -> invalid; skips_level_allowlist wrongly accepts",
+    ),
+    # Malformed (non-ISO-8601) timestamp, all fields present, allowed level.
+    # Correct -> INVALID. Both mutants validate the timestamp the same way the
+    # oracle does, so this is a decoy for the two planted mutants but guards
+    # against a third class of bug (a validator that drops the ts check).
+    LogCase(
+        "bad_timestamp",
+        {"timestamp": "01/15/2024 10:30:00", "level": "INFO", "message": "m"},
+        False,
+        "non-ISO-8601 timestamp -> invalid (decoy for the two planted mutants)",
+    ),
+)
+
+
+# --- ORACLE: reuse the harness's own correct LogFormatValidator, plus the
+#     level-allowlist check the format validator deliberately leaves to the
+#     LogLevelChecker. A structured log line is valid iff it is well-formed
+#     (required fields + parseable ISO-8601 ts) AND its level is allowed. ------
+
+def oracle_validate(entry: dict[str, Any]) -> bool:
+    """Correct structured-log validity verdict.
+
+    Delegates field/timestamp validation to the harness's own
+    ``LogFormatValidator`` and the level-allowlist to ``LogLevelChecker``;
+    an entry is valid iff both pass.
+    """
+    fmt_ok, _ = LogFormatValidator().validate_dict(entry)
+    level = entry.get("level")
+    level_ok = isinstance(level, str) and level.upper() in ALLOWED_LOG_LEVELS
+    return fmt_ok and level_ok
+
+
+# --- Planted buggy twins (each models a real validator defect) ---------------
+
+def skips_level_allowlist(entry: dict[str, Any]) -> bool:
+    """BUG: accepts ANY non-empty level string instead of the allowed set.
+
+    Models the classic "we forgot to check the level against the allowlist"
+    defect: a typo'd, deprecated, or attacker-supplied level value
+    (``TRACE``, ``FATAL``, ``haxx``) is treated as VALID as long as it is a
+    non-empty string. Field/timestamp validation is unchanged, so well-formed
+    entries with a real level still pass.
+    """
+    fmt_ok, _ = LogFormatValidator().validate_dict(entry)
+    level = entry.get("level")
+    level_ok = isinstance(level, str) and bool(level)  # BUG: any non-empty string
+    return fmt_ok and level_ok
+
+
+def skips_required_fields(entry: dict[str, Any]) -> bool:
+    """BUG: checks only the level, never that timestamp/message exist.
+
+    Models a validator that was refactored to gate on the level alone and lost
+    the required-field check: a half-built entry that is missing its
+    ``message`` (or ``timestamp``) is wrongly accepted as long as its level is
+    in the allowed set.
+    """
+    level = entry.get("level")
+    level_ok = isinstance(level, str) and level.upper() in ALLOWED_LOG_LEVELS
+    return level_ok  # BUG: never checks required fields / timestamp format
+
+
+def prove(impl: Callable[[dict[str, Any]], bool]) -> bool:
+    """True iff ``impl`` returns the WRONG verdict for any frozen corpus case
+    (i.e. the validator bug is caught): the verdict diverges from the
+    hand-decided literal, or the impl raises.
+
+    Non-circular + deterministic: every expectation is a literal baked into
+    LOG_CORPUS, never read from the oracle; dict/string/regex work only, no
+    RNG/clock/threads/network/filesystem. An impl that raises on a corpus case
+    counts as caught.
+    """
+    for case in LOG_CORPUS:
+        try:
+            verdict = impl(case.entry)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if bool(verdict) != case.expected_valid:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_validate,
+    mutants=(
+        Mutant("skips_level_allowlist", skips_level_allowlist,
+               "accepts any non-empty level string instead of the allowed set "
+               "-> an invalid/typo'd/spoofed level slips through as VALID"),
+        Mutant("skips_required_fields", skips_required_fields,
+               "checks only the level, never that timestamp/message exist "
+               "-> a half-built entry missing required fields is accepted"),
+    ),
+    corpus_size=len(LOG_CORPUS),
+    kind="oracle_swap",
+    notes="a structured log line is valid iff it has the required fields "
+          "(timestamp/level/message), its level is in the allowed set, and its "
+          "timestamp parses as ISO-8601",
+)
+
+
+def list_teeth_scenarios() -> list[str]:
+    """Names of the frozen log-validity corpus cases (the teeth scenarios)."""
+    return [c.name for c in LOG_CORPUS]
+
+
+# ---------------------------------------------------------------------------
+# Self-test — fails loud, reports findings.
+# ---------------------------------------------------------------------------
+def _run_self_test(as_json: bool = False) -> int:
+    """Assert the teeth: the correct oracle reproduces every frozen validity
+    literal, and the universal swap-check passes (oracle clean, every planted
+    validator mutant caught)."""
+    report = Report("core/logging")
+
+    # 1. The correct oracle reproduces every frozen validity literal exactly.
+    for case in LOG_CORPUS:
+        report.add(f"oracle_valid:{case.name}", case.expected_valid,
+                   oracle_validate(case.entry), detail=case.note)
+
+    # 2. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
+
+
+# ---------------------------------------------------------------------------
+# CLI — default action is the self-test (repo convention).
+# ---------------------------------------------------------------------------
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Logging / observability log-format validity controls"
+    )
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_teeth_scenarios()))
+        return 0
+    return _run_self_test(as_json=args.json)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

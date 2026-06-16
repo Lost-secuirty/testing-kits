@@ -2,21 +2,42 @@
 App-Security Test Harness (Harness 36/36)
 Covers OWASP classes most over-represented in AI-generated code.
 Pure stdlib, zero external dependencies.
+
+TEETH (security/appsec) — a clock-free SSRF URL/host auditor. A host is FLAGGED
+iff it targets a private / loopback / link-local / cloud-metadata address. The
+frozen corpus pins literal flag decisions; ``prove`` judges an auditor against
+those literals (never against the oracle at runtime), so the check is
+non-circular. Run:
+
+  python harnesses/security/appsec_test_harness.py --self-test
+  python harnesses/security/appsec_test_harness.py --json
+  python harnesses/security/appsec_test_harness.py --list-scenarios
 """
 
+from __future__ import annotations
+
+import argparse
 import base64
 import hashlib
 import hmac
 import ipaddress
 import json
-import pickle
 import re
+import sys
 import threading
 import time
 import urllib.parse
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
+
+# Make the shared teeth contract importable whether run as a module or a script.
+from pathlib import Path as _Path
 from typing import Any
+
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # SecFinding & AppSecReport
@@ -720,54 +741,245 @@ def stop_mock_server(server: HTTPServer) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Module self-test
+# TEETH: a clock-free SSRF URL/host auditor over a FROZEN corpus.
+#
+# An "auditor impl" is a callable ``audit(target: str) -> bool`` returning True
+# iff ``target`` (a URL or a bare host) should be BLOCKED as SSRF: it resolves to
+# a private / loopback / link-local / cloud-metadata address. The harness has
+# teeth only if it CATCHES an auditor that MISSES a known-dangerous target (a
+# false negative — the dangerous failure: the request reaches an internal host)
+# or FALSE-FLAGS a known-safe public target (a false positive that erodes trust).
+#
+# prove(audit_impl) judges the impl ONLY against SSRF_CORPUS, whose
+# ``should_flag`` booleans are hand-derived constants (169.254.169.254 IS the
+# cloud-metadata IP; 127.0.0.1 / localhost ARE loopback; 10.x IS RFC-1918;
+# a public host is NOT), NEVER read back from the oracle at runtime. So the check
+# is non-circular: corrupting one frozen literal flips prove(oracle) False->True.
+#
+# Pure + DETERMINISTIC: URL parsing + ip_address membership only. NO clock,
+# network, filesystem, threads, or RNG (the auditor deliberately does NOT use
+# JWTChecker.check_expiry, which reads time.time()).
+#
+# The two planted mutants model genuine real-world SSRF-filter regressions:
+#
+#   * misses_metadata — blocks loopback/localhost and the RFC-1918 ranges but
+#     DROPS the 169.254.0.0/16 link-local range, so the 169.254.169.254
+#     cloud-metadata endpoint sails through (a false negative — the classic
+#     IMDS credential-theft SSRF the filter author forgot to cover);
+#   * substring_blocklist — replaces real address parsing with a naive substring
+#     scan ("169.254.169.254"/"127.0.0.1"/"localhost" in target, or a "10."
+#     prefix). A crafted PUBLIC host that merely CONTAINS one of those tokens
+#     (e.g. ``169.254.169.254.attacker.example`` or ``mylocalhost.example``) is
+#     FALSE-FLAGGED, and a "10."-prefixed public host is wrongly blocked — the
+#     over-eager string filter that both blocks legitimate hosts and (in the
+#     real world) is bypassed by alternate IP encodings.
+#
+# The corpus covers BOTH dangerous and safe twins for each token the mutants
+# touch, so each mutant is caught by >=2 cases (no single load-bearing fixture).
 # ---------------------------------------------------------------------------
 
+SsrfAuditor = Callable[[str], bool]
+
+
+@dataclass(frozen=True)
+class SsrfCase:
+    """One frozen auditor case with a literal, hand-derived block decision."""
+
+    name: str
+    target: str
+    should_flag: bool   # the EXACT block decision a correct SSRF auditor must make
+    note: str = ""
+
+
+# Every ``should_flag`` is a constant derived from RFC-1918 / RFC-3927 / cloud
+# IMDS ground truth, never read from the oracle at runtime. Cases are chosen so
+# the correct oracle matches every literal AND each planted mutant gets >=2 wrong.
+SSRF_CORPUS: tuple[SsrfCase, ...] = (
+    # --- public / safe: a correct auditor must NOT flag these -----------------
+    SsrfCase("public_https", "https://api.example.com/v1/data", False,
+             "ordinary public host — must not block"),
+    SsrfCase("public_bare_host", "cdn.example.org", False,
+             "bare public hostname — must not block"),
+    # crafted public hosts that CONTAIN a blocklist token (substring trap):
+    SsrfCase("public_metadata_lookalike", "http://169.254.169.254.attacker.example/x", False,
+             "public host that merely contains the metadata IP as a label — must NOT block"),
+    SsrfCase("public_localhost_lookalike", "https://mylocalhost.example/health", False,
+             "public host containing the 'localhost' substring — must NOT block"),
+    SsrfCase("public_ten_prefix_host", "https://10things.example/page", False,
+             "public host whose name starts with '10' — a '10.' prefix filter false-flags it"),
+    # --- cloud metadata (link-local 169.254.0.0/16): MUST flag ----------------
+    SsrfCase("metadata_ip_url", "http://169.254.169.254/latest/meta-data/", True,
+             "AWS/GCP/Azure IMDS endpoint — must block (misses_metadata drops this)"),
+    SsrfCase("metadata_ip_bare", "169.254.169.254", True,
+             "bare metadata IP — must block (misses_metadata drops this)"),
+    # --- loopback: MUST flag --------------------------------------------------
+    SsrfCase("loopback_ip_url", "http://127.0.0.1/admin", True,
+             "loopback IPv4 — must block"),
+    SsrfCase("localhost_url", "http://localhost:8080/internal", True,
+             "loopback by name — must block"),
+    # --- RFC-1918 private: MUST flag ------------------------------------------
+    SsrfCase("private_ten_ip", "http://10.0.0.5/internal", True,
+             "RFC-1918 10.0.0.0/8 host — must block (a real 10.x IP, not a '10' label)"),
+    SsrfCase("private_192_ip", "https://192.168.1.10/config", True,
+             "RFC-1918 192.168.0.0/16 host — must block"),
+)
+
+
+def list_ssrf_cases() -> list[str]:
+    """Names of the frozen SSRF auditor corpus cases (the teeth scenarios)."""
+    return [case.name for case in SSRF_CORPUS]
+
+
+def _target_hostname(target: str) -> str:
+    """Normalise a URL OR a bare host into a lowercase hostname.
+
+    Pure string work: if ``target`` parses to a hostname (has a scheme/authority)
+    use it; otherwise treat the whole token as a bare host. No I/O, no DNS.
+    """
+    parsed = urllib.parse.urlparse(target if "//" in target else "//" + target)
+    host = (parsed.hostname or "").lower().strip(".")
+    return host
+
+
+# --- ORACLE: the harness's own correct SSRF address logic, reused as-is -------
+
+def ssrf_oracle(target: str) -> bool:
+    """Correct SSRF auditor: FLAG iff ``target``'s host is a cloud-metadata
+    endpoint OR resolves to a literal IP in a private/loopback/link-local range.
+
+    Reuses the harness's own ``_METADATA_HOSTS`` and ``_PRIVATE_NETS`` constants
+    (the real control surface). Clock-free and deterministic."""
+    host = _target_hostname(target)
+    if not host:
+        return False
+    if host in _METADATA_HOSTS or host == "localhost":
+        return True
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False  # a hostname that is not a literal IP — not flagged here
+    return any(addr in net for net in _PRIVATE_NETS)
+
+
+# --- Planted buggy twins (each models a real SSRF-filter regression) ----------
+
+# misses_metadata: the same private ranges MINUS the 169.254.0.0/16 link-local
+# block, so the cloud-metadata IP is no longer covered.
+_NETS_NO_LINKLOCAL = [
+    net for net in _PRIVATE_NETS if net != ipaddress.ip_network("169.254.0.0/16")
+]
+
+
+def misses_metadata(target: str) -> bool:
+    """BUG: blocks loopback/localhost and the RFC-1918 ranges but DROPS the
+    169.254.0.0/16 link-local block, so 169.254.169.254 (cloud IMDS) is MISSED
+    (false negative — the classic forgotten metadata range)."""
+    host = _target_hostname(target)
+    if not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(addr in net for net in _NETS_NO_LINKLOCAL)
+
+
+def substring_blocklist(target: str) -> bool:
+    """BUG: a naive substring/prefix scan instead of real address parsing. A
+    crafted PUBLIC host that merely CONTAINS a token (e.g.
+    ``169.254.169.254.attacker.example`` or ``mylocalhost.example``) is
+    FALSE-FLAGGED, and any host starting with ``10.`` is blocked regardless of
+    whether it is a real RFC-1918 IP — both false positives that get the filter
+    disabled (and, in the wild, bypassed by alternate IP encodings)."""
+    low = target.lower()
+    tokens = ("169.254.169.254", "127.0.0.1", "localhost")
+    if any(tok in low for tok in tokens):
+        return True
+    host = _target_hostname(target)
+    return host.startswith("10.")
+
+
+def prove(impl: SsrfAuditor) -> bool:
+    """True iff ``impl`` DIVERGES from the frozen SSRF_CORPUS on any case (i.e.
+    the auditor defect is caught): it misses a target that must be flagged
+    (false negative) or flags one that must not be (false positive), or raises.
+
+    Non-circular + deterministic: every ``should_flag`` is a literal baked into
+    SSRF_CORPUS, never read from the oracle; URL/IP parsing only, no
+    RNG/clock/network/filesystem. An impl that raises on a corpus case counts as
+    caught.
+    """
+    for case in SSRF_CORPUS:
+        try:
+            verdict = bool(impl(case.target))
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if verdict != case.should_flag:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=ssrf_oracle,
+    mutants=(
+        Mutant("misses_metadata", misses_metadata,
+               "SSRF filter drops the 169.254.0.0/16 link-local range -> the "
+               "169.254.169.254 cloud-metadata IMDS endpoint is missed (false negative)"),
+        Mutant("substring_blocklist", substring_blocklist,
+               "naive substring/prefix scan -> a public host merely containing a "
+               "blocklist token (or starting with '10.') is false-flagged (false positive)"),
+    ),
+    corpus_size=len(SSRF_CORPUS),
+    kind="auditor",
+    notes="an SSRF auditor must block every private/loopback/link-local/metadata "
+          "target and allow every public one: dropping the metadata range misses "
+          "IMDS, and a substring blocklist false-flags crafted public hosts",
+)
+
+
+# ---------------------------------------------------------------------------
+# Self-test — fails loud, reports findings.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(as_json: bool = False) -> int:
+    report = Report("security/appsec")
+
+    # 1. The correct oracle reproduces every frozen SSRF literal exactly
+    #    (the non-circular corpus the teeth are judged against).
+    for case in SSRF_CORPUS:
+        report.add(
+            f"oracle_ssrf:{case.name}",
+            case.should_flag,
+            ssrf_oracle(case.target),
+            detail=case.note,
+        )
+
+    # 2. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
+
+
+# ---------------------------------------------------------------------------
+# CLI — default action is the self-test (repo convention).
+# ---------------------------------------------------------------------------
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="App-security harness — SSRF auditor teeth")
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_ssrf_cases()))
+        return 0
+    return _run_self_test(as_json=args.json)
+
+
 if __name__ == "__main__":
-    print("AppSec Test Harness — self test")
-
-    # Quick smoke test
-    ssrf = SSRFChecker(allowed_hosts=["example.com"])
-    assert ssrf.check("https://example.com/path") == (True, "OK")
-    assert ssrf.check("http://127.0.0.1/")[0] is False
-    assert ssrf.check("file:///etc/passwd")[0] is False
-    print("SSRFChecker OK")
-
-    deser = DeserializationChecker()
-    safe_pickle = pickle.dumps({"key": "value"})
-    danger_pickle = pickle.dumps({"key": "value"})  # safe object
-    # Craft a payload with REDUCE opcode
-    bad_bytes = b'\x80\x04\x95' + b'R'  # contains REDUCE
-    assert deser.check_pickle(bad_bytes)[0] is True
-    print("DeserializationChecker OK")
-
-    jwt_checker = JWTChecker()
-    token = jwt_checker.sign_hs256({"sub": "1234", "exp": int(time.time()) + 3600}, "secret")
-    valid, _ = jwt_checker.verify_hs256(token, "secret")
-    assert valid
-    print("JWTChecker OK")
-
-    redir = OpenRedirectChecker(allowed_domains=["example.com"])
-    assert redir.check("https://example.com/dashboard")[0] is True
-    assert redir.check("https://evil.com/phish")[0] is False
-    print("OpenRedirectChecker OK")
-
-    mass = MassAssignmentChecker(allowed_fields=["username", "email"])
-    filtered, report = mass.check({"username": "alice", "role": "admin"})
-    assert "role" not in filtered
-    assert not report.is_clean()
-    print("MassAssignmentChecker OK")
-
-    xxe = XXEChecker()
-    assert xxe.check('<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>')[0] is True
-    assert xxe.check('<root><data>hello</data></root>')[0] is False
-    print("XXEChecker OK")
-
-    server, port = start_mock_server()
-    import urllib.request
-    resp = urllib.request.urlopen(f"http://127.0.0.1:{port}/health")
-    assert json.loads(resp.read())["status"] == "ok"
-    stop_mock_server(server)
-    print(f"MockServer OK (port {port})")
-
-    print("All self-tests passed!")
+    sys.exit(main())

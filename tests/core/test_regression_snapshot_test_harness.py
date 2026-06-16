@@ -7,7 +7,10 @@ import hashlib
 import json
 import unittest
 
+from harnesses._teeth import verify
 from harnesses.core.regression_snapshot_test_harness import (
+    COMPARE_CORPUS,
+    TEETH,
     CompareMode,
     ComparisonResult,
     MockRegressionServer,
@@ -20,6 +23,10 @@ from harnesses.core.regression_snapshot_test_harness import (
     make_runner,
     make_store,
     make_test,
+    no_recurse_match,
+    oracle_match,
+    order_sensitive_match,
+    prove,
 )
 
 # ---------------------------------------------------------------------------
@@ -533,6 +540,89 @@ class TestEdgeCases(unittest.TestCase):
         t = RegressionTest(name="bad_mode", func=lambda: 1, compare_mode="nonexistent")
         with self.assertRaises(ValueError):
             self.runner.run(t)
+
+
+# ===========================================================================
+# Teeth tests — the universal swap-check on the normalized-comparator oracle.
+# ===========================================================================
+
+class TestTeeth(unittest.TestCase):
+    """The teeth contract: the correct oracle is clean, every planted comparator
+    mutant is caught, the corpus is non-empty, and prove() is judged ONLY against
+    frozen literal expectations (non-circular)."""
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(len(COMPARE_CORPUS), 1)
+        self.assertEqual(TEETH.corpus_size, len(COMPARE_CORPUS))
+
+    def test_oracle_is_clean(self):
+        # The correct impl must NOT be flagged.
+        self.assertIs(prove(oracle_match), False)
+
+    def test_oracle_matches_every_frozen_literal(self):
+        # Directly: the oracle reproduces every hand-decided verdict.
+        for case in COMPARE_CORPUS:
+            self.assertEqual(
+                oracle_match(case.actual, case.stored),
+                case.expected_match,
+                msg=f"oracle disagreed with frozen literal on {case.name}",
+            )
+
+    def test_mutant_no_recurse_is_caught(self):
+        self.assertIs(prove(no_recurse_match), True)
+
+    def test_mutant_order_sensitive_is_caught(self):
+        self.assertIs(prove(order_sensitive_match), True)
+
+    def test_every_declared_mutant_is_caught(self):
+        for mutant in TEETH.mutants:
+            self.assertIs(prove(mutant.impl), True,
+                          msg=f"mutant {mutant.name} was NOT caught")
+
+    def test_teeth_verified_via_shared_gate(self):
+        # The same universal swap-check the external gate runs.
+        result = verify(TEETH)
+        self.assertIsNone(result["error"])
+        self.assertTrue(result["oracle_clean"])
+        self.assertEqual(result["mutants_uncaught"], [])
+        self.assertTrue(result["teeth_verified"])
+
+    def test_noncircular_flipping_a_literal_passes_the_oracle(self):
+        # Non-circularity evidence: prove() compares against FROZEN literals, not
+        # a runtime oracle call. Flip one expected_match and the (still correct)
+        # oracle must now be "caught" — proving the literal, not the oracle, is
+        # the source of truth.
+        import dataclasses
+
+        flipped = list(COMPARE_CORPUS)
+        flipped[0] = dataclasses.replace(
+            flipped[0], expected_match=not flipped[0].expected_match
+        )
+
+        def prove_against(corpus):
+            for case in corpus:
+                if bool(oracle_match(case.actual, case.stored)) != case.expected_match:
+                    return True
+            return False
+
+        # Unflipped: oracle is clean. Flipped: oracle is now wrongly "caught".
+        self.assertIs(prove_against(COMPARE_CORPUS), False)
+        self.assertIs(prove_against(tuple(flipped)), True)
+
+    def test_no_recurse_caught_by_at_least_two_cases(self):
+        # Robustness: the no_recurse mutant must be caught by >=2 corpus cases.
+        diverging = [
+            c.name for c in COMPARE_CORPUS
+            if bool(no_recurse_match(c.actual, c.stored)) != c.expected_match
+        ]
+        self.assertGreaterEqual(len(diverging), 2, msg=f"only {diverging} caught it")
+
+    def test_order_sensitive_caught_by_at_least_two_cases(self):
+        diverging = [
+            c.name for c in COMPARE_CORPUS
+            if bool(order_sensitive_match(c.actual, c.stored)) != c.expected_match
+        ]
+        self.assertGreaterEqual(len(diverging), 2, msg=f"only {diverging} caught it")
 
 
 if __name__ == "__main__":

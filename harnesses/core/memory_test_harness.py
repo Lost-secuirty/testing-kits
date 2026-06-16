@@ -15,6 +15,7 @@ Zero external dependencies — pure Python stdlib.
 
 from __future__ import annotations
 
+import argparse
 import gc
 import os
 
@@ -33,8 +34,14 @@ import weakref
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path as _Path
 from threading import Event, Thread
 from typing import Any
+
+# Make the shared teeth contract importable whether run as a module or a script.
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Platform helpers
@@ -329,6 +336,175 @@ def analyze_snapshots(snapshots: list[MemorySnapshot],
         threshold_bytes_per_iter=threshold_bytes_per_iter,
         details=details,
     )
+
+
+# ---------------------------------------------------------------------------
+# TEETH: a FROZEN corpus of (memory snapshot series) -> the exact leak verdict
+# a CORRECT leak-regression analyzer MUST return.
+#
+# The oracle-able core is analyze_snapshots: fit a least-squares line to the
+# RSS-vs-iteration series and report LEAKED iff the slope STRICTLY exceeds the
+# threshold (bytes/iter). A leak-detection harness only has teeth if it CATCHES
+# the two classic ways this verdict goes wrong:
+#
+#   * threshold_boundary — uses ``slope >= threshold`` instead of
+#     ``slope > threshold``, so a series whose slope sits EXACTLY on the
+#     threshold (a benign steady-state, not a leak) is wrongly flagged;
+#   * peak_minus_min — judges leakiness from the peak-to-trough SPAN
+#     (``max - min``) instead of the regression slope, so a noisy-but-flat
+#     series (large oscillation, zero net trend) is wrongly flagged as leaking.
+#
+# An impl is a callable ``analyze(rss_series: tuple[int, ...]) -> bool`` that
+# returns the leaked verdict. prove() judges each impl against the corpus's
+# FROZEN LITERAL ``expected_leaked`` booleans (hand-derived from the
+# slope-vs-threshold contract, NEVER read back from the oracle at runtime), so
+# the check is non-circular. prove(impl) is True iff any verdict diverges from
+# the frozen literal — i.e. the planted analyzer bug is caught.
+#
+# Pure + deterministic: a fixed least-squares fit over an injected frozen list
+# of integer RSS values — no live RSS, no /proc, no tracemalloc, no clock, no
+# RNG, no threads, no network, no filesystem. The frozen threshold below is the
+# single shared constant every expectation was computed against.
+# ---------------------------------------------------------------------------
+
+# Frozen analysis threshold (bytes/iter) for the teeth corpus. Every
+# ``expected_leaked`` literal below was hand-derived against THIS constant.
+TEETH_THRESHOLD: float = 1000.0
+
+
+@dataclass(frozen=True)
+class LeakCase:
+    """One frozen RSS series with its literal, hand-derived leak verdict."""
+    name: str
+    rss_series: tuple[int, ...]
+    expected_leaked: bool
+    note: str = ""
+
+
+# Cases chosen so the correct oracle matches every literal AND each planted
+# mutant gets at least one (the peak_minus_min mutant: two) wrong. Every
+# ``expected_leaked`` is derived from the contract "leaked iff slope > 1000
+# B/iter", not from any reference impl at runtime.
+LEAK_CORPUS: tuple[LeakCase, ...] = (
+    # Perfectly flat series: slope 0 -> not a leak. Decoy for both mutants
+    # (zero span, sub-threshold slope) — neither can flag it.
+    LeakCase("flat", (1_000_000,) * 8, False,
+             "constant RSS: slope 0, both impls agree it is not a leak"),
+    # Strong monotonic growth at 5000 B/iter -> a real leak both impls catch.
+    LeakCase("monotonic_growth",
+             tuple(1_000_000 + i * 5000 for i in range(8)), True,
+             "5000 B/iter linear growth: an unambiguous leak"),
+    # Perfect line whose slope is EXACTLY the 1000 B/iter threshold. The oracle
+    # uses strict ``>`` so this benign steady-state is NOT a leak; the
+    # threshold_boundary mutant's ``>=`` wrongly flags it. Its 7000 B span also
+    # trips the peak_minus_min mutant -> this case catches BOTH mutants.
+    LeakCase("boundary_exact",
+             tuple(1_000_000 + i * 1000 for i in range(8)), False,
+             "slope == threshold exactly: strict > is not a leak; >= wrongly flags"),
+    # Noisy-but-flat: oscillates over a 40000 B span but the least-squares slope
+    # is exactly 0 (symmetric pattern, equal endpoints) -> not a leak. The
+    # peak_minus_min mutant flags it on span alone; the slope-based oracle does
+    # not. A second, independent case that catches peak_minus_min.
+    LeakCase("noisy_flat",
+             (1_000_000, 1_040_000, 1_000_000, 1_040_000,
+              1_040_000, 1_000_000, 1_040_000, 1_000_000), False,
+             "large oscillation, zero net slope: span-based check wrongly flags"),
+    # Small steady growth at 100 B/iter, well under threshold -> not a leak.
+    # A decoy whose 700 B span is also under any span threshold, so it stays a
+    # true-negative for every impl (guards against a too-eager span mutant).
+    LeakCase("small_growth",
+             tuple(1_000_000 + i * 100 for i in range(8)), False,
+             "100 B/iter: sub-threshold growth, not a leak"),
+)
+
+
+# --- ORACLE: reuse the harness's own correct analyze_snapshots --------------
+
+def oracle_analyze(rss_series: tuple[int, ...]) -> bool:
+    """Correct leak verdict, delegating to the harness's own
+    ``analyze_snapshots``. Wraps the frozen RSS values in MemorySnapshots and
+    returns its ``leaked`` flag against the frozen ``TEETH_THRESHOLD``."""
+    snaps = [
+        MemorySnapshot(rss_bytes=v, gc_objects=0, fd_count=0, thread_count=1)
+        for v in rss_series
+    ]
+    return analyze_snapshots(snaps, threshold_bytes_per_iter=TEETH_THRESHOLD).leaked
+
+
+# --- Planted buggy twins (each models a real leak-analyzer defect) -----------
+
+def threshold_boundary(rss_series: tuple[int, ...]) -> bool:
+    """BUG: ``slope >= threshold`` instead of ``slope > threshold``.
+
+    Off-by-a-boundary comparison: a series whose slope lands EXACTLY on the
+    threshold is a benign steady-state, but this twin reports it as a leak.
+    """
+    snaps = [
+        MemorySnapshot(rss_bytes=v, gc_objects=0, fd_count=0, thread_count=1)
+        for v in rss_series
+    ]
+    if len(snaps) < 2:
+        return False
+    xs = list(range(len(snaps)))
+    ys = [float(s.rss_bytes) for s in snaps]
+    slope, _intercept, _r = _linear_regression(xs, ys)
+    return slope >= TEETH_THRESHOLD  # BUG: should be strict >
+
+
+def peak_minus_min(rss_series: tuple[int, ...]) -> bool:
+    """BUG: leak verdict from the peak-to-trough SPAN, not the regression slope.
+
+    Models the naive "did memory ever spike?" check: ``max(rss) - min(rss) >
+    threshold``. A noisy-but-flat series (large oscillation, zero net trend) has
+    a big span yet no leak, so this twin raises a false alarm.
+    """
+    if not rss_series:
+        return False
+    return (max(rss_series) - min(rss_series)) > TEETH_THRESHOLD  # BUG: span, not slope
+
+
+def prove(impl: Callable[[tuple[int, ...]], bool]) -> bool:
+    """True iff ``impl`` returns the WRONG leak verdict for any frozen corpus
+    case (i.e. the analyzer bug is caught): its boolean diverges from the
+    hand-derived literal, or the impl raises.
+
+    Non-circular + deterministic: every expectation is a literal baked into
+    LEAK_CORPUS, never read from the oracle; a fixed least-squares fit over
+    frozen integers, no RNG/clock/threads/network/filesystem. An impl that
+    raises on a corpus case counts as caught.
+    """
+    for case in LEAK_CORPUS:
+        try:
+            verdict = impl(case.rss_series)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if bool(verdict) != case.expected_leaked:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_analyze,
+    mutants=(
+        Mutant("threshold_boundary", threshold_boundary,
+               "uses slope >= threshold instead of strict slope > threshold -> a "
+               "series sitting exactly on the threshold is wrongly flagged as a leak"),
+        Mutant("peak_minus_min", peak_minus_min,
+               "judges leakiness from the peak-to-trough span (max - min) instead of "
+               "the regression slope -> a noisy-but-flat series raises a false alarm"),
+    ),
+    corpus_size=len(LEAK_CORPUS),
+    kind="oracle_swap",
+    notes="a leak verdict must come from the least-squares slope strictly "
+          "exceeding the threshold, not from a boundary-inclusive compare nor "
+          "the peak-to-trough span",
+)
+
+
+def list_teeth_scenarios() -> list[str]:
+    """Names of the frozen leak-analysis corpus cases (the teeth scenarios)."""
+    return [c.name for c in LEAK_CORPUS]
 
 
 # ---------------------------------------------------------------------------
@@ -692,67 +868,53 @@ def http_get(url: str, timeout: float = 5.0) -> tuple[int, bytes]:
 
 
 # ---------------------------------------------------------------------------
-# Self-test / __main__
+# Self-test / __main__ — fails loud, reports findings, asserts the teeth.
 # ---------------------------------------------------------------------------
 
-def _self_test() -> None:
-    print("=== Memory / Soak Test Harness self-test ===\n")
+def _run_self_test(as_json: bool = False) -> int:
+    """Exercise the leak-regression analyzer this harness guards and assert the
+    teeth: the correct oracle reproduces every frozen leak verdict, the
+    ObjectTracker lifecycle balance holds, and the universal swap-check passes
+    (oracle clean, every planted mutant caught). Pure + deterministic: no live
+    RSS, no mock server, no clock — only the frozen LEAK_CORPUS."""
+    report = Report("core/memory")
 
-    # 1. Basic snapshot
-    snap = MemorySnapshot(
-        rss_bytes=_rss_bytes(),
-        gc_objects=_gc_object_count(),
-        fd_count=_fd_count(),
-        thread_count=threading.active_count(),
-    )
-    print(f"Snapshot: {snap}")
+    # 1. The correct oracle reproduces every frozen leak verdict exactly.
+    for case in LEAK_CORPUS:
+        report.add(f"oracle_leak:{case.name}", case.expected_leaked,
+                   oracle_analyze(case.rss_series), detail=case.note)
 
-    # 2. Soak with clean function (no leak)
-    print("\n[1] Soak test — clean function (no leak expected):")
-    runner = SoakTestRunner(threshold_bytes_per_iter=8192.0)
-    result = runner.run(lambda: None, iterations=50, snapshot_interval=5)
-    print(result.summary())
-
-    # 3. ObjectTracker
-    print("\n[2] ObjectTracker:")
+    # 2. ObjectTracker lifecycle balance (a created-vs-destroyed invariant the
+    #    harness also guards): an unbalanced kind leaks, a balanced one does not.
     tracker = ObjectTracker()
     tracker.record_create("Widget")
     tracker.record_create("Widget")
     tracker.record_destroy("Widget")
     rep = tracker.report()
-    print(f"  report={rep}")
-    print(f"  has_leaks={tracker.has_leaks()}")
+    report.add("tracker_leaked_count", 1, rep["Widget"]["leaked"],
+               detail="2 created - 1 destroyed = 1 leaked")
+    report.record("tracker_has_leaks", tracker.has_leaks(),
+                  detail="an unbalanced kind must report a leak")
 
-    # 4. Mock server
-    print("\n[3] Mock HTTP server:")
-    server = MockServer()
-    server.start()
-    try:
-        status, body = http_get(f"{server.base_url}/status")
-        print(f"  /status -> HTTP {status}, {len(body)} bytes")
-        status2, body2 = http_get(f"{server.base_url}/gc")
-        print(f"  /gc     -> HTTP {status2}, {body2.decode()}")
-    finally:
-        server.stop()
+    # 3. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
 
-    # 5. Linear regression
-    print("\n[4] Linear regression leak detection:")
-    snaps_flat = [
-        MemorySnapshot(rss_bytes=1_000_000 + i * 100, gc_objects=0, fd_count=0, thread_count=1)
-        for i in range(20)
-    ]
-    report_flat = analyze_snapshots(snaps_flat, threshold_bytes_per_iter=1024.0)
-    print(f"  Flat growth (100B/iter): {report_flat.summary}")
+    return report.emit(as_json=as_json)
 
-    snaps_big = [
-        MemorySnapshot(rss_bytes=1_000_000 + i * 50_000, gc_objects=0, fd_count=0, thread_count=1)
-        for i in range(20)
-    ]
-    report_big = analyze_snapshots(snaps_big, threshold_bytes_per_iter=1024.0)
-    print(f"  Big leak  (50KB/iter):  {report_big.summary}")
 
-    print("\n=== self-test complete ===")
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Memory / soak leak-regression controls and teeth")
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true")
+    args = parser.parse_args(argv)
+    if args.list_scenarios:
+        print("\n".join(list_teeth_scenarios()))
+        return 0
+    return _run_self_test(as_json=args.json)
 
 
 if __name__ == "__main__":
-    _self_test()
+    sys.exit(main())
