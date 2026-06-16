@@ -781,6 +781,19 @@ GRADE_CORPUS: tuple[GradeCase, ...] = (
     # Without case-folding {Cat,Dog} vs {cat,dog} are disjoint -> 0.0 -> wrong FAIL.
     GradeCase("case_norm_disc", "Cat Dog", "cat dog", True,
               "case-folded identical (PASS); skipping lowercase makes it disjoint (wrong FAIL)"),
+    # 2nd discriminator for 'jaccard_union_swap': out={m,n,p,q,r}, exp={m,n}.
+    # true union=5 -> 2/5 = 0.40 -> FAIL. intersection/len(expected)=2/2=1.0
+    # -> the union-swap bug wrongly PASSes. Oracle FAILs, mutant PASSes.
+    GradeCase("union_swap_disc2", "m n p q r", "m n", False,
+              "true Jaccard 0.40 (FAIL); dividing by |expected| gives 1.0 (wrong PASS)"),
+    # 2nd discriminator for 'ge_to_gt': out={p,q}, exp={p} -> intersection={p}=1,
+    # union={p,q}=2 -> 0.50 exactly at threshold. >= passes; the > mutant fails.
+    GradeCase("boundary2", "p q", "p", True,
+              "Jaccard exactly 0.50 at threshold: >= passes, > would fail"),
+    # 2nd discriminator for 'no_lowercase': case-folded identical -> 1.0 -> PASS.
+    # Without case-folding {Hello,World} vs {hello,world} are disjoint -> wrong FAIL.
+    GradeCase("case_norm_disc2", "Hello World", "hello world", True,
+              "case-folded identical (PASS); skipping lowercase makes it disjoint (wrong FAIL)"),
 )
 
 
