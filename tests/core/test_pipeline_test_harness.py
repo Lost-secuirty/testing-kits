@@ -8,8 +8,12 @@ import unittest
 import urllib.error
 import urllib.request
 
+import harnesses.core.pipeline_test_harness as pipeline_mod
 from harnesses.core.pipeline_test_harness import (
+    AGG_CORPUS,
+    AGG_RECORDS,
     DEFAULT_PORT,
+    TEETH,
     AggregateFunction,
     Aggregator,
     Deduplicator,
@@ -25,6 +29,10 @@ from harnesses.core.pipeline_test_harness import (
     ReconciliationResult,
     SchemaSpec,
     SchemaValidator,
+    avg_div_by_groupcount,
+    oracle_aggregate,
+    prove,
+    sum_skips_first,
 )
 
 # ---------------------------------------------------------------------------
@@ -816,6 +824,85 @@ class TestFullPipeline(unittest.TestCase):
         result = rec.reconcile(source, dest)
         self.assertFalse(result.match)
         self.assertEqual(result.discrepancy, 1)
+
+
+# ---------------------------------------------------------------------------
+# TEETH: the group-aggregator oracle vs. its planted mutants
+# ---------------------------------------------------------------------------
+
+class TestTeeth(unittest.TestCase):
+    """Assert the harness's teeth: the correct group aggregator is NOT flagged,
+    every planted aggregation mutant IS caught, the frozen corpus is non-empty,
+    and the expectations are non-circular (literals, not oracle-derived)."""
+
+    def _records(self):
+        # Defensive copy so a buggy impl mutating its input cannot bleed across.
+        return [dict(r) for r in AGG_RECORDS]
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(len(AGG_CORPUS), 1)
+        self.assertEqual(TEETH.corpus_size, len(AGG_CORPUS))
+
+    def test_prove_oracle_is_false(self):
+        # The correct oracle must reproduce every frozen literal -> not caught.
+        self.assertIs(prove(oracle_aggregate), False)
+
+    def test_prove_each_mutant_is_true(self):
+        for mutant in TEETH.mutants:
+            with self.subTest(mutant=mutant.name):
+                self.assertIs(prove(mutant.impl), True)
+
+    def test_mutants_are_the_two_planted_aggregation_bugs(self):
+        names = {m.name for m in TEETH.mutants}
+        self.assertEqual(names, {"avg_div_by_groupcount", "sum_skips_first"})
+
+    def test_avg_div_by_groupcount_caught_on_unequal_groups(self):
+        # eng has 3 values == 3 groups, so its AVG coincides (200.0); the bug is
+        # caught because hr (200/3) and ops (90/3) diverge from the true AVG.
+        out = {g.key: g for g in avg_div_by_groupcount(self._records())}
+        self.assertAlmostEqual(out["hr"].avg, 200 / 3)
+        self.assertAlmostEqual(out["ops"].avg, 90 / 3)
+        self.assertNotAlmostEqual(out["hr"].avg, 100.0)
+        self.assertNotAlmostEqual(out["ops"].avg, 90.0)
+        self.assertIs(prove(avg_div_by_groupcount), True)
+
+    def test_sum_skips_first_drops_first_value_per_group(self):
+        out = {g.key: g for g in sum_skips_first(self._records())}
+        self.assertEqual(out["eng"].total, 500)   # 200 + 300 (dropped 100)
+        self.assertEqual(out["hr"].total, 50)      # 50 (dropped 150)
+        self.assertEqual(out["ops"].total, 0)      # dropped its only value
+        self.assertIs(prove(sum_skips_first), True)
+
+    def test_oracle_matches_every_frozen_literal(self):
+        produced = {g.key: g for g in oracle_aggregate(self._records())}
+        self.assertEqual(set(produced), {g.key for g in AGG_CORPUS})
+        for expected in AGG_CORPUS:
+            got = produced[expected.key]
+            self.assertEqual(got.count, expected.count)
+            self.assertEqual(got.total, expected.total)
+            self.assertAlmostEqual(got.avg, expected.avg)
+
+    def test_noncircular_flipping_a_literal_flags_the_oracle(self):
+        # The campaign-critical property: expectations are frozen LITERALS, not
+        # derived from the oracle at runtime. If we flip one literal, the correct
+        # oracle must now be "caught" (prove -> True). This is exactly the check
+        # the gate cannot perform for us.
+        import dataclasses
+
+        original = pipeline_mod.AGG_CORPUS
+        self.addCleanup(setattr, pipeline_mod, "AGG_CORPUS", original)
+        flipped = tuple(
+            dataclasses.replace(g, avg=g.avg + 1.0) if g.key == "hr" else g
+            for g in original
+        )
+        pipeline_mod.AGG_CORPUS = flipped
+        self.assertIs(prove(oracle_aggregate), True)
+
+    def test_teeth_metadata(self):
+        self.assertEqual(TEETH.kind, "oracle_swap")
+        self.assertGreaterEqual(len(TEETH.mutants), 1)
+        self.assertIs(TEETH.oracle, oracle_aggregate)
+        self.assertIs(TEETH.prove, prove)
 
 
 if __name__ == "__main__":
