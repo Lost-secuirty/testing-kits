@@ -688,11 +688,17 @@ class LeakCase:
 
 
 # Cases chosen so the correct oracle matches every literal AND each planted
-# mutant gets at least one case wrong. Every ``expected`` is hand-written from
-# the rule ``leaked iff acquired != released`` — a constant, never derived at
-# runtime. ``balanced`` and ``no_resource`` are decoys neither mutant can
-# distinguish (both agree with the oracle there), so the teeth come from the
-# real leak/over-release cases, not coincidence.
+# mutant now gets caught by at least TWO discriminating cases (no single-point-
+# of-failure tooth — flipping or removing any one case still leaves the mutant
+# caught). ``ignores_balance`` is caught by BOTH over-release cases
+# (``double_release`` 1->2 and ``over_release_from_zero`` 0->1, where it wrongly
+# reports clean). ``off_by_one`` is caught by BOTH single-handle leaks
+# (``single_leak`` 2->1 and ``over_release_from_zero`` 0->1: there
+# ``(0 - 1) > 1`` is False while the oracle flags it True). Every ``expected``
+# is hand-written from the rule ``leaked iff acquired != released`` — a
+# constant, never derived at runtime. ``balanced`` and ``no_resource`` are
+# decoys neither mutant can distinguish (both agree with the oracle there), so
+# the teeth come from the real leak/over-release cases, not coincidence.
 LEAK_CORPUS: tuple[LeakCase, ...] = (
     # Acquired exactly as many as released: a clean try/finally. No leak.
     LeakCase("balanced", 2, 2, False,
@@ -706,6 +712,13 @@ LEAK_CORPUS: tuple[LeakCase, ...] = (
     LeakCase("double_release", 1, 2, True,
              "released > acquired: over-release/double-free — ignores_balance "
              "misses this"),
+    # Released 1 having acquired 0: a spurious/over-release (release without a
+    # matching acquire). The oracle flags it (0 != 1); ``ignores_balance``
+    # (released < acquired only) wrongly calls it clean — a 2nd over-release case
+    # so ignores_balance is caught even if ``double_release`` is ever changed.
+    LeakCase("over_release_from_zero", 0, 1, True,
+             "released without acquiring: spurious/over-release -> "
+             "ignores_balance misses it"),
     # Acquired 2, released 1: a single leaked handle. The oracle flags it;
     # ``off_by_one`` (tolerates a gap of one) wrongly calls it clean.
     LeakCase("single_leak", 2, 1, True,

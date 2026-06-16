@@ -586,7 +586,6 @@ class ResilienceTestRunner:
             self.metrics.record_success(latency)
             return result
         except CircuitOpenError:
-            latency = (time.monotonic() - t0) * 1000
             self.metrics.record_open()
             if self.circuit_breaker.fallback is not None:
                 return self.circuit_breaker.fallback

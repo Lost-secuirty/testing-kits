@@ -120,7 +120,6 @@ class Mutator:
                 pattern = self._arith_pattern(op)
                 for m in re.finditer(pattern, masked):
                     # Reconstruct source with this single substitution
-                    sum(len(line) for line in lines[:line_idx]) + m.start()
                     new_line = (
                         code_part[:m.start()]
                         + m.group().replace(op, replacement, 1)

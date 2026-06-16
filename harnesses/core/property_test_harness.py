@@ -15,7 +15,6 @@ import http.server
 import json
 import math
 import random
-import socket
 import string
 import sys
 import threading
@@ -178,9 +177,7 @@ class Shrinker:
         return value
 
     def _shrink_bool(self, value: bool, predicate: Callable) -> bool:
-        if not value and predicate(False):
-            return False
-        if value and predicate(False):
+        if predicate(False):
             return False
         return value
 
@@ -377,7 +374,6 @@ class Shrinker:
         best = dict(value)
 
         # Try removing keys
-        list(best.keys())
         changed = True
         while changed:
             changed = False
@@ -603,8 +599,6 @@ class PropertySuite:
 # Mock HTTP Server
 # ---------------------------------------------------------------------------
 
-DEFAULT_PORT = 18970
-
 
 class MockPropertyHandler(http.server.BaseHTTPRequestHandler):
     """
@@ -711,9 +705,6 @@ def _safe_repr(value: Any) -> Any:
     return repr(value)
 
 
-# Built-in named properties for the HTTP server
-_rng_for_builtins = random.Random(42)
-
 _BUILT_IN_PROPERTIES: dict[str, Property] = {
     "reverse_twice": Property(
         generator=gen_list(gen_int()),
@@ -798,17 +789,6 @@ class MockPropertyServer:
 # ---------------------------------------------------------------------------
 # Convenience helpers
 # ---------------------------------------------------------------------------
-
-
-def find_free_port(default: int = DEFAULT_PORT) -> int:
-    """Find a free TCP port, falling back to any available port."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        try:
-            s.bind(("127.0.0.1", default))
-            return default
-        except OSError:
-            s.bind(("127.0.0.1", 0))
-            return s.getsockname()[1]
 
 
 def run_suite_and_report(
