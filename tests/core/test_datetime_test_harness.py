@@ -3,12 +3,19 @@ Tests for DateTime Test Harness (Harness 20 of 36).
 ~73 tests. Pure stdlib, no zoneinfo — uses datetime.timezone(timedelta(hours=N)).
 """
 
+import dataclasses
 import datetime
+import subprocess
+import sys
 import time
 import unittest
 from datetime import timedelta, timezone
 
+from harnesses._teeth import verify
+from harnesses.core import datetime_test_harness as harness
 from harnesses.core.datetime_test_harness import (
+    LEAP_CORPUS,
+    TEETH,
     BoundaryTester,
     Clock,
     DSTTester,
@@ -17,6 +24,8 @@ from harnesses.core.datetime_test_harness import (
     ParseFormatTester,
     ServerTimeTester,
     TimezoneTester,
+    oracle_is_leap,
+    prove,
 )
 
 # ===========================================================================
@@ -620,6 +629,73 @@ class TestServerTimeTester(unittest.TestCase):
             self.assertEqual(data["day"], 14)
         # Restart for tearDown
         self.server.start()
+
+
+# ===========================================================================
+# Teeth — the harness must catch a real planted leap-year bug
+# ===========================================================================
+
+class TestTeeth(unittest.TestCase):
+    """The harness must catch a real planted bug (the campaign teeth contract)."""
+
+    def test_teeth_verified(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"], result["error"])
+        self.assertTrue(result["teeth_verified"], f"teeth not verified: {result}")
+
+    def test_oracle_is_clean(self):
+        # The correct Gregorian leap-year predicate must NOT be flagged by prove.
+        self.assertFalse(TEETH.prove(TEETH.oracle))
+        self.assertFalse(prove(oracle_is_leap))
+
+    def test_every_mutant_is_caught(self):
+        # Each planted defect must be individually caught.
+        self.assertEqual(len(TEETH.mutants), 2)
+        for mutant in TEETH.mutants:
+            self.assertTrue(TEETH.prove(mutant.impl), f"mutant not caught: {mutant.name}")
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(TEETH.corpus_size, 1)
+        self.assertEqual(TEETH.corpus_size, len(LEAP_CORPUS))
+
+    def test_oracle_matches_frozen_literals(self):
+        # The frozen expectations are non-circular constants the oracle must
+        # reproduce exactly for every corpus year.
+        for case in LEAP_CORPUS:
+            self.assertEqual(oracle_is_leap(case.year), case.expected, case.name)
+
+    def test_mutants_break_the_discriminating_cases(self):
+        # Pin WHY each mutant is caught: every_4th mishandles the non-400
+        # centuries; forgets_400 mishandles the %400 century.
+        self.assertTrue(harness.every_4th(1900))   # bug: says leap, truth is False
+        self.assertTrue(harness.every_4th(2100))   # bug: says leap, truth is False
+        self.assertFalse(harness.forgets_400(2000))  # bug: says common, truth is True
+
+    def test_noncircular_corpus(self):
+        # Corrupt one frozen literal and assert prove(oracle) flips to True.
+        # If it does not flip, the corpus is being derived from the oracle
+        # (circular) rather than judged against frozen ground truth.
+        original = harness.LEAP_CORPUS
+        corrupted = list(original)
+        corrupted[0] = dataclasses.replace(corrupted[0], expected=not corrupted[0].expected)
+        harness.LEAP_CORPUS = tuple(corrupted)
+        try:
+            self.assertTrue(prove(oracle_is_leap),
+                            "prove(oracle) must flip True when a frozen literal is corrupted")
+        finally:
+            harness.LEAP_CORPUS = original
+        # Sanity: the restored corpus is clean again.
+        self.assertFalse(prove(oracle_is_leap))
+
+    def test_cli_self_test_exits_zero(self):
+        proc = subprocess.run(
+            [sys.executable, harness.__file__, "--self-test"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("OK:", proc.stdout)
 
 
 if __name__ == "__main__":

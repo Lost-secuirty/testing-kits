@@ -2,16 +2,40 @@
 DateTime Test Harness (Harness 20 of 36)
 Pure stdlib, zero external dependencies.
 Mock HTTP server on dynamic port (default 19060).
+
+Teeth (campaign): the oracle-able core is the Gregorian leap-year rule
+``LeapYearTester.is_leap_year``. A frozen ``(year -> is_leap)`` corpus pins the
+full rule (the %4 / %100 / %400 exception chain) with explicit literals, and two
+realistic planted mutants — a naive ``year % 4 == 0`` and one that forgets the
+%400 century exception — are each caught against those literals. See ``--self-test``.
+
+Self-test (pure, deterministic — no clock/network/server):
+  python harnesses/core/datetime_test_harness.py --self-test
+  python harnesses/core/datetime_test_harness.py --json
+  python harnesses/core/datetime_test_harness.py --list-scenarios
 """
 
+from __future__ import annotations
+
+import argparse
 import calendar
 import datetime
 import http.server
 import importlib.util
 import json
+import sys
 import threading
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import timedelta, timezone
+
+# Make the shared teeth contract importable whether run as a module or a script.
+from pathlib import Path as _Path
+
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # Detect zoneinfo availability (Python 3.9+) without importing it.
 HAS_ZONEINFO = importlib.util.find_spec("zoneinfo") is not None
@@ -440,3 +464,183 @@ class ServerTimeTester:
 
     def __exit__(self, *args):
         self.stop()
+
+
+# ---------------------------------------------------------------------------
+# TEETH: a FROZEN corpus of (year -> is_leap) pinning the FULL Gregorian rule.
+#
+# The Gregorian leap-year rule is the classic "looks like one line but has a
+# three-step exception chain" calculation:
+#
+#   * divisible by 4            -> leap        (2024)
+#   * ...unless divisible by 100 -> NOT leap   (1900, 2100)
+#   * ...unless divisible by 400 -> leap       (2000)
+#
+# A leap-year oracle only has teeth if it CATCHES the two defects a real dev
+# actually ships: the naive ``year % 4 == 0`` that forgets centuries entirely,
+# and the "remembered %100 but forgot the %400 exception" that wrongly rejects
+# 2000. The corpus therefore includes the discriminating century cases — 1900
+# and 2100 (caught only by the %400 rule, missed by every-4th) and 2000 (the
+# %400 exception, missed by forgets-400) — alongside an ordinary leap (2024)
+# and an ordinary common year (2023).
+#
+# An impl is a predicate ``is_leap(year) -> bool``. prove() judges each impl
+# against the corpus's FROZEN LITERAL ``expected`` flags (hand-written from the
+# Gregorian rule, NEVER read back from the oracle at runtime), so the check is
+# non-circular. prove(impl) is True iff any year's verdict diverges from the
+# frozen literal — i.e. the planted leap-year bug is caught.
+#
+# Pure + deterministic: integer arithmetic only, no clock/network/server,
+# no threads, no RNG, no filesystem. The two planted mutants model genuine
+# real-world leap-year defects (per the campaign hint):
+#
+#   * every_4th    — ``year % 4 == 0`` only, the textbook oversimplification;
+#                    wrongly calls 1900 and 2100 leap years.
+#   * forgets_400  — handles %4 and the %100 exception but DROPS the %400
+#                    re-inclusion; wrongly calls 2000 a common year.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class LeapCase:
+    """One frozen leap-year case with a literal, hand-written verdict."""
+
+    name: str
+    year: int
+    expected: bool  # the EXACT Gregorian verdict (a constant, not derived)
+    note: str = ""
+
+
+# Cases chosen so the correct oracle matches every literal AND at least one
+# planted mutant gets each discriminating case wrong. Every ``expected`` flag is
+# hand-written from the Gregorian rule — constants, never read from the oracle.
+LEAP_CORPUS: tuple[LeapCase, ...] = (
+    LeapCase("y2024_div4", 2024, True,
+             "ordinary leap: divisible by 4, not by 100"),
+    LeapCase("y2023_common", 2023, False,
+             "ordinary common year: not divisible by 4"),
+    LeapCase("y1900_div100_not_400", 1900, False,
+             "century NOT divisible by 400 -> common; every_4th wrongly says leap"),
+    LeapCase("y2000_div400", 2000, True,
+             "century divisible by 400 -> leap; forgets_400 wrongly says common"),
+    LeapCase("y2100_div100_not_400", 2100, False,
+             "century NOT divisible by 400 -> common; every_4th wrongly says leap"),
+)
+
+
+# --- ORACLE: reuse the harness's own correct LeapYearTester.is_leap_year -----
+
+def oracle_is_leap(year: int) -> bool:
+    """Correct Gregorian leap-year predicate, delegating to the harness's own
+    ``LeapYearTester.is_leap_year`` (which wraps ``calendar.isleap``)."""
+    return LeapYearTester.is_leap_year(year)
+
+
+# --- Planted buggy twins (each models a real leap-year defect) ---------------
+
+def every_4th(year: int) -> bool:
+    """BUG: the textbook oversimplification ``year % 4 == 0``.
+
+    Forgets the century exceptions entirely, so it wrongly classifies 1900 and
+    2100 (divisible by 4 but by 100 and not 400) as leap years.
+    """
+    return year % 4 == 0
+
+
+def forgets_400(year: int) -> bool:
+    """BUG: handles %4 and the %100 exception but DROPS the %400 re-inclusion.
+
+    A common half-remembered version of the rule: every century is treated as a
+    common year, so it wrongly classifies 2000 (divisible by 400) as a common
+    year while still getting 1900/2100 right.
+    """
+    if year % 100 == 0:
+        return False
+    return year % 4 == 0
+
+
+def prove(impl: Callable[[int], bool]) -> bool:
+    """True iff ``impl`` returns the WRONG verdict for any frozen corpus year
+    (i.e. the leap-year bug is caught): the boolean diverges from the
+    hand-written literal, or the impl raises.
+
+    Non-circular + deterministic: every expectation is a literal baked into
+    LEAP_CORPUS, never read from the oracle; integer arithmetic only, no
+    RNG/clock/threads/network/filesystem. An impl that raises on a corpus case
+    counts as caught.
+    """
+    for case in LEAP_CORPUS:
+        try:
+            verdict = impl(case.year)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if bool(verdict) != case.expected:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_is_leap,
+    mutants=(
+        Mutant("every_4th", every_4th,
+               "naive `year % 4 == 0`: forgets the century exceptions and "
+               "wrongly calls 1900/2100 leap years"),
+        Mutant("forgets_400", forgets_400,
+               "handles %4 and %100 but drops the %400 re-inclusion: wrongly "
+               "calls 2000 a common year"),
+    ),
+    corpus_size=len(LEAP_CORPUS),
+    kind="oracle_swap",
+    notes="the full Gregorian rule: leap iff divisible by 4, unless by 100, "
+          "unless by 400 — pinned by the 1900/2000/2100 century cases",
+)
+
+
+def list_scenarios() -> list[str]:
+    """Names of the frozen leap-year corpus cases (the teeth scenarios)."""
+    return [c.name for c in LEAP_CORPUS]
+
+
+# ---------------------------------------------------------------------------
+# Self-test — fails loud, reports findings. Pure: never starts the HTTP server.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(as_json: bool = False) -> int:
+    """Assert the leap-year teeth: the correct oracle reproduces every frozen
+    Gregorian verdict, then the universal swap-check passes (oracle clean, every
+    planted mutant caught). Deterministic — no clock, network, or server."""
+    report = Report("core/datetime")
+
+    # 1. The correct oracle reproduces every frozen leap-year literal exactly.
+    for case in LEAP_CORPUS:
+        report.add(f"leap:{case.name}", case.expected, oracle_is_leap(case.year),
+                   detail=case.note)
+
+    # 2. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
+
+
+# ---------------------------------------------------------------------------
+# CLI — default action is the self-test (repo convention). The mock HTTP server
+# is exercised only by the test suite / explicit callers, never bound here.
+# ---------------------------------------------------------------------------
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="DateTime harness: pure leap-year teeth self-test")
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true")
+    args = parser.parse_args(argv)
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
+    return _run_self_test(as_json=args.json)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
