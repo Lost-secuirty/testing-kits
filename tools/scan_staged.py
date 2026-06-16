@@ -74,7 +74,7 @@ _SECRET_RES = [
             r"(?i)(?<![a-z0-9])"
             r"(?:client[_-]?secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|"
             r"private[_-]?key|secret[_-]?key|api[_-]?key|access[_-]?key|"
-            r"secret|token|passwd|password|bearer)"
+            r"secret|token|passwd|password)"
             r"\s*[:=]\s*['\"]?[A-Za-z0-9_\-/+=]{16,}"
         ),
     ),
