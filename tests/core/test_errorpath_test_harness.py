@@ -1238,10 +1238,11 @@ class TestTeeth(unittest.TestCase):
         # ... but flip a single frozen literal and the same oracle is now caught.
         self.assertIs(prove_against(oracle_leaked, flipped), True)
 
-    def test_cleanup_tester_leaked_field_matches_mutant_shape(self):
-        # The harness's own ResourceCleanupTester.leaked uses the ignores_balance
-        # shape; confirm it agrees with the mutant on the over-release case the
-        # oracle catches (documents WHY ignores_balance is a realistic bug).
+    def test_cleanup_tester_flags_over_release_like_oracle(self):
+        # The shipped ResourceCleanupTester now uses the correct
+        # ``acquired != released`` rule, so it flags an over-release/double-free
+        # exactly as the oracle does — and disagrees with the ignores_balance
+        # mutant (which only checks under-release and misses this case).
         def double_releaser(counters):
             counters["acquired"] += 1
             counters["released"] += 1
@@ -1251,9 +1252,9 @@ class TestTeeth(unittest.TestCase):
         result = tester.test_with_counters(double_releaser)
         self.assertEqual(result["acquired"], 1)
         self.assertEqual(result["released"], 2)
-        # The shipped tester (ignores_balance shape) calls this clean ...
-        self.assertFalse(result["leaked"])
-        # ... whereas the correct oracle flags it as a leak.
+        # The shipped tester now catches the imbalance ...
+        self.assertTrue(result["leaked"])
+        # ... in agreement with the correct oracle.
         self.assertTrue(oracle_leaked(result["acquired"], result["released"]))
 
     def test_list_teeth_scenarios_matches_corpus(self):

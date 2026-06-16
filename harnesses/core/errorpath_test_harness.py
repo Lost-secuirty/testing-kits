@@ -587,8 +587,7 @@ class ResourceCleanupTester:
 
         result["acquired"] = acquire_count[0]
         result["released"] = release_count[0]
-        result["leaked"] = (acquire_count[0] > 0 and
-                            release_count[0] < acquire_count[0])
+        result["leaked"] = acquire_count[0] != release_count[0]
         result["passed"] = not result["leaked"]
 
         self._results.append(result)
@@ -624,8 +623,7 @@ class ResourceCleanupTester:
 
         result["acquired"] = counters["acquired"]
         result["released"] = counters["released"]
-        result["leaked"] = (counters["acquired"] > 0 and
-                            counters["released"] < counters["acquired"])
+        result["leaked"] = counters["acquired"] != counters["released"]
         result["passed"] = not result["leaked"]
 
         self._results.append(result)
@@ -669,10 +667,10 @@ class ResourceCleanupTester:
 #
 # The two planted mutants model genuine real-world cleanup-auditor defects:
 #
-#   * ignores_balance — the auditor only flags ``released < acquired`` (the
-#     exact shape this file's own ResourceCleanupTester.leaked uses today),
-#     so an over-release / double-free where ``released > acquired`` slips
-#     past unnoticed: a real "we only checked for under-release" bug;
+#   * ignores_balance — the auditor only flags ``released < acquired``, so an
+#     over-release / double-free where ``released > acquired`` slips past
+#     unnoticed: a real "we only checked for under-release" bug (the common
+#     mistake this harness's own ResourceCleanupTester used to make);
 #   * off_by_one — a fencepost slip (``acquired - released > 1`` instead of
 #     ``!= 0``) that "tolerates one unreleased handle", letting a genuine
 #     single-handle leak go unreported.
@@ -734,10 +732,10 @@ def ignores_balance(acquired: int, released: int) -> bool:
     """BUG: only flags UNDER-release (``released < acquired``), ignoring the
     over-release / double-free case where ``released > acquired``.
 
-    This is the exact predicate this file's own ResourceCleanupTester uses
-    today (``acquired > 0 and released < acquired``): it models the very common
-    "we only ever checked for a missing release, never for releasing twice"
-    auditor bug, so a double-free run is silently reported clean.
+    It models the very common "we only ever checked for a missing release,
+    never for releasing twice" auditor bug, so a double-free run is silently
+    reported clean. (This harness's own ResourceCleanupTester used to ship this
+    exact bug; it now uses the correct ``acquired != released`` balance rule.)
     """
     return acquired > 0 and released < acquired
 
