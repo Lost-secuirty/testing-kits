@@ -523,8 +523,8 @@ class TestOpenRedirectChecker(unittest.TestCase):
         self.assertFalse(ok)
 
     def test_block_no_allowed_domains_configured(self):
-        OpenRedirectChecker()  # no domains
-        ok, reason = self.checker.check("https://evil.com/")
+        checker = OpenRedirectChecker()  # no domains
+        ok, _ = checker.check("https://evil.com/")
         self.assertFalse(ok)
 
     def test_allow_http_allowed_domain(self):

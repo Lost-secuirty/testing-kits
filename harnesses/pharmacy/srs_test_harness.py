@@ -69,12 +69,12 @@ def sm2_update(ease_factor, interval_days, repetitions, correct):
         elif reps == 1:
             new_interval = 6
         else:
-                # Guard against numeric overflow when interval*ease becomes infinite
-                try:
-                    prod = interval * ease
-                    new_interval = int(10 ** 9) if not math.isfinite(prod) else int(round(prod))
-                except OverflowError:
-                    new_interval = int(10**9)
+            # Guard against numeric overflow when interval*ease becomes infinite
+            try:
+                prod = interval * ease
+                new_interval = int(10 ** 9) if not math.isfinite(prod) else int(round(prod))
+            except OverflowError:
+                new_interval = int(10**9)
         new_reps = reps + 1
         new_ease = ease + 0.1
     else:
