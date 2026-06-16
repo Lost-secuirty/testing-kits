@@ -27,7 +27,7 @@ and **reports its findings** (structured). Gate + contract are documented in
 | pending | 30 | in scope, no `TEETH` yet — counted, non-blocking |
 | legacy (pharmacy) | 8 | older soft gate, out of campaign |
 
-**required (29):** Batch 0 (9) core/{check_digit_identifier,feature_flag,graphql,
+**required (39):** Batch 0 (9) core/{check_digit_identifier,feature_flag,graphql,
 grpc_contract,idempotency,queue,tracing}, security/{ci_workflow_hardening,diff_secret_gate}
 · Batch 1 (10) core/{api,cache,cli,config,contract,null_propagation,pagination,serialization,
 statemachine}, security/authz · Batch 2 (10) core/{db,scraper,fuzz,numeric,concurrency,
@@ -106,19 +106,19 @@ ai/{agent_eval,drift_detection}.
 ## Full in-scope status
 Legend: `R` required · `P` pending · (pharmacy = legacy, omitted).
 
-**core (52):** R api, cache, check_digit_identifier, cli, concurrency, config, contract,
-db, error_path_leak, feature_flag, fuzz, graphql, grpc_contract, idempotency,
-null_propagation, numeric, pagination, queue, schema_evolution, scraper, serialization,
-statemachine, tracing · P a11y, browser_e2e, canvas_scene_state, cardinality, chaos,
-circuitbreaker, clock_skew, complexity, datetime, dormant_code, errorpath,
-game_loop_simulation, hermeticity, i18n, iot_telemetry, lexical_date_canonicalization,
-logging, memory, mutation, network, payments, pipeline, property, ratelimit,
-regression_snapshot, search_relevance, statistical_rng_oracle, stress, webhook
+**core (52):** R api, browser_e2e, cache, canvas_scene_state, check_digit_identifier, cli,
+concurrency, config, contract, db, error_path_leak, feature_flag, fuzz,
+game_loop_simulation, graphql, grpc_contract, idempotency, iot_telemetry,
+lexical_date_canonicalization, null_propagation, numeric, pagination, payments, queue,
+schema_evolution, scraper, serialization, statemachine, statistical_rng_oracle, tracing
+· P a11y, cardinality, chaos, circuitbreaker, clock_skew, complexity, datetime,
+dormant_code, errorpath, hermeticity, i18n, logging, memory, mutation, network, pipeline,
+property, ratelimit, regression_snapshot, search_relevance, stress, webhook
 
-**security (10):** R authz, ci_workflow_hardening, diff_secret_gate, supplychain, upload
-· P appsec, cwe_kev_regression, jwt, pii_redaction, security
+**security (10):** R authz, ci_workflow_hardening, cwe_kev_regression, diff_secret_gate,
+supplychain, upload · P appsec, jwt, pii_redaction, security
 
-**ai (7):** R agent_memory_context · P agent_eval, agentic, drift_detection, llm_eval,
+**ai (7):** R agent_eval, agent_memory_context, drift_detection · P agentic, llm_eval,
 prompt_injection, rag_eval
 
 > `core/stress` also still uses the non-standard `stress_harness.py` filename
