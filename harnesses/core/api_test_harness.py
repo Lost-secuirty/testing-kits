@@ -516,12 +516,29 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
+def _wait_until_accepting(host: str, port: int, timeout: float = 3.0) -> bool:
+    """Block until the listener accepts a connection, or timeout elapses.
+
+    Closes the CI race where serve_forever() has not yet bound/listened by the
+    time start_mock_server() returns and a client connects.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=0.2):
+                return True
+        except OSError:
+            time.sleep(0.01)
+    return False
+
+
 def start_mock_server(port: int = 0) -> tuple[http.server.HTTPServer, int]:
     if port == 0:
         port = _find_free_port()
     server = http.server.HTTPServer(("127.0.0.1", port), MockApiHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    _wait_until_accepting(server.server_address[0], server.server_address[1])
     return server, port
 
 

@@ -155,15 +155,32 @@ class MockNetworkHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
 
+def _wait_until_accepting(host: str, port: int, timeout: float = 3.0) -> bool:
+    """Block until the listener accepts a connection, or timeout elapses.
+
+    Closes the CI race where serve_forever() has not yet bound/listened by the
+    time _start_mock_server() returns and a client connects.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=0.2):
+                return True
+        except OSError:
+            time.sleep(0.01)
+    return False
+
+
 def _start_mock_server(config: dict[str, Any] | None = None) -> tuple[ThreadingHTTPServer, int]:
     """Start a mock server on a random free port and return (server, port)."""
     server = ThreadingHTTPServer(("127.0.0.1", 0), MockNetworkHandler)
     server.config = config or {}  # type: ignore[attr-defined]
     if "lock" not in server.config:  # type: ignore[attr-defined]
         server.config["lock"] = threading.Lock()  # type: ignore[attr-defined]
-    port = server.server_address[1]
+    host, port = server.server_address[0], server.server_address[1]
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
+    _wait_until_accepting(host, port)
     return server, port
 
 
