@@ -1,7 +1,7 @@
 """
 DateTime Test Harness (Harness 20 of 36)
 Pure stdlib, zero external dependencies.
-Mock HTTP server on dynamic port (default 19060).
+Mock HTTP server on OS-assigned free port (port=0).
 
 Teeth (campaign): the oracle-able core is the Gregorian leap-year rule
 ``LeapYearTester.is_leap_year``. A frozen ``(year -> is_leap)`` corpus pins the
@@ -419,8 +419,6 @@ class MockDateTimeHandler(http.server.BaseHTTPRequestHandler):
 class ServerTimeTester:
     """Manages a mock HTTP server that serves current time."""
 
-    DEFAULT_PORT = 19060
-
     def __init__(self, port: int = 0, clock: Clock = None):
         """
         port=0 means OS assigns a free port.
@@ -523,6 +521,9 @@ LEAP_CORPUS: tuple[LeapCase, ...] = (
              "century NOT divisible by 400 -> common; every_4th wrongly says leap"),
     LeapCase("y2000_div400", 2000, True,
              "century divisible by 400 -> leap; forgets_400 wrongly says common"),
+    LeapCase("y1600_div400", 1600, True,
+             "divisible by 400 (century leap year) -> forgets_400 wrongly "
+             "returns non-leap"),
     LeapCase("y2100_div100_not_400", 2100, False,
              "century NOT divisible by 400 -> common; every_4th wrongly says leap"),
 )

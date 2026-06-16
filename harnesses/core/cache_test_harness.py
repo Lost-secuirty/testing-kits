@@ -12,6 +12,7 @@ import argparse
 import collections
 import dataclasses
 import json
+import socket
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
@@ -697,6 +698,24 @@ class MockCacheHandler(BaseHTTPRequestHandler):
         self._send_json(404, {"error": "unknown route"})
 
 
+def _wait_until_accepting(host: str, port: int, timeout: float = 3.0) -> None:
+    """Block until the listener accepts a connection, or timeout elapses.
+
+    Closes the CI race where serve_forever() has not yet bound/listened by the
+    time MockCacheServer.start() returns and a client connects.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=0.2):
+                return
+        except OSError:
+            time.sleep(0.01)
+    raise RuntimeError(
+        f"mock server at {host}:{port} did not start accepting within {timeout}s"
+    )
+
+
 class MockCacheServer:
     """Context manager that starts a MockCacheHandler HTTP server on a dynamic port."""
 
@@ -736,6 +755,8 @@ class MockCacheServer:
         self._server = HTTPServer((self._host, self._requested_port), BoundHandler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
+        host, port = self._server.server_address[0], self._server.server_address[1]
+        _wait_until_accepting(host, port)
         return self
 
     def stop(self) -> None:
