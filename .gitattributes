@@ -1,2 +1,8 @@
+# Normalize every text file to LF in the repository and on checkout, matching
+# .editorconfig (end_of_line = lf). Ends the mixed CRLF/LF blob drift that crept
+# in from Windows autocrlf checkouts. `text=auto` lets git leave binaries alone.
+* text=auto eol=lf
+
+# Explicit (also covered by the rule above): shell scripts and git hooks are LF.
 *.sh text eol=lf
 .githooks/* text eol=lf
