@@ -19,6 +19,8 @@ import urllib.request
 from typing import Any
 
 from harnesses.core.property_test_harness import (
+    SHRINK_CORPUS,
+    TEETH,
     CounterExample,
     MockPropertyServer,
     Property,
@@ -39,6 +41,8 @@ from harnesses.core.property_test_harness import (
     gen_string,
     gen_tuple,
     is_simpler,
+    oracle_shrink,
+    prove,
     run_suite_and_report,
 )
 
@@ -765,6 +769,77 @@ class TestUtilityHelpers(unittest.TestCase):
         r = PropertyReport(passed=3, failed=1)
         self.assertIn("passed=3", repr(r))
         self.assertIn("failed=1", repr(r))
+
+
+# ============================================================
+# 10. Teeth — the Shrinker oracle vs. planted shrinking mutants
+# ============================================================
+
+class TestTeeth(unittest.TestCase):
+    """The campaign teeth: prove(oracle) is False, every planted mutant is
+    caught, and the frozen corpus is non-empty and non-circular."""
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(len(SHRINK_CORPUS), 1)
+        self.assertEqual(TEETH.corpus_size, len(SHRINK_CORPUS))
+
+    def test_prove_oracle_is_false(self):
+        # The correct Shrinker must NOT be flagged.
+        self.assertIs(prove(TEETH.oracle), False)
+        self.assertIs(prove(oracle_shrink()), False)
+
+    def test_prove_each_mutant_is_true(self):
+        # Every planted shrinker defect must be caught.
+        self.assertGreaterEqual(len(TEETH.mutants), 1)
+        for mutant in TEETH.mutants:
+            with self.subTest(mutant=mutant.name):
+                self.assertIs(prove(mutant.impl), True)
+
+    def test_expected_mutant_names_present(self):
+        names = {m.name for m in TEETH.mutants}
+        self.assertIn("stops_early", names)
+        self.assertIn("overshoots", names)
+
+    def test_oracle_reproduces_every_frozen_literal(self):
+        shrink = oracle_shrink()
+        for case in SHRINK_CORPUS:
+            with self.subTest(case=case.name):
+                self.assertEqual(shrink(case.start, case.predicate),
+                                 case.expected_minimal)
+
+    def test_prove_is_noncircular_flipping_a_literal_catches_oracle(self):
+        # If a frozen literal were derived from the oracle at runtime, flipping it
+        # could never make prove(oracle) True. It does -> the expectations are
+        # genuine frozen literals, so the teeth are non-circular.
+        import dataclasses
+
+        import harnesses.core.property_test_harness as mod
+
+        original = mod.SHRINK_CORPUS
+        flipped = dataclasses.replace(original[0],
+                                      expected_minimal=("WRONG", original[0].expected_minimal))
+        try:
+            mod.SHRINK_CORPUS = (flipped, *original[1:])
+            self.assertIs(prove(mod.TEETH.oracle), True)
+        finally:
+            mod.SHRINK_CORPUS = original
+        # And restoring leaves the oracle clean again.
+        self.assertIs(prove(mod.TEETH.oracle), False)
+
+    def test_stops_early_returns_unshrunk_input(self):
+        # The 'stops_early' mutant returns the original (un-minimised) value, so
+        # for the int case it stays at the start, not the boundary.
+        impl = {m.name: m.impl for m in TEETH.mutants}["stops_early"]
+        int_case = next(c for c in SHRINK_CORPUS if c.name == "int_ge_10")
+        self.assertEqual(impl(int_case.start, int_case.predicate), int_case.start)
+
+    def test_overshoots_returns_passing_value(self):
+        # The 'overshoots' mutant steps past the boundary, so its result no
+        # longer satisfies the failing predicate (it is a passing input).
+        impl = {m.name: m.impl for m in TEETH.mutants}["overshoots"]
+        int_case = next(c for c in SHRINK_CORPUS if c.name == "int_ge_10")
+        result = impl(int_case.start, int_case.predicate)
+        self.assertFalse(int_case.predicate(result))
 
 
 if __name__ == "__main__":

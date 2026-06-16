@@ -9,16 +9,26 @@ Pure stdlib, zero external dependencies.
 
 from __future__ import annotations
 
+import argparse
+import copy
 import http.server
 import json
 import math
 import random
 import socket
 import string
+import sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
+
+# Make the shared teeth contract importable whether run as a module or a script.
+from pathlib import Path as _Path
 from typing import Any
+
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Generators
@@ -837,6 +847,204 @@ def is_simpler(a: Any, b: Any) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# TEETH: the deterministic Shrinker is the oracle.
+#
+# Property-based shrinking is only useful if it lands on the *minimal*
+# counterexample: a failing int must collapse toward 0 (stopping at the
+# smallest still-failing integer), and a failing list must collapse toward []
+# (stopping at the shortest still-failing list, elements driven to 0). The
+# random generators and the random-driven PropertyRunner are excluded on
+# purpose — only ``Shrinker.shrink`` is deterministic, so the oracle is scoped
+# to it alone (no RNG anywhere in prove).
+#
+# An impl is a callable ``shrink(start, pred) -> minimal`` (the bound method of
+# a Shrinker-like object). The corpus is a tuple of frozen
+# (start_value, predicate, expected_minimal) triples using simple FIXED pure
+# predicates; ``expected_minimal`` is a hand-computed LITERAL, never read back
+# from the oracle at runtime, so the check is non-circular. prove(impl) is True
+# iff the impl's shrink output diverges from any frozen literal — i.e. the
+# shrinking defect is caught.
+#
+# Pure + deterministic: the predicates are pure integer/length tests, the
+# Shrinker walks a fixed bisection/removal schedule with no RNG, and prove does
+# no clock/network/filesystem/thread work. The two planted mutants model
+# genuine real-world shrinker defects (per the campaign hint):
+#
+#   * stops_early — returns the FIRST failing value (the original input) instead
+#     of bisecting toward the boundary: the "shrinking silently disabled / early
+#     return" bug. The reported counterexample is huge, not minimal.
+#   * overshoots — shrinks one step PAST the boundary to a value that no longer
+#     fails (an off-by-one in the accept check / a final extra reduction): the
+#     reported "counterexample" is a passing input, which is worse than useless.
+# ---------------------------------------------------------------------------
+
+# A shrink impl: (start_value, still_fails_predicate) -> minimal failing value.
+ShrinkFunc = Callable[[Any, Callable[[Any], bool]], Any]
+
+
+def _pred_int_ge_10(x: Any) -> bool:
+    """Frozen predicate: an int 'still fails' iff it is >= 10."""
+    return isinstance(x, int) and not isinstance(x, bool) and x >= 10
+
+
+def _pred_int_ge_1(x: Any) -> bool:
+    """Frozen predicate: an int 'still fails' iff it is >= 1 (shrinks to 1)."""
+    return isinstance(x, int) and not isinstance(x, bool) and x >= 1
+
+
+def _pred_list_len_ge_3(xs: Any) -> bool:
+    """Frozen predicate: a list 'still fails' iff its length is >= 3."""
+    return isinstance(xs, list) and len(xs) >= 3
+
+
+def _pred_list_len_ge_1(xs: Any) -> bool:
+    """Frozen predicate: a list 'still fails' iff it is non-empty (len >= 1)."""
+    return isinstance(xs, list) and len(xs) >= 1
+
+
+@dataclass(frozen=True)
+class ShrinkCase:
+    """One frozen shrink case with a hand-computed literal minimal counterexample."""
+
+    name: str
+    start: Any
+    predicate: Callable[[Any], bool]
+    expected_minimal: Any
+    note: str = ""
+
+
+# Every ``expected_minimal`` is a constant derived from the shrinking contract
+# (smallest still-failing value), NOT read from the oracle at runtime:
+#   * ge_10 from 50 -> 10 (smallest int with x >= 10);
+#   * ge_1  from 64 -> 1  (smallest int with x >= 1);
+#   * list_len_3 from a length-8 list -> [0, 0, 0] (shortest failing list, all
+#     elements collapsed to 0);
+#   * list_len_1 from a length-5 list -> [0] (shortest non-empty failing list).
+# These boundaries (10, 1) are chosen so the correct Shrinker genuinely reaches
+# the true minimum; the int bisection plus its small linear-scan window land
+# exactly on the boundary for them.
+SHRINK_CORPUS: tuple[ShrinkCase, ...] = (
+    ShrinkCase("int_ge_10", 50, _pred_int_ge_10, 10,
+               "failing int collapses toward 0, stopping at the boundary 10"),
+    ShrinkCase("int_ge_1", 64, _pred_int_ge_1, 1,
+               "failing int collapses toward 0, stopping at the boundary 1"),
+    ShrinkCase("list_len_3", [7, 6, 5, 4, 3, 2, 1, 0], _pred_list_len_ge_3,
+               [0, 0, 0],
+               "failing list collapses toward [], stopping at length 3 of zeros"),
+    ShrinkCase("list_len_1", [5, 4, 3, 2, 1], _pred_list_len_ge_1, [0],
+               "failing list collapses toward [], stopping at length 1 ([0])"),
+)
+
+
+def oracle_shrink() -> ShrinkFunc:
+    """ORACLE: the harness's own correct deterministic ``Shrinker.shrink``."""
+    return Shrinker().shrink
+
+
+class _StopsEarlyShrinker(Shrinker):
+    """BUG: returns the first failing value (the original) without reducing it.
+
+    Models a shrinker whose reduction loop was disabled / short-circuited (e.g.
+    an early ``return value`` slipped in): the reported counterexample is the raw
+    generated input, never minimised, so an int never reaches its boundary and a
+    list never sheds an element.
+    """
+
+    def shrink(self, value: Any, predicate: Callable[[Any], bool]) -> Any:
+        return value  # BUG: no shrinking at all
+
+
+class _OvershootsShrinker(Shrinker):
+    """BUG: takes one reduction step PAST the boundary to a passing value.
+
+    Models an off-by-one in the accept check (or one extra final reduction): for
+    ints it returns ``minimal - 1`` (sign-aware, i.e. one step closer to 0 than
+    the true boundary) and for lists it drops one element too many — in both
+    cases the returned "counterexample" no longer satisfies the failing
+    predicate, which is strictly worse than reporting the real minimum.
+    """
+
+    def _shrink_int(self, value: int, predicate: Callable[..., Any]) -> int:
+        true_min = super()._shrink_int(value, predicate)
+        step = -1 if true_min > 0 else 1  # one step toward 0, past the boundary
+        return true_min + step
+
+    def _shrink_list(self, value: list, predicate: Callable[..., Any]) -> list:
+        true_min = super()._shrink_list(value, predicate)
+        return true_min[:-1]  # BUG: shed one more element than is failing
+
+
+def stops_early_shrink() -> ShrinkFunc:
+    return _StopsEarlyShrinker().shrink
+
+
+def overshoots_shrink() -> ShrinkFunc:
+    return _OvershootsShrinker().shrink
+
+
+def prove(impl: ShrinkFunc) -> bool:
+    """True iff ``impl`` shrinks any frozen case to the WRONG minimal value
+    (i.e. the shrinking defect is caught): the result diverges from the
+    hand-computed literal, or the impl raises.
+
+    Non-circular + deterministic: every expectation is a literal baked into
+    SHRINK_CORPUS, never read from the oracle; the predicates are pure and the
+    Shrinker uses no RNG/clock/threads/network/filesystem. An impl that raises on
+    a corpus case counts as caught.
+    """
+    for case in SHRINK_CORPUS:
+        try:
+            got = impl(copy.deepcopy(case.start), case.predicate)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if got != case.expected_minimal:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_shrink(),
+    mutants=(
+        Mutant("stops_early", stops_early_shrink(),
+               "returns the first failing value (the original) instead of "
+               "bisecting toward the boundary -> counterexample is never minimal"),
+        Mutant("overshoots", overshoots_shrink(),
+               "shrinks one step past the boundary to a value that no longer "
+               "fails -> reports a passing input as the counterexample"),
+    ),
+    corpus_size=len(SHRINK_CORPUS),
+    kind="oracle_swap",
+    notes="minimal shrinking: a failing int collapses toward 0 and a failing "
+          "list toward [], each stopping at the smallest still-failing value",
+)
+
+
+def list_scenarios() -> list[str]:
+    """Names of the frozen shrink corpus cases (the teeth scenarios)."""
+    return [c.name for c in SHRINK_CORPUS]
+
+
+# ---------------------------------------------------------------------------
+# Self-test — fails loud, reports findings.
+# ---------------------------------------------------------------------------
+
+
+def _run_self_test(as_json: bool = False) -> int:
+    """Confirm the correct Shrinker reproduces every frozen minimal literal and
+    assert the teeth: prove(oracle) is False (the real Shrinker is clean) and
+    every planted shrinker mutant is caught."""
+    report = Report("core/property")
+    correct = oracle_shrink()
+    for case in SHRINK_CORPUS:
+        report.add(f"shrink:{case.name}", case.expected_minimal,
+                   correct(copy.deepcopy(case.start), case.predicate),
+                   detail=case.note)
+    report.assert_teeth(TEETH)
+    return report.emit(as_json=as_json)
+
+
+# ---------------------------------------------------------------------------
 # Module-level convenience: run a quick check
 # ---------------------------------------------------------------------------
 
@@ -862,7 +1070,13 @@ def forall(
 # Demo / smoke test when run directly
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+
+def _run_demo() -> int:
+    """Original interactive demo: run a property suite and poke the mock server.
+
+    Kept under ``main`` only — the mock HTTP server is started here and nowhere
+    near import time or inside ``prove``.
+    """
     print("=== Property-Based Test Harness (Harness 11/36) ===\n")
 
     suite = PropertySuite("demo")
@@ -913,3 +1127,31 @@ if __name__ == "__main__":
 
         resp = urllib.request.urlopen(f"{server.base_url}/status")
         print(f"Status: {json.loads(resp.read())}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Property-based test harness (generators, shrinker, suite)."
+    )
+    parser.add_argument("--self-test", action="store_true",
+                        help="run built-in shrinker teeth checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true")
+    parser.add_argument("--demo", action="store_true",
+                        help="run the interactive property + mock-server demo")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
+    if args.demo:
+        return _run_demo()
+    if args.self_test or args.json:
+        return _run_self_test(as_json=args.json)
+    return _run_self_test(as_json=False)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -2,16 +2,44 @@
 Data Pipeline / ETL Test Harness (Harness 19 of 36)
 Pure stdlib, zero external dependencies.
 Mock HTTP server on dynamic port (default 19050).
+
+Teeth (campaign 2026): the oracle-able core is the group ``Aggregator`` — a pure
+group-by transform that computes per-group SUM / COUNT / AVG. A frozen corpus of
+input records carries its hand-computed per-group aggregates as literal
+expectations, chosen so AVG (sum / value-count) cannot be confused with a
+divide-by-group-count, and so a sum that drops the first record diverges on every
+non-trivial group. ``prove`` judges an aggregator impl against those frozen
+literals (never against the oracle at runtime), so the check is non-circular and
+pure: no clock, network, filesystem, threads, or RNG. The mock HTTP server stays
+under ``main`` only and is never touched by the teeth path.
+
+Self-test:
+  python harnesses/core/pipeline_test_harness.py --self-test
+  python harnesses/core/pipeline_test_harness.py --json
+  python harnesses/core/pipeline_test_harness.py --list-scenarios
 """
 
+from __future__ import annotations
+
+import argparse
 import enum
 import json
 import socket
+import sys
 import threading
 import time
 from collections import defaultdict
+from collections.abc import Callable
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
+
+# Make the shared teeth contract importable whether run as a module or a script.
+from pathlib import Path as _Path
 from typing import Any
+
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Base Classes
@@ -539,7 +567,7 @@ class PipelineRunner:
         self.stages: list[PipelineStage] = stages or []
         self._last_report: PipelineReport | None = None
 
-    def add_stage(self, stage: PipelineStage) -> "PipelineRunner":
+    def add_stage(self, stage: PipelineStage) -> PipelineRunner:
         self.stages.append(stage)
         return self
 
@@ -728,7 +756,7 @@ class MockPipelineServer:
     def get_url(self) -> str:
         return f"http://127.0.0.1:{self.port}"
 
-    def __enter__(self) -> "MockPipelineServer":
+    def __enter__(self) -> MockPipelineServer:
         self.start()
         return self
 
@@ -753,3 +781,266 @@ def find_free_port(preferred: int = 19050) -> int:
 
 # Expose default port constant
 DEFAULT_PORT = 19050
+
+
+# ---------------------------------------------------------------------------
+# TEETH: a FROZEN corpus of input records -> the EXACT per-group aggregate a
+# correct group-by transform MUST produce.
+#
+# The oracle-able core is the ``Aggregator`` group transform: bucket records by
+# ``dept`` and compute, per group, COUNT, SUM(salary) and AVG(salary). A
+# group-by aggregator only has teeth if it CATCHES the two defects a real dev
+# ships when hand-rolling the fold:
+#
+#   * AVG divides each group's SUM by the NUMBER OF GROUPS (a stray
+#     ``len(groups)`` where ``len(group_records)`` was meant) instead of by the
+#     count of values IN that group — correct only by coincidence when a group's
+#     value-count happens to equal the group-count;
+#   * SUM folds from the SECOND record (``records[1:]`` / an accumulator seeded
+#     with the first element and the loop also skipping it), silently dropping
+#     the first value of every group.
+#
+# An impl is a callable ``aggregate(records) -> tuple[GroupAgg, ...]`` returning
+# one normalized, key-sorted aggregate per group. ``prove`` judges each impl
+# against the corpus's FROZEN LITERAL aggregates (hand-computed below, NEVER read
+# back from the oracle at runtime), so the check is non-circular. ``prove(impl)``
+# is True iff any group's (count, total, avg) diverges from its frozen literal —
+# i.e. the planted aggregation bug is caught.
+#
+# Pure + deterministic: integer / float arithmetic over a frozen tuple only — no
+# clock (the ``perf_counter`` throughput path is excluded), no RNG, no threads,
+# no network, no filesystem. Group iteration order is normalized away by sorting
+# on the group key, so dict ordering cannot make the check flaky.
+# ---------------------------------------------------------------------------
+
+AGG_GROUP_BY = "dept"
+AGG_SRC_FIELD = "salary"
+
+
+@dataclass(frozen=True)
+class GroupAgg:
+    """One group's expected aggregate — every number is a frozen literal."""
+
+    key: str        # the group-by value (dept)
+    count: int      # number of records in the group
+    total: int      # SUM of salary over the group
+    avg: float      # AVG of salary over the group == total / count
+
+
+# Frozen input records. Groups are deliberately UNEQUAL in size (3 / 2 / 1) and
+# there are exactly THREE groups, so dividing a group's SUM by the group-count
+# (3) disagrees with the true AVG on every group whose value-count != 3.
+AGG_RECORDS: tuple[dict[str, Any], ...] = (
+    {"dept": "eng", "salary": 100},
+    {"dept": "eng", "salary": 200},
+    {"dept": "eng", "salary": 300},
+    {"dept": "hr", "salary": 150},
+    {"dept": "hr", "salary": 50},
+    {"dept": "ops", "salary": 90},
+)
+
+
+# Hand-computed expectations (constants, never derived at runtime):
+#   eng: [100,200,300] -> count 3, total 600, avg 200.0
+#   hr : [150,50]      -> count 2, total 200, avg 100.0
+#   ops: [90]          -> count 1, total  90, avg  90.0
+# Discriminating cases:
+#   * avg_div_by_groupcount divides by 3 (the group-count): eng 600/3=200.0
+#     coincides, but hr 200/3≈66.67 != 100.0 and ops 90/3=30.0 != 90.0 -> caught.
+#   * sum_skips_first drops the first value: eng 500 != 600, hr 50 != 200,
+#     ops 0 != 90 -> caught on every group.
+AGG_CORPUS: tuple[GroupAgg, ...] = (
+    GroupAgg("eng", 3, 600, 200.0),
+    GroupAgg("hr", 2, 200, 100.0),
+    GroupAgg("ops", 1, 90, 90.0),
+)
+
+
+def _normalize(rows: list[dict[str, Any]]) -> tuple[GroupAgg, ...]:
+    """Project aggregator output rows into key-sorted ``GroupAgg`` tuples so
+    comparison is independent of group iteration order."""
+    out = []
+    for r in rows:
+        out.append(GroupAgg(
+            key=r[AGG_GROUP_BY],
+            count=int(r["count"]),
+            total=int(r["total"]),
+            avg=float(r["avg"]),
+        ))
+    return tuple(sorted(out, key=lambda g: g.key))
+
+
+# --- ORACLE: reuse the harness's own correct ``Aggregator`` group transform ---
+
+def oracle_aggregate(records: list[dict[str, Any]]) -> tuple[GroupAgg, ...]:
+    """Correct per-group COUNT / SUM / AVG, delegating to the harness's own
+    ``Aggregator``. Returns one key-sorted ``GroupAgg`` per group."""
+    agg = Aggregator(
+        group_by=AGG_GROUP_BY,
+        aggregations={
+            "count": (AggregateFunction.COUNT, AGG_SRC_FIELD),
+            "total": (AggregateFunction.SUM, AGG_SRC_FIELD),
+            "avg": (AggregateFunction.AVG, AGG_SRC_FIELD),
+        },
+    )
+    return _normalize(agg.process(records))
+
+
+# --- Planted buggy twins (each models a real group-by fold defect) -----------
+
+def avg_div_by_groupcount(records: list[dict[str, Any]]) -> tuple[GroupAgg, ...]:
+    """BUG: computes AVG as ``group_sum / number_of_groups`` instead of
+    ``group_sum / number_of_values_in_the_group``.
+
+    Models the stray-``len(groups)`` defect: the developer divides by the count
+    of buckets (held in scope) rather than the size of the current bucket. COUNT
+    and SUM are correct; only AVG is wrong, and only on groups whose value-count
+    differs from the group-count.
+    """
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for rec in records:
+        groups[rec[AGG_GROUP_BY]].append(rec)
+    n_groups = len(groups)  # BUG: wrong denominator for AVG
+    rows = []
+    for key, members in groups.items():
+        values = [m[AGG_SRC_FIELD] for m in members if m.get(AGG_SRC_FIELD) is not None]
+        total = sum(values)
+        rows.append({
+            AGG_GROUP_BY: key,
+            "count": len(members),
+            "total": total,
+            "avg": (total / n_groups) if n_groups else 0.0,
+        })
+    return _normalize(rows)
+
+
+def sum_skips_first(records: list[dict[str, Any]]) -> tuple[GroupAgg, ...]:
+    """BUG: folds each group's SUM (and therefore AVG) starting from the SECOND
+    record, dropping the first value of every group.
+
+    Models the classic ``for v in values[1:]`` / accumulator-seeded-then-skipped
+    off-by-one in a hand-rolled reducer. COUNT stays correct (it counts members),
+    so the row count looks right while the totals are silently low.
+    """
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for rec in records:
+        groups[rec[AGG_GROUP_BY]].append(rec)
+    rows = []
+    for key, members in groups.items():
+        values = [m[AGG_SRC_FIELD] for m in members if m.get(AGG_SRC_FIELD) is not None]
+        total = sum(values[1:])  # BUG: skips the first value of the group
+        count = len(members)
+        rows.append({
+            AGG_GROUP_BY: key,
+            "count": count,
+            "total": total,
+            "avg": (total / count) if count else 0.0,
+        })
+    return _normalize(rows)
+
+
+def prove(impl: Callable[[list[dict[str, Any]]], tuple[GroupAgg, ...]]) -> bool:
+    """True iff ``impl`` produces an aggregate that diverges from any frozen
+    corpus literal (i.e. the aggregation bug is caught): a group is missing /
+    extra, or its (count, total, avg) differs from the hand-computed literal, or
+    the impl raises.
+
+    Non-circular + deterministic: every expectation lives in ``AGG_CORPUS`` as a
+    literal, never read from the oracle; arithmetic over a frozen tuple only, no
+    RNG/clock/threads/network/filesystem. An impl that raises counts as caught.
+    """
+    try:
+        produced = tuple(sorted(impl([dict(r) for r in AGG_RECORDS]),
+                                key=lambda g: g.key))
+    except Exception:  # noqa: BLE001 — raising on the corpus counts as caught
+        return True
+    return produced != AGG_CORPUS
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_aggregate,
+    mutants=(
+        Mutant("avg_div_by_groupcount", avg_div_by_groupcount,
+               "AVG divides each group's sum by the NUMBER OF GROUPS instead of "
+               "the count of values in the group -> wrong on any group whose "
+               "value-count != group-count"),
+        Mutant("sum_skips_first", sum_skips_first,
+               "SUM folds from the second record (values[1:]) -> drops the first "
+               "value of every group, so totals and AVG run low"),
+    ),
+    corpus_size=len(AGG_CORPUS),
+    kind="oracle_swap",
+    notes="group-by aggregator: per group, AVG == SUM(values) / COUNT(values), "
+          "not SUM / number_of_groups, and SUM must include the first value",
+)
+
+
+def list_scenarios() -> list[str]:
+    """Names of the frozen aggregation corpus groups (the teeth scenarios)."""
+    return [g.key for g in AGG_CORPUS]
+
+
+# ---------------------------------------------------------------------------
+# Self-test — fails loud, reports findings.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(as_json: bool = False) -> int:
+    """Assert the group aggregator reproduces every frozen per-group literal and
+    that the teeth hold: prove(oracle) is False and every planted mutant is
+    caught."""
+    report = Report("core/pipeline")
+
+    produced = {g.key: g for g in oracle_aggregate([dict(r) for r in AGG_RECORDS])}
+    for expected in AGG_CORPUS:
+        got = produced.get(expected.key)
+        report.add(
+            f"agg:{expected.key}",
+            [expected.count, expected.total, expected.avg],
+            None if got is None else [got.count, got.total, got.avg],
+            detail=f"per-group COUNT/SUM/AVG for dept={expected.key!r}",
+        )
+
+    report.assert_teeth(TEETH)
+    return report.emit(as_json=as_json)
+
+
+# ---------------------------------------------------------------------------
+# CLI — default action is the self-test (repo convention).
+# ---------------------------------------------------------------------------
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Data pipeline / ETL controls — group-aggregator teeth"
+    )
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true")
+    parser.add_argument("--serve", action="store_true",
+                        help="run the mock pipeline HTTP server (blocks)")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT,
+                        help="port for --serve (default 19050; 0 = OS-assigned)")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
+
+    if args.serve:
+        # serve_forever stays under main only — never at import, never in prove.
+        server = MockPipelineServer(port=args.port)
+        actual = server.start()
+        print(f"serving mock pipeline on http://127.0.0.1:{actual}", file=sys.stderr)
+        try:
+            while True:
+                time.sleep(3600)
+        except KeyboardInterrupt:
+            server.stop()
+        return 0
+
+    return _run_self_test(as_json=args.json)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

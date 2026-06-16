@@ -18,7 +18,10 @@ import time
 import unittest
 from unittest.mock import MagicMock
 
+from harnesses._teeth import verify
 from harnesses.core.chaos_test_harness import (
+    BREAKER_CORPUS,
+    TEETH,
     CircuitBreaker,
     CircuitOpenError,
     CircuitState,
@@ -30,8 +33,13 @@ from harnesses.core.chaos_test_harness import (
     http_get,
     http_get_json,
     is_transient,
+    list_scenarios,
+    oracle_run,
+    prove,
     retry_with_backoff,
+    serves_while_open,
     start_mock_server,
+    trips_one_late,
 )
 
 # ---------------------------------------------------------------------------
@@ -636,6 +644,112 @@ class TestRecoveryBehavior(unittest.TestCase):
         with contextlib.suppress(ConnectionError, CircuitOpenError):
             cb.call(lambda: (_ for _ in ()).throw(ConnectionError("probe fail")))
         self.assertEqual(cb.state, CircuitState.OPEN)
+
+
+# ---------------------------------------------------------------------------
+# 11. Teeth — the frozen circuit-breaker oracle/mutant swap-check
+# ---------------------------------------------------------------------------
+
+class TestTeeth(unittest.TestCase):
+    """The teeth contract: prove() catches realistic breaker bugs against a
+    frozen literal corpus, the correct oracle is clean, and prove() is
+    non-circular (it compares to baked-in literals, never to a runtime oracle)."""
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(len(BREAKER_CORPUS), 1)
+        self.assertEqual(TEETH.corpus_size, len(BREAKER_CORPUS))
+
+    def test_oracle_is_clean(self):
+        # The correct breaker is NOT flagged by its own corpus.
+        self.assertIs(prove(oracle_run), False)
+
+    def test_every_mutant_is_caught(self):
+        # Each planted defect is flagged against the frozen corpus.
+        for mutant in TEETH.mutants:
+            with self.subTest(mutant=mutant.name):
+                self.assertIs(prove(mutant.impl), True)
+
+    def test_trips_one_late_caught(self):
+        self.assertIs(prove(trips_one_late), True)
+
+    def test_serves_while_open_caught(self):
+        self.assertIs(prove(serves_while_open), True)
+
+    def test_verify_reports_full_teeth(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"])
+        self.assertTrue(result["teeth_verified"])
+        self.assertTrue(result["oracle_clean"])
+        self.assertEqual(result["mutants_caught"], len(TEETH.mutants))
+        self.assertEqual(result["mutants_uncaught"], [])
+
+    def test_oracle_matches_every_frozen_literal(self):
+        # Independent of prove(): the oracle reproduces each hand-computed
+        # observation tuple exactly.
+        for case in BREAKER_CORPUS:
+            with self.subTest(case=case.name):
+                got = oracle_run(
+                    case.timeline, case.failure_threshold, case.open_duration
+                )
+                self.assertEqual(tuple(got), case.expected)
+
+    def test_prove_is_non_circular(self):
+        """Flipping ONE frozen literal expectation must make prove(oracle) True.
+
+        If prove() derived its expectations by calling oracle() at runtime, a
+        corrupted corpus would still pass (vacuously green). Because the
+        expectations are baked-in literals, a single flipped tuple is enough to
+        flag the otherwise-correct oracle — proving the comparison is against
+        the frozen corpus, not a reference impl."""
+        import dataclasses
+
+        import harnesses.core.chaos_test_harness as mod
+
+        original = mod.BREAKER_CORPUS
+        self.assertIs(prove(oracle_run), False)  # baseline: clean
+
+        # Corrupt the discriminating reject expectation: ('OPEN', True) ->
+        # ('OPEN', False) in the 'reject_while_open' case.
+        target = original[1]
+        self.assertEqual(target.name, "reject_while_open")
+        corrupted = dataclasses.replace(
+            target, expected=target.expected[:3] + (("OPEN", False),)
+        )
+        mod.BREAKER_CORPUS = original[:1] + (corrupted,) + original[2:]
+        try:
+            self.assertIs(prove(mod.oracle_run), True)
+        finally:
+            mod.BREAKER_CORPUS = original
+        # Restored: clean again.
+        self.assertIs(prove(oracle_run), False)
+
+    def test_mutant_discriminated_by_intended_case(self):
+        """Each mutant is caught by the case designed to expose it (and the
+        off-by-one mutant specifically fails the exact-threshold trip case)."""
+        def caught_cases(impl):
+            return {
+                case.name
+                for case in BREAKER_CORPUS
+                if tuple(
+                    impl(case.timeline, case.failure_threshold, case.open_duration)
+                )
+                != case.expected
+            }
+
+        self.assertIn("trip_on_exact_threshold", caught_cases(trips_one_late))
+        self.assertIn("reject_while_open", caught_cases(serves_while_open))
+
+    def test_decoy_case_distinguishes_neither_bug(self):
+        """The success-reset decoy stays CLOSED for the oracle AND both bugs:
+        teeth must come from real transitions, not coincidence on the decoy."""
+        decoy = next(c for c in BREAKER_CORPUS if c.name == "success_resets_failure_run")
+        for impl in (oracle_run, trips_one_late, serves_while_open):
+            with self.subTest(impl=impl.__name__):
+                got = impl(decoy.timeline, decoy.failure_threshold, decoy.open_duration)
+                self.assertEqual(tuple(got), decoy.expected)
+
+    def test_list_scenarios_matches_corpus(self):
+        self.assertEqual(list_scenarios(), [c.name for c in BREAKER_CORPUS])
 
 
 if __name__ == "__main__":

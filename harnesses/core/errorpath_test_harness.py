@@ -6,6 +6,7 @@ Mock HTTP server on dynamic port (default 19120).
 
 from __future__ import annotations
 
+import argparse
 import json
 import socket
 import sys
@@ -14,7 +15,13 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path as _Path
 from typing import Any
+
+# Make the shared teeth contract importable whether run as a module or a script.
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Dataclasses
@@ -580,8 +587,7 @@ class ResourceCleanupTester:
 
         result["acquired"] = acquire_count[0]
         result["released"] = release_count[0]
-        result["leaked"] = (acquire_count[0] > 0 and
-                            release_count[0] < acquire_count[0])
+        result["leaked"] = acquire_count[0] != release_count[0]
         result["passed"] = not result["leaked"]
 
         self._results.append(result)
@@ -617,8 +623,7 @@ class ResourceCleanupTester:
 
         result["acquired"] = counters["acquired"]
         result["released"] = counters["released"]
-        result["leaked"] = (counters["acquired"] > 0 and
-                            counters["released"] < counters["acquired"])
+        result["leaked"] = counters["acquired"] != counters["released"]
         result["passed"] = not result["leaked"]
 
         self._results.append(result)
@@ -629,6 +634,198 @@ class ResourceCleanupTester:
 
     def all_passed(self) -> bool:
         return all(r["passed"] for r in self._results)
+
+
+# ---------------------------------------------------------------------------
+# TEETH: a FROZEN corpus of (acquired, released) resource-event counts -> the
+# exact leak verdict a CORRECT try/finally cleanup auditor MUST return.
+#
+# This harness's whole reason to exist is catching resources that are acquired
+# but not released. ResourceCleanupTester reduces every run to a pair of
+# counters (acquired, released); the leak verdict is the pure function under
+# test. The ONE correct rule is a balance check:
+#
+#     leaked  iff  acquired != released
+#
+# i.e. a clean run releases exactly what it acquired. Under-release (a missing
+# ``finally``) AND over-release (a double-``close``/double-``release``, the
+# use-after-free / double-free class) are both real leaks, so both must be
+# flagged. ``acquired == released == 0`` (nothing acquired) is clean.
+#
+# An impl is a callable ``leaked(acquired, released) -> bool``. prove() judges
+# each impl against the corpus's FROZEN LITERAL ``expected`` verdicts — every
+# one hand-written here as a constant, NEVER read back from the oracle at
+# runtime — so the check is non-circular: flip any single ``expected`` literal
+# and prove(oracle) flips to True. prove(impl) is True iff any verdict diverges
+# from its frozen literal — i.e. the planted leak-detector bug is caught.
+#
+# Pure + deterministic: integer comparison only, no clock/sleep, no RNG, no
+# threads, no network, no filesystem. The mock HTTP server and the
+# thread-based TimeoutTester are deliberately OUT of the teeth path (real
+# sockets/threads are non-deterministic) — the teeth ride the pure counter
+# verdict, exactly the in-process behavior the gate wants.
+#
+# The two planted mutants model genuine real-world cleanup-auditor defects:
+#
+#   * ignores_balance — the auditor only flags ``released < acquired``, so an
+#     over-release / double-free where ``released > acquired`` slips past
+#     unnoticed: a real "we only checked for under-release" bug (the common
+#     mistake this harness's own ResourceCleanupTester used to make);
+#   * off_by_one — a fencepost slip (``acquired - released > 1`` instead of
+#     ``!= 0``) that "tolerates one unreleased handle", letting a genuine
+#     single-handle leak go unreported.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class LeakCase:
+    """One frozen resource-cleanup case with a literal, hand-written verdict."""
+    name: str
+    acquired: int
+    released: int
+    expected: bool   # the EXACT leak verdict a correct balance check yields
+    note: str = ""
+
+
+# Cases chosen so the correct oracle matches every literal AND each planted
+# mutant gets at least one case wrong. Every ``expected`` is hand-written from
+# the rule ``leaked iff acquired != released`` — a constant, never derived at
+# runtime. ``balanced`` and ``no_resource`` are decoys neither mutant can
+# distinguish (both agree with the oracle there), so the teeth come from the
+# real leak/over-release cases, not coincidence.
+LEAK_CORPUS: tuple[LeakCase, ...] = (
+    # Acquired exactly as many as released: a clean try/finally. No leak.
+    LeakCase("balanced", 2, 2, False,
+             "acquired == released: a correct try/finally releases everything"),
+    # Acquired 3, released only 1: a missing ``finally`` leaks 2 handles. Both
+    # the oracle and both mutants agree this is a leak (under-release).
+    LeakCase("under_release", 3, 1, True,
+             "released < acquired: the classic missing-finally resource leak"),
+    # Acquired 1, released 2: a double-``release``/double-free. The oracle flags
+    # it; ``ignores_balance`` (released < acquired only) wrongly calls it clean.
+    LeakCase("double_release", 1, 2, True,
+             "released > acquired: over-release/double-free — ignores_balance "
+             "misses this"),
+    # Acquired 2, released 1: a single leaked handle. The oracle flags it;
+    # ``off_by_one`` (tolerates a gap of one) wrongly calls it clean.
+    LeakCase("single_leak", 2, 1, True,
+             "off-by-one leak of exactly one handle — off_by_one misses this"),
+    # Nothing acquired, nothing released: not a leak. A decoy — every impl
+    # agrees, so it cannot be the source of the teeth.
+    LeakCase("no_resource", 0, 0, False,
+             "no resource acquired: nothing to leak"),
+)
+
+
+# --- ORACLE: the correct leak verdict (acquired != released) -----------------
+
+def oracle_leaked(acquired: int, released: int) -> bool:
+    """Correct cleanup verdict: a run leaks iff it did not release exactly what
+    it acquired. Catches both under-release (missing ``finally``) and
+    over-release (double-free)."""
+    return acquired != released
+
+
+# --- Planted buggy twins (each models a real cleanup-auditor defect) ---------
+
+def ignores_balance(acquired: int, released: int) -> bool:
+    """BUG: only flags UNDER-release (``released < acquired``), ignoring the
+    over-release / double-free case where ``released > acquired``.
+
+    It models the very common "we only ever checked for a missing release,
+    never for releasing twice" auditor bug, so a double-free run is silently
+    reported clean. (This harness's own ResourceCleanupTester used to ship this
+    exact bug; it now uses the correct ``acquired != released`` balance rule.)
+    """
+    return acquired > 0 and released < acquired
+
+
+def off_by_one(acquired: int, released: int) -> bool:
+    """BUG: a fencepost slip that tolerates one unreleased handle.
+
+    Models the "allow a gap of one" defect (e.g. a developer who wrote
+    ``acquired - released > 1`` thinking one straggler is acceptable): a genuine
+    single-handle leak (acquired 2, released 1) is wrongly reported clean.
+    """
+    return (acquired - released) > 1
+
+
+def prove(impl: Callable[[int, int], bool]) -> bool:
+    """True iff ``impl`` returns the WRONG leak verdict for any frozen corpus
+    case (i.e. the cleanup-auditor bug is caught): its verdict diverges from
+    the hand-written literal, or it raises.
+
+    Non-circular + deterministic: every expectation is a literal baked into
+    LEAK_CORPUS, never read from the oracle; integer comparison only, no
+    RNG/clock/threads/network/filesystem. An impl that raises on a corpus case
+    counts as caught.
+    """
+    for case in LEAK_CORPUS:
+        try:
+            verdict = impl(case.acquired, case.released)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if bool(verdict) != case.expected:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_leaked,
+    mutants=(
+        Mutant("ignores_balance", ignores_balance,
+               "only flags released < acquired, so an over-release/double-free "
+               "(released > acquired) is silently reported clean"),
+        Mutant("off_by_one", off_by_one,
+               "tolerates a gap of one (acquired - released > 1), so a genuine "
+               "single-handle leak goes unreported"),
+    ),
+    corpus_size=len(LEAK_CORPUS),
+    kind="oracle_swap",
+    notes="resource cleanup leaks iff acquired != released; both under-release "
+          "(missing finally) and over-release (double-free) are real leaks",
+)
+
+
+def list_teeth_scenarios() -> list[str]:
+    """Names of the frozen resource-cleanup corpus cases (the teeth scenarios)."""
+    return [c.name for c in LEAK_CORPUS]
+
+
+def _run_self_test(as_json: bool = False) -> int:
+    """Assert the teeth: the correct leak oracle reproduces every frozen verdict
+    literal, and the universal swap-check passes (oracle clean, every planted
+    cleanup-auditor mutant caught). Pure + deterministic — the thread-based
+    TimeoutTester and the mock HTTP server are intentionally excluded."""
+    report = Report("core/errorpath")
+
+    # 1. The correct oracle reproduces every frozen leak-verdict literal exactly.
+    for case in LEAK_CORPUS:
+        verdict = oracle_leaked(case.acquired, case.released)
+        report.add(f"oracle_leak:{case.name}", case.expected, verdict,
+                   detail=case.note)
+
+    # 2. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Error-path / negative-coverage harness self-test")
+    parser.add_argument("--self-test", action="store_true",
+                        help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_teeth_scenarios()))
+        return 0
+    return _run_self_test(as_json=args.json)
 
 
 # ---------------------------------------------------------------------------
@@ -795,3 +992,7 @@ class ErrorPathServer:
 
     def __exit__(self, *args) -> None:
         self.stop()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

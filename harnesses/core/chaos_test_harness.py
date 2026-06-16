@@ -1,21 +1,46 @@
+#!/usr/bin/env python3
 """
 Chaos / Resilience Test Harness (Harness 7 of 36)
+=================================================
 
-Tests system resilience under failure conditions using a built-in mock HTTP server.
-Pure stdlib, zero external dependencies.
+Tests system resilience under failure conditions. The CircuitBreaker state
+machine is the oracle-able core: a deterministic transition function over a
+sequence of call outcomes. A mock HTTP server is available under ``main`` only
+(never bound at import, never inside ``prove``); the teeth never touch a socket,
+a clock, threads, or RNG.
+
+GOLD shape — declares a module-level ``TEETH`` over the in-process breaker
+oracle so the hardened gate (``tools/proof_audit.py``) verifies real teeth.
+
+Run:
+  python harnesses/core/chaos_test_harness.py --self-test
+  python harnesses/core/chaos_test_harness.py --json
+  python harnesses/core/chaos_test_harness.py --list-scenarios
 """
 
+from __future__ import annotations
+
+import argparse
 import http.server
 import json
 import random
 import socket
+import sys
 import threading
 import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
+
+# Make the shared teeth contract importable whether run as a module or a script.
+from pathlib import Path as _Path
 from typing import Any
+
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Circuit Breaker
@@ -192,19 +217,19 @@ class FaultInjector:
     # Configuration helpers
     # ------------------------------------------------------------------
 
-    def inject_latency(self, ms: float) -> "FaultInjector":
+    def inject_latency(self, ms: float) -> FaultInjector:
         self._fault = FaultType.LATENCY
         self._latency_ms = ms
         self._enabled = True
         return self
 
-    def inject_error(self, message: str = "Injected fault error") -> "FaultInjector":
+    def inject_error(self, message: str = "Injected fault error") -> FaultInjector:
         self._fault = FaultType.ERROR
         self._error_message = message
         self._enabled = True
         return self
 
-    def inject_timeout(self, seconds: float = 60.0) -> "FaultInjector":
+    def inject_timeout(self, seconds: float = 60.0) -> FaultInjector:
         self._fault = FaultType.TIMEOUT
         self._timeout_seconds = seconds
         self._enabled = True
@@ -212,13 +237,13 @@ class FaultInjector:
 
     def inject_corruption(
         self, corrupt_fn: Callable[[Any], Any] | None = None
-    ) -> "FaultInjector":
+    ) -> FaultInjector:
         self._fault = FaultType.CORRUPT
         self._corrupt_fn = corrupt_fn or (lambda v: str(v)[::-1])
         self._enabled = True
         return self
 
-    def disable(self) -> "FaultInjector":
+    def disable(self) -> FaultInjector:
         self._fault = FaultType.NONE
         self._enabled = False
         return self
@@ -653,10 +678,381 @@ class FallbackRegistry:
 
 
 # ---------------------------------------------------------------------------
-# Demo / manual smoke test
+# TEETH: a FROZEN timeline of circuit-breaker call outcomes -> the EXACT
+# (state, was_rejected) a CORRECT breaker MUST produce after each step.
+#
+# The chaos harness only has teeth if it CATCHES the two defects a real
+# resilience engineer ships most often:
+#
+#   * a threshold OFF-BY-ONE — the breaker trips one failure too late
+#     (``> threshold`` instead of ``>= threshold``), so the Nth consecutive
+#     failure that should open the circuit leaves it CLOSED and the very next
+#     call (which should be fast-rejected) is instead let through; and
+#   * a "never rejects while OPEN" bug — the OPEN state is recorded but the
+#     guard that fast-fails is dropped, so every call is served straight to the
+#     failing dependency, defeating the entire breaker.
+#
+# An impl is a callable ``run(timeline, failure_threshold, open_duration)``
+# returning a tuple of per-step ``(state_name, was_rejected)`` observations,
+# where ``timeline`` is a frozen sequence of string events:
+#
+#   "S"  -> a call whose underlying fn SUCCEEDS
+#   "F"  -> a call whose underlying fn FAILS (raises)
+#   "W"  -> WAIT: advance the injected step-clock past ``open_duration`` so the
+#           breaker is eligible to transition OPEN -> HALF_OPEN on the next call
+#           (an explicit cooldown marker; produces NO observation)
+#
+# DETERMINISM: the real ``CircuitBreaker`` keys its OPEN->HALF_OPEN transition
+# off ``time.monotonic()``. prove() drives an equivalent breaker through an
+# INJECTED integer step-clock instead — no real clock, no sleep, no threads, no
+# RNG, no socket. ``"W"`` is the only thing that advances time, and it advances
+# it by exactly one ``open_duration`` so transitions are fully scripted.
+#
+# prove() judges each impl against the corpus's FROZEN LITERAL observation
+# tuples (hand-computed from the state-machine contract, NEVER read back from
+# the oracle at runtime), so the check is non-circular. prove(impl) is True iff
+# any observation diverges from the frozen literal — i.e. the planted breaker
+# bug is caught.
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+
+def _simulate_breaker(
+    timeline: tuple[str, ...],
+    failure_threshold: int,
+    open_duration: int,
+    *,
+    trip_late: bool = False,
+    serve_while_open: bool = False,
+) -> tuple[tuple[str, bool], ...]:
+    """Deterministic reference circuit-breaker over a scripted timeline.
+
+    Pure: an injected integer step-clock (advanced only by ``"W"``) replaces
+    ``time.monotonic()``; no real time, threads, RNG, or I/O. Returns one
+    ``(state_after, was_rejected)`` observation per call event ("S"/"F").
+
+    The two flags select the planted bugs so the oracle and both buggy twins
+    share one code path (only the defect differs):
+
+    * ``trip_late``       — open at ``failures > threshold`` (off-by-one late)
+                            instead of ``failures >= threshold``;
+    * ``serve_while_open``— skip the OPEN fast-reject guard, serving the call.
+    """
+    state = CircuitState.CLOSED
+    failure_count = 0
+    success_count = 0
+    success_threshold = 1
+    opened_at: int | None = None
+    now = 0
+
+    observations: list[tuple[str, bool]] = []
+
+    for event in timeline:
+        if event == "W":
+            # Cooldown marker: advance the injected clock one full open_duration.
+            now += open_duration
+            continue
+
+        # OPEN -> HALF_OPEN once the cooldown has elapsed (clock-driven).
+        if (
+            state == CircuitState.OPEN
+            and opened_at is not None
+            and (now - opened_at) >= open_duration
+        ):
+            state = CircuitState.HALF_OPEN
+            success_count = 0
+
+        # Fast-reject guard while OPEN.
+        if state == CircuitState.OPEN and not serve_while_open:
+            observations.append((state.value, True))
+            continue
+
+        succeeded = event == "S"
+
+        if state == CircuitState.HALF_OPEN:
+            if succeeded:
+                success_count += 1
+                if success_count >= success_threshold:
+                    state = CircuitState.CLOSED
+                    failure_count = 0
+                    success_count = 0
+                    opened_at = None
+            else:
+                # A failed probe re-opens immediately.
+                state = CircuitState.OPEN
+                opened_at = now
+                failure_count = 0
+                success_count = 0
+            observations.append((state.value, False))
+            continue
+
+        # CLOSED path (also reached when serve_while_open masks an OPEN state).
+        if succeeded:
+            failure_count = 0
+        else:
+            failure_count += 1
+            tripped = (
+                failure_count > failure_threshold
+                if trip_late
+                else failure_count >= failure_threshold
+            )
+            if tripped:
+                state = CircuitState.OPEN
+                opened_at = now
+                failure_count = 0
+                success_count = 0
+        observations.append((state.value, False))
+
+    return tuple(observations)
+
+
+@dataclass(frozen=True)
+class BreakerCase:
+    """One frozen breaker timeline with literal, hand-computed observations."""
+    name: str
+    timeline: tuple[str, ...]
+    failure_threshold: int
+    open_duration: int
+    expected: tuple[tuple[str, bool], ...]  # (state, was_rejected) per call event
+    note: str = ""
+
+
+# Cases chosen so the correct oracle matches every literal AND at least one
+# planted mutant gets each one wrong. Every ``expected`` tuple is hand-computed
+# from the state-machine contract — constants, never derived at runtime.
+#
+# Legend per observation: (state_after_this_call, was_this_call_rejected).
+BREAKER_CORPUS: tuple[BreakerCase, ...] = (
+    # threshold=3: the 3rd consecutive failure trips the breaker OPEN. The
+    # discriminating case for the off-by-one: 'trips_one_late' leaves the 3rd
+    # failure CLOSED (and would only open on a 4th).
+    BreakerCase(
+        "trip_on_exact_threshold",
+        ("F", "F", "F"),
+        3,
+        5,
+        (("CLOSED", False), ("CLOSED", False), ("OPEN", False)),
+        "exactly failure_threshold consecutive failures must open the circuit",
+    ),
+    # After tripping OPEN on the 3rd failure, the 4th call (no cooldown) must be
+    # fast-REJECTED. This is the discriminating case for 'serves_while_open':
+    # the correct breaker rejects (True); the bug serves it (CLOSED, False).
+    BreakerCase(
+        "reject_while_open",
+        ("F", "F", "F", "F"),
+        3,
+        5,
+        (
+            ("CLOSED", False),
+            ("CLOSED", False),
+            ("OPEN", False),
+            ("OPEN", True),   # fast-fail: rejected without calling fn
+        ),
+        "while OPEN and before cooldown, calls are rejected (not served)",
+    ),
+    # Full happy-path recovery: trip OPEN, WAIT past cooldown -> HALF_OPEN probe
+    # succeeds -> CLOSED. Exercises the cooldown marker and the close path.
+    BreakerCase(
+        "recover_via_half_open",
+        ("F", "F", "W", "S", "S"),
+        2,
+        5,
+        (
+            ("CLOSED", False),   # 1st failure
+            ("OPEN", False),     # 2nd failure trips (threshold=2)
+            # "W" advances the clock; no observation
+            ("CLOSED", False),   # HALF_OPEN probe succeeds -> CLOSED
+            ("CLOSED", False),   # back to normal CLOSED operation
+        ),
+        "OPEN -> (cooldown) -> HALF_OPEN -> CLOSED on a successful probe",
+    ),
+    # HALF_OPEN probe FAILS -> straight back to OPEN, and the next call (no new
+    # cooldown) is rejected again. Exercises the half-open->open edge.
+    BreakerCase(
+        "half_open_probe_fails_reopens",
+        ("F", "F", "W", "F", "S"),
+        2,
+        5,
+        (
+            ("CLOSED", False),   # 1st failure
+            ("OPEN", False),     # 2nd failure trips
+            # "W" advances the clock; no observation
+            ("OPEN", False),     # HALF_OPEN probe fails -> re-OPEN
+            ("OPEN", True),      # still OPEN, no cooldown -> rejected
+        ),
+        "a failed HALF_OPEN probe re-opens the circuit immediately",
+    ),
+    # Decoy: a success resets the consecutive-failure counter, so two failures
+    # split by a success never reach threshold=3. Neither bug can trip or reject
+    # here — guards against teeth that fire on coincidence.
+    BreakerCase(
+        "success_resets_failure_run",
+        ("F", "F", "S", "F", "F"),
+        3,
+        5,
+        (
+            ("CLOSED", False),
+            ("CLOSED", False),
+            ("CLOSED", False),   # success resets the run
+            ("CLOSED", False),
+            ("CLOSED", False),   # only 2 consecutive again -> still CLOSED
+        ),
+        "decoy: an interleaved success prevents reaching the threshold",
+    ),
+)
+
+
+# --- ORACLE: the correct breaker transition function -------------------------
+
+def oracle_run(
+    timeline: tuple[str, ...],
+    failure_threshold: int,
+    open_duration: int,
+) -> tuple[tuple[str, bool], ...]:
+    """Correct circuit-breaker observations over a scripted timeline."""
+    return _simulate_breaker(timeline, failure_threshold, open_duration)
+
+
+# --- Planted buggy twins (each models a real resilience defect) --------------
+
+def trips_one_late(
+    timeline: tuple[str, ...],
+    failure_threshold: int,
+    open_duration: int,
+) -> tuple[tuple[str, bool], ...]:
+    """BUG: opens at ``failure_threshold + 1`` consecutive failures.
+
+    Models the classic ``if failures > threshold`` off-by-one (should be
+    ``>=``): the Nth failure that ought to open the circuit leaves it CLOSED, so
+    one extra call is sent to the failing dependency before the breaker engages.
+    """
+    return _simulate_breaker(
+        timeline, failure_threshold, open_duration, trip_late=True
+    )
+
+
+def serves_while_open(
+    timeline: tuple[str, ...],
+    failure_threshold: int,
+    open_duration: int,
+) -> tuple[tuple[str, bool], ...]:
+    """BUG: does not fast-reject while OPEN.
+
+    Models a dropped guard: the state is correctly recorded as OPEN, but the
+    fast-fail check is missing, so calls are served straight through to the
+    failing dependency while open — defeating the breaker's whole purpose.
+    """
+    return _simulate_breaker(
+        timeline, failure_threshold, open_duration, serve_while_open=True
+    )
+
+
+def prove(
+    impl: Callable[
+        [tuple[str, ...], int, int], tuple[tuple[str, bool], ...]
+    ],
+) -> bool:
+    """True iff ``impl`` produces the WRONG observations for any frozen corpus
+    case (i.e. the breaker bug is caught): the per-step ``(state, was_rejected)``
+    tuple diverges from the hand-computed literal, or the impl raises.
+
+    Non-circular + deterministic: every expectation is a literal baked into
+    BREAKER_CORPUS, never read from the oracle; integer arithmetic and an
+    injected step-clock only, no RNG/clock/threads/network/filesystem. An impl
+    that raises on a corpus case counts as caught.
+    """
+    for case in BREAKER_CORPUS:
+        try:
+            got = impl(case.timeline, case.failure_threshold, case.open_duration)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if tuple(got) != case.expected:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_run,
+    mutants=(
+        Mutant("trips_one_late", trips_one_late,
+               "opens at failure_threshold+1 (a > vs >= off-by-one) -> the Nth "
+               "failure that should trip the breaker leaves it CLOSED and one "
+               "extra call reaches the failing dependency"),
+        Mutant("serves_while_open", serves_while_open,
+               "drops the OPEN fast-reject guard -> every call is served to the "
+               "failing dependency while the circuit is OPEN, defeating it"),
+    ),
+    corpus_size=len(BREAKER_CORPUS),
+    kind="oracle_swap",
+    notes="a circuit breaker must trip OPEN after EXACTLY failure_threshold "
+          "consecutive failures and fast-reject calls while OPEN, then recover "
+          "OPEN -> HALF_OPEN -> CLOSED via a successful probe after cooldown",
+)
+
+
+def list_scenarios() -> list[str]:
+    """Names of the frozen breaker-timeline corpus cases (the teeth scenarios)."""
+    return [c.name for c in BREAKER_CORPUS]
+
+
+# ---------------------------------------------------------------------------
+# Self-test — fails loud, reports findings.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(as_json: bool = False) -> int:
+    """Assert the breaker oracle reproduces every frozen observation literal and
+    the universal swap-check passes (oracle clean, every planted mutant caught).
+    Pure + deterministic: no socket, clock, thread, or RNG is touched."""
+    report = Report("core/chaos")
+
+    # 1. The correct oracle reproduces every frozen observation tuple exactly.
+    for case in BREAKER_CORPUS:
+        got = oracle_run(case.timeline, case.failure_threshold, case.open_duration)
+        report.add(
+            f"breaker:{case.name}",
+            [list(o) for o in case.expected],
+            [list(o) for o in got],
+            detail=case.note,
+        )
+
+    # 2. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
+
+
+# ---------------------------------------------------------------------------
+# CLI — default action is the self-test (repo convention).
+# ---------------------------------------------------------------------------
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Chaos / resilience harness: circuit-breaker transition oracle"
+    )
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true")
+    parser.add_argument("--demo", action="store_true",
+                        help="run the mock HTTP server smoke demo")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
+
+    if args.demo:
+        return _run_demo()
+
+    return _run_self_test(as_json=args.json)
+
+
+def _run_demo() -> int:
+    """Manual smoke test against the in-process mock chaos server.
+
+    The mock HTTP server is bound here under ``main`` ONLY — never at import
+    time and never inside ``prove``/the teeth path.
+    """
     print("Starting mock chaos server...")
     server, port, base_url = start_mock_server()
     print(f"Server running on {base_url}")
@@ -676,3 +1072,8 @@ if __name__ == "__main__":
     print(f"\nMetrics: {metrics.summary()}")
     server.shutdown()
     server.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
