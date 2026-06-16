@@ -10,6 +10,7 @@ Pure stdlib, zero external dependencies.
 from __future__ import annotations
 
 import argparse
+import copy
 import http.server
 import json
 import math
@@ -993,7 +994,7 @@ def prove(impl: ShrinkFunc) -> bool:
     """
     for case in SHRINK_CORPUS:
         try:
-            got = impl(case.start, case.predicate)
+            got = impl(copy.deepcopy(case.start), case.predicate)
         except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
             return True
         if got != case.expected_minimal:
@@ -1037,7 +1038,8 @@ def _run_self_test(as_json: bool = False) -> int:
     correct = oracle_shrink()
     for case in SHRINK_CORPUS:
         report.add(f"shrink:{case.name}", case.expected_minimal,
-                   correct(case.start, case.predicate), detail=case.note)
+                   correct(copy.deepcopy(case.start), case.predicate),
+                   detail=case.note)
     report.assert_teeth(TEETH)
     return report.emit(as_json=as_json)
 
