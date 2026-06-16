@@ -24,7 +24,6 @@ from __future__ import annotations
 import argparse
 import enum
 import json
-import socket
 import sys
 import threading
 import time
@@ -722,8 +721,6 @@ class MockPipelineHandler(BaseHTTPRequestHandler):
 class MockPipelineServer:
     """Wrapper for the mock pipeline HTTP server."""
 
-    DEFAULT_PORT = 19050
-
     def __init__(self, port: int = 0):
         """port=0 means OS assigns a dynamic port."""
         self.port = port
@@ -762,21 +759,6 @@ class MockPipelineServer:
 
     def __exit__(self, *args: Any) -> None:
         self.stop()
-
-
-# ---------------------------------------------------------------------------
-# Utility: find free port
-# ---------------------------------------------------------------------------
-
-def find_free_port(preferred: int = 19050) -> int:
-    """Find a free port, starting from preferred."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        try:
-            s.bind(("127.0.0.1", preferred))
-            return preferred
-        except OSError:
-            s.bind(("127.0.0.1", 0))
-            return s.getsockname()[1]
 
 
 # Expose default port constant
