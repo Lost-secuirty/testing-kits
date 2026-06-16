@@ -12,7 +12,10 @@ import urllib.error
 import urllib.request
 from dataclasses import fields as dc_fields
 
+from harnesses._teeth import verify
 from harnesses.core.errorpath_test_harness import (
+    LEAK_CORPUS,
+    TEETH,
     BoundaryTester,
     BranchResult,
     CoverageProbe,
@@ -25,6 +28,11 @@ from harnesses.core.errorpath_test_harness import (
     ResourceCleanupTester,
     TimeoutTester,
     find_free_port,
+    ignores_balance,
+    list_teeth_scenarios,
+    off_by_one,
+    oracle_leaked,
+    prove,
 )
 
 # ---------------------------------------------------------------------------
@@ -1141,6 +1149,116 @@ class TestEdgeCases(unittest.TestCase):
         # "b" should appear once
         b_count = never.count("b")
         self.assertEqual(b_count, 1)
+
+
+# ---------------------------------------------------------------------------
+# 13. Teeth tests — the resource-cleanup leak detector (oracle_swap)
+# ---------------------------------------------------------------------------
+
+class TestTeeth(unittest.TestCase):
+    """Verify the harness has real, non-circular teeth: the correct leak oracle
+    is never flagged, every planted cleanup-auditor mutant is caught, and the
+    frozen corpus is the load-bearing source of truth."""
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(len(LEAK_CORPUS), 1)
+        self.assertEqual(TEETH.corpus_size, len(LEAK_CORPUS))
+
+    def test_prove_oracle_is_false(self):
+        # The correct impl must NOT be flagged against the frozen corpus.
+        self.assertIs(prove(oracle_leaked), False)
+
+    def test_prove_each_mutant_is_true(self):
+        # Every planted defect must be caught.
+        for mutant in TEETH.mutants:
+            self.assertIs(prove(mutant.impl), True, f"{mutant.name} not caught")
+
+    def test_mutant_impls_directly_caught(self):
+        self.assertIs(prove(ignores_balance), True)
+        self.assertIs(prove(off_by_one), True)
+
+    def test_teeth_object_wires_the_oracle(self):
+        self.assertIs(TEETH.oracle, oracle_leaked)
+        self.assertEqual(TEETH.kind, "oracle_swap")
+        self.assertGreaterEqual(len(TEETH.mutants), 1)
+
+    def test_verify_reports_full_teeth(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"])
+        self.assertTrue(result["teeth_verified"])
+        self.assertTrue(result["oracle_clean"])
+        self.assertEqual(result["mutants_uncaught"], [])
+        self.assertEqual(result["mutants_caught"], result["mutants_total"])
+
+    def test_oracle_matches_every_frozen_literal(self):
+        # The oracle reproduces each hand-written expected verdict exactly.
+        for case in LEAK_CORPUS:
+            self.assertEqual(
+                oracle_leaked(case.acquired, case.released),
+                case.expected,
+                f"oracle disagrees with frozen literal for {case.name}",
+            )
+
+    def test_oracle_flags_under_and_over_release(self):
+        # Balance rule: both directions of imbalance are leaks.
+        self.assertTrue(oracle_leaked(3, 1))   # under-release (missing finally)
+        self.assertTrue(oracle_leaked(1, 2))   # over-release (double-free)
+        self.assertFalse(oracle_leaked(2, 2))  # balanced
+        self.assertFalse(oracle_leaked(0, 0))  # nothing acquired
+
+    def test_ignores_balance_misses_double_release(self):
+        # The discriminating case: over-release. Oracle flags it, mutant doesn't.
+        self.assertTrue(oracle_leaked(1, 2))
+        self.assertFalse(ignores_balance(1, 2))
+
+    def test_off_by_one_misses_single_leak(self):
+        # The discriminating case: a single leaked handle.
+        self.assertTrue(oracle_leaked(2, 1))
+        self.assertFalse(off_by_one(2, 1))
+
+    def test_non_circular_flipping_a_literal_flags_the_oracle(self):
+        # Campaign-critical: prove() compares to FROZEN literals, never to the
+        # oracle at runtime. If one expected literal is flipped, the (correct)
+        # oracle would then be flagged — proving the literals are load-bearing.
+        from dataclasses import replace
+
+        flipped = tuple(
+            replace(c, expected=not c.expected) if c.name == "double_release" else c
+            for c in LEAK_CORPUS
+        )
+
+        def prove_against(impl, corpus):
+            return any(
+                bool(impl(case.acquired, case.released)) != case.expected
+                for case in corpus
+            )
+
+        # Against the real corpus the oracle is clean ...
+        self.assertIs(prove_against(oracle_leaked, LEAK_CORPUS), False)
+        # ... but flip a single frozen literal and the same oracle is now caught.
+        self.assertIs(prove_against(oracle_leaked, flipped), True)
+
+    def test_cleanup_tester_leaked_field_matches_mutant_shape(self):
+        # The harness's own ResourceCleanupTester.leaked uses the ignores_balance
+        # shape; confirm it agrees with the mutant on the over-release case the
+        # oracle catches (documents WHY ignores_balance is a realistic bug).
+        def double_releaser(counters):
+            counters["acquired"] += 1
+            counters["released"] += 1
+            counters["released"] += 1  # over-release / double-free
+
+        tester = ResourceCleanupTester()
+        result = tester.test_with_counters(double_releaser)
+        self.assertEqual(result["acquired"], 1)
+        self.assertEqual(result["released"], 2)
+        # The shipped tester (ignores_balance shape) calls this clean ...
+        self.assertFalse(result["leaked"])
+        # ... whereas the correct oracle flags it as a leak.
+        self.assertTrue(oracle_leaked(result["acquired"], result["released"]))
+
+    def test_list_teeth_scenarios_matches_corpus(self):
+        names = list_teeth_scenarios()
+        self.assertEqual(names, [c.name for c in LEAK_CORPUS])
 
 
 if __name__ == "__main__":
