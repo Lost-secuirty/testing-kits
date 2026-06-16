@@ -8,22 +8,22 @@ from __future__ import annotations
 import argparse
 import base64
 import json
-import threading
-import time
-import urllib.request
-import urllib.error
-from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, Callable, Dict, List, Optional, Tuple
-from urllib.parse import urlparse, parse_qs
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+import threading
+import urllib.error
+import urllib.request
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path as _Path
+from typing import Any
+from urllib.parse import parse_qs, urlparse
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # BackingStore
@@ -34,9 +34,9 @@ class BackingStore:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._records: List[Dict[str, Any]] = []
+        self._records: list[dict[str, Any]] = []
 
-    def add(self, record: Dict[str, Any]) -> None:
+    def add(self, record: dict[str, Any]) -> None:
         """Add a record. Record must have 'id', 'sort_key', and 'data' keys."""
         if "id" not in record:
             raise ValueError("Record must have 'id' field")
@@ -52,7 +52,7 @@ class BackingStore:
             self._records = [r for r in self._records if r["id"] != record_id]
             return len(self._records) < before
 
-    def all(self) -> List[Dict[str, Any]]:
+    def all(self) -> list[dict[str, Any]]:
         """Return a snapshot of all records."""
         with self._lock:
             return [dict(r) for r in self._records]
@@ -74,16 +74,16 @@ class BackingStore:
 
 @dataclass
 class Page:
-    items: List[Dict[str, Any]]
+    items: list[dict[str, Any]]
     total: int
     has_next: bool
-    cursor: Optional[str] = None  # opaque cursor for next page, or None
+    cursor: str | None = None  # opaque cursor for next page, or None
 
 
 @dataclass
 class PageResult:
-    page: Optional[Page]
-    error: Optional[str] = None
+    page: Page | None
+    error: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +96,7 @@ def encode_cursor(sort_key: Any, record_id: Any) -> str:
     return base64.urlsafe_b64encode(payload.encode()).decode()
 
 
-def decode_cursor(cursor: str) -> Tuple[Any, Any]:
+def decode_cursor(cursor: str) -> tuple[Any, Any]:
     """
     Decode a cursor back to (sort_key, id).
     Raises ValueError on malformed base64, invalid JSON, or wrong structure.
@@ -104,11 +104,11 @@ def decode_cursor(cursor: str) -> Tuple[Any, Any]:
     try:
         decoded_bytes = base64.urlsafe_b64decode(cursor + "==")
     except Exception:
-        raise ValueError(f"Malformed base64 cursor: {cursor!r}")
+        raise ValueError(f"Malformed base64 cursor: {cursor!r}") from None
     try:
         payload = json.loads(decoded_bytes.decode())
     except Exception:
-        raise ValueError(f"Cursor payload is not valid JSON: {cursor!r}")
+        raise ValueError(f"Cursor payload is not valid JSON: {cursor!r}") from None
     if not isinstance(payload, dict):
         raise ValueError(f"Cursor payload is not a JSON object: {cursor!r}")
     if "sort_key" not in payload or "id" not in payload:
@@ -130,7 +130,7 @@ class OffsetPaginator:
     def __init__(self, store: BackingStore) -> None:
         self._store = store
 
-    def _sorted_records(self) -> List[Dict[str, Any]]:
+    def _sorted_records(self) -> list[dict[str, Any]]:
         records = self._store.all()
         records.sort(key=lambda r: (r["sort_key"], r["id"]))
         return records
@@ -167,12 +167,12 @@ class CursorPaginator:
     def __init__(self, store: BackingStore) -> None:
         self._store = store
 
-    def _sorted_records(self) -> List[Dict[str, Any]]:
+    def _sorted_records(self) -> list[dict[str, Any]]:
         records = self._store.all()
         records.sort(key=lambda r: (r["sort_key"], r["id"]))
         return records
 
-    def page(self, cursor: Optional[str] = None, limit: int = 10) -> PageResult:
+    def page(self, cursor: str | None = None, limit: int = 10) -> PageResult:
         if limit <= 0:
             return PageResult(page=None, error="limit must be > 0")
 
@@ -201,7 +201,7 @@ class CursorPaginator:
         items = filtered[:limit]
         has_next = len(filtered) > limit
 
-        next_cursor: Optional[str] = None
+        next_cursor: str | None = None
         if has_next and items:
             last = items[-1]
             next_cursor = encode_cursor(last["sort_key"], last["id"])
@@ -215,14 +215,14 @@ class CursorPaginator:
             )
         )
 
-    def all_pages(self, limit: int = 10) -> Tuple[List[Dict[str, Any]], List[PageResult]]:
+    def all_pages(self, limit: int = 10) -> tuple[list[dict[str, Any]], list[PageResult]]:
         """
         Traverse all pages and return (all_items, all_page_results).
         Useful for full-traversal reconciliation tests.
         """
-        all_items: List[Dict[str, Any]] = []
-        results: List[PageResult] = []
-        cursor: Optional[str] = None
+        all_items: list[dict[str, Any]] = []
+        results: list[PageResult] = []
+        cursor: str | None = None
         while True:
             result = self.page(cursor=cursor, limit=limit)
             results.append(result)
@@ -250,7 +250,7 @@ class PaginationTestResult:
 
 @dataclass
 class PaginationReport:
-    results: List[PaginationTestResult] = field(default_factory=list)
+    results: list[PaginationTestResult] = field(default_factory=list)
     total: int = 0
     passed: int = 0
     failed: int = 0
@@ -299,7 +299,7 @@ class MockPaginationHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
 
-        def get_int(key: str, default: int) -> Optional[int]:
+        def get_int(key: str, default: int) -> int | None:
             vals = params.get(key)
             if vals:
                 try:
@@ -360,11 +360,11 @@ class PaginationServer:
 
     DEFAULT_PORT = 19170
 
-    def __init__(self, store: Optional[BackingStore] = None, port: int = 0) -> None:
+    def __init__(self, store: BackingStore | None = None, port: int = 0) -> None:
         self.store = store or BackingStore()
         self._server = HTTPServer(("127.0.0.1", port), MockPaginationHandler)
         self._server.store = self.store  # type: ignore[attr-defined]
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
 
     @property
     def port(self) -> int:
@@ -385,12 +385,12 @@ class PaginationServer:
             self._thread.join(timeout=5)
             self._thread = None
 
-    def get_json(self, path: str) -> Dict[str, Any]:
+    def get_json(self, path: str) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
         with urllib.request.urlopen(url, timeout=5) as resp:
             return json.loads(resp.read().decode())
 
-    def get_raw(self, path: str) -> Tuple[int, Dict[str, Any]]:
+    def get_raw(self, path: str) -> tuple[int, dict[str, Any]]:
         """Return (status_code, body_dict) without raising on HTTP errors."""
         url = f"{self.base_url}{path}"
         try:
@@ -405,7 +405,7 @@ class PaginationServer:
 # Helpers to build test datasets
 # ---------------------------------------------------------------------------
 
-def make_records(n: int, sort_key_fn=None) -> List[Dict[str, Any]]:
+def make_records(n: int, sort_key_fn=None) -> list[dict[str, Any]]:
     """Create n records with sequential ids and sort_keys."""
     records = []
     for i in range(1, n + 1):
@@ -425,7 +425,7 @@ def populated_store(n: int, sort_key_fn=None) -> BackingStore:
 # High-level scenario runners
 # ---------------------------------------------------------------------------
 
-def demonstrate_offset_delete_bug(store: BackingStore, limit: int = 3) -> Dict[str, Any]:
+def demonstrate_offset_delete_bug(store: BackingStore, limit: int = 3) -> dict[str, Any]:
     """
     Show that deleting a row before the current offset causes the next
     page to skip a record.
@@ -454,7 +454,7 @@ def demonstrate_offset_delete_bug(store: BackingStore, limit: int = 3) -> Dict[s
     }
 
 
-def demonstrate_offset_insert_bug(store: BackingStore, limit: int = 3) -> Dict[str, Any]:
+def demonstrate_offset_insert_bug(store: BackingStore, limit: int = 3) -> dict[str, Any]:
     """
     Show that inserting a row before the current offset causes the next
     page to re-show a record.
@@ -504,37 +504,34 @@ def demonstrate_offset_insert_bug(store: BackingStore, limit: int = 3) -> Dict[s
 # A frozen dataset: ids 1..7 with strictly increasing (sort_key, id) keys. The
 # uneven page-size script (3, 2, 2, 2) crosses every page boundary, including the
 # exact-multiple final boundary, so an off-by-one at the seam is observable.
-_FROZEN_RECORDS: Tuple[Dict[str, Any], ...] = tuple(
+_FROZEN_RECORDS: tuple[dict[str, Any], ...] = tuple(
     {"id": i, "sort_key": i * 10, "data": f"item-{i}"} for i in range(1, 8)
 )
 # The page sizes requested, in order. Sum (3+2+2) reaches the end at 7 items; the
 # traversal stops when an impl reports no next cursor.
-_PAGE_SCRIPT: Tuple[int, ...] = (3, 2, 2, 2)
+_PAGE_SCRIPT: tuple[int, ...] = (3, 2, 2, 2)
 # The hand-computed, literal expected concatenation: each of ids 1..7 exactly once
 # in stable ascending order. This is the oracle the impl is judged against — a
 # constant, NOT derived from any paginator at runtime.
-_EXPECTED_IDS: Tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7)
+_EXPECTED_IDS: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7)
 
 
-def _key_of(record: Dict[str, Any]) -> Tuple[Any, Any]:
+def _key_of(record: dict[str, Any]) -> tuple[Any, Any]:
     return (record["sort_key"], record["id"])
 
 
 def oracle_page(
-    records: List[Dict[str, Any]],
-    after: Optional[Tuple[Any, Any]],
+    records: list[dict[str, Any]],
+    after: tuple[Any, Any] | None,
     limit: int,
-) -> Tuple[List[Dict[str, Any]], Optional[Tuple[Any, Any]]]:
+) -> tuple[list[dict[str, Any]], tuple[Any, Any] | None]:
     """Correct keyset page: items strictly after `after`, sliced to `limit`.
 
     Returns (items, next_after). next_after is the key of the last returned item
     when more records remain, else None. This is the reference behaviour the
     harness's CursorPaginator implements; reused here as the ORACLE.
     """
-    if after is None:
-        candidates = records
-    else:
-        candidates = [r for r in records if _key_of(r) > after]
+    candidates = records if after is None else [r for r in records if _key_of(r) > after]
     items = candidates[:limit]
     has_next = len(candidates) > limit
     next_after = _key_of(items[-1]) if (has_next and items) else None
@@ -544,10 +541,10 @@ def oracle_page(
 # --- Planted buggy twins (each models a real keyset-pagination defect) ------
 
 def page_skip_boundary(
-    records: List[Dict[str, Any]],
-    after: Optional[Tuple[Any, Any]],
+    records: list[dict[str, Any]],
+    after: tuple[Any, Any] | None,
     limit: int,
-) -> Tuple[List[Dict[str, Any]], Optional[Tuple[Any, Any]]]:
+) -> tuple[list[dict[str, Any]], tuple[Any, Any] | None]:
     """BUG: resumes STRICTLY after the wrong key — uses the key of the item one
     past the page (a fetch-then-advance off-by-one), so the first item of every
     subsequent page is silently skipped.
@@ -556,10 +553,7 @@ def page_skip_boundary(
     record *after* the page's last item instead of the last item itself, dropping
     one record at each page boundary.
     """
-    if after is None:
-        candidates = records
-    else:
-        candidates = [r for r in records if _key_of(r) > after]
+    candidates = records if after is None else [r for r in records if _key_of(r) > after]
     items = candidates[:limit]
     has_next = len(candidates) > limit
     # BUG: advance past the FIRST item beyond the page, not the last item in it.
@@ -568,21 +562,18 @@ def page_skip_boundary(
 
 
 def page_inclusive_boundary(
-    records: List[Dict[str, Any]],
-    after: Optional[Tuple[Any, Any]],
+    records: list[dict[str, Any]],
+    after: tuple[Any, Any] | None,
     limit: int,
-) -> Tuple[List[Dict[str, Any]], Optional[Tuple[Any, Any]]]:
+) -> tuple[list[dict[str, Any]], tuple[Any, Any] | None]:
     """BUG: resumes at records >= the cursor (inclusive) instead of strictly
     after it, so the boundary item is returned again on the next page.
 
     Models the very common `>=` vs `>` keyset error, which duplicates the last
     item of each page as the first item of the following page.
     """
-    if after is None:
-        candidates = records
-    else:
-        # BUG: `>=` re-includes the cursor record itself.
-        candidates = [r for r in records if _key_of(r) >= after]
+    # BUG: `>=` re-includes the cursor record itself.
+    candidates = records if after is None else [r for r in records if _key_of(r) >= after]
     items = candidates[:limit]
     has_next = len(candidates) > limit
     next_after = _key_of(items[-1]) if (has_next and items) else None
@@ -590,28 +581,25 @@ def page_inclusive_boundary(
 
 
 def page_stuck_cursor(
-    records: List[Dict[str, Any]],
-    after: Optional[Tuple[Any, Any]],
+    records: list[dict[str, Any]],
+    after: tuple[Any, Any] | None,
     limit: int,
-) -> Tuple[List[Dict[str, Any]], Optional[Tuple[Any, Any]]]:
+) -> tuple[list[dict[str, Any]], tuple[Any, Any] | None]:
     """BUG: never advances the cursor — next_after is always None even when more
     records remain, so traversal returns only the first page and loses the tail.
 
     Models a pager that forgets to emit a next-page token (or sets has_next but
     no cursor), silently truncating the result set after page one.
     """
-    if after is None:
-        candidates = records
-    else:
-        candidates = [r for r in records if _key_of(r) > after]
+    candidates = records if after is None else [r for r in records if _key_of(r) > after]
     items = candidates[:limit]
     # BUG: never report a next cursor — position is lost after the first page.
     return items, None
 
 
 def _traverse(
-    impl: Callable[..., Tuple[List[Dict[str, Any]], Optional[Tuple[Any, Any]]]],
-) -> List[int]:
+    impl: Callable[..., tuple[list[dict[str, Any]], tuple[Any, Any] | None]],
+) -> list[int]:
     """Drive `impl` across the frozen page script; return the concatenated ids.
 
     Pure + deterministic: walks _FROZEN_RECORDS (pre-sorted) using each scripted
@@ -619,8 +607,8 @@ def _traverse(
     reports no next cursor or the script is exhausted. A guard caps the loop so a
     cursor-that-never-advances bug cannot hang prove()."""
     records = sorted(_FROZEN_RECORDS, key=_key_of)
-    after: Optional[Tuple[Any, Any]] = None
-    collected: List[int] = []
+    after: tuple[Any, Any] | None = None
+    collected: list[int] = []
     max_pages = len(_PAGE_SCRIPT)
     for i in range(max_pages):
         limit = _PAGE_SCRIPT[i]
@@ -632,7 +620,7 @@ def _traverse(
     return collected
 
 
-def prove(impl: Callable[..., Tuple[List[Dict[str, Any]], Optional[Tuple[Any, Any]]]]) -> bool:
+def prove(impl: Callable[..., tuple[list[dict[str, Any]], tuple[Any, Any] | None]]) -> bool:
     """True iff paging `impl` diverges from the frozen expected concatenation
     (i.e. the planted boundary bug is CAUGHT).
 
@@ -667,7 +655,7 @@ TEETH = Teeth(
 )
 
 
-def list_scenarios() -> List[str]:
+def list_scenarios() -> list[str]:
     """Names of the planted teeth mutants (the boundary scenarios)."""
     return [m.name for m in TEETH.mutants]
 
@@ -678,7 +666,7 @@ def list_scenarios() -> List[str]:
 # real paginator, not just an isolated function).
 # ---------------------------------------------------------------------------
 
-def _cursor_paginator_ids(limit: int = 3) -> List[int]:
+def _cursor_paginator_ids(limit: int = 3) -> list[int]:
     store = BackingStore()
     for r in _FROZEN_RECORDS:
         store.add(dict(r))
@@ -712,7 +700,7 @@ def _run_self_test(as_json: bool = False) -> int:
 # CLI — default action is the self-test (repo convention).
 # ---------------------------------------------------------------------------
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Pagination / cursor consistency controls")
     parser.add_argument("--self-test", action="store_true", help="run built-in checks")
     parser.add_argument("--json", action="store_true",

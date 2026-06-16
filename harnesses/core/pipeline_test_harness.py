@@ -4,17 +4,14 @@ Pure stdlib, zero external dependencies.
 Mock HTTP server on dynamic port (default 19050).
 """
 
-import json
-import time
-import threading
-import socket
 import enum
-import copy
-import statistics
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Any, Dict, List, Optional, Tuple, Union
+import json
+import socket
+import threading
+import time
 from collections import defaultdict
-
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Base Classes
@@ -23,7 +20,7 @@ from collections import defaultdict
 class PipelineStage:
     """Base class for all pipeline stages."""
 
-    def process(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def process(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Process a list of records and return transformed records."""
         return records
 
@@ -48,13 +45,13 @@ class SchemaSpec:
         "any": None,  # No type check
     }
 
-    def __init__(self, fields: Dict[str, Any]):
+    def __init__(self, fields: dict[str, Any]):
         """
         fields: dict mapping field_name -> type or type string
         e.g. {"id": int, "name": str} or {"id": "int", "name": "str"}
         Can also specify required: {"id": {"type": int, "required": True}}
         """
-        self.fields: Dict[str, Dict[str, Any]] = {}
+        self.fields: dict[str, dict[str, Any]] = {}
         for name, spec in fields.items():
             if isinstance(spec, dict):
                 self.fields[name] = spec
@@ -65,7 +62,7 @@ class SchemaSpec:
                 # Assume it's a type directly
                 self.fields[name] = {"type": spec, "required": True}
 
-    def get_field_type(self, field_name: str) -> Optional[type]:
+    def get_field_type(self, field_name: str) -> type | None:
         spec = self.fields.get(field_name)
         if spec is None:
             return None
@@ -77,7 +74,7 @@ class SchemaSpec:
             return False
         return spec.get("required", True)
 
-    def field_names(self) -> List[str]:
+    def field_names(self) -> list[str]:
         return list(self.fields.keys())
 
 
@@ -91,9 +88,9 @@ class SchemaValidator(PipelineStage):
         """
         self.schema = schema
         self.strict = strict
-        self.errors: List[Dict[str, Any]] = []
+        self.errors: list[dict[str, Any]] = []
 
-    def validate_record(self, record: Dict[str, Any], index: int) -> List[str]:
+    def validate_record(self, record: dict[str, Any], index: int) -> list[str]:
         """Validate a single record. Returns list of error messages."""
         errs = []
         for field_name, spec in self.schema.fields.items():
@@ -116,7 +113,7 @@ class SchemaValidator(PipelineStage):
                 )
         return errs
 
-    def process(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def process(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         self.errors = []
         valid_records = []
         for i, record in enumerate(records):
@@ -131,7 +128,7 @@ class SchemaValidator(PipelineStage):
                 valid_records.append(record)
         return valid_records
 
-    def get_errors(self) -> List[Dict[str, Any]]:
+    def get_errors(self) -> list[dict[str, Any]]:
         return self.errors
 
     def has_errors(self) -> bool:
@@ -154,8 +151,8 @@ class NullHandler(PipelineStage):
     def __init__(
         self,
         strategy: NullStrategy = NullStrategy.PROPAGATE,
-        fields: Optional[List[str]] = None,
-        defaults: Optional[Dict[str, Any]] = None,
+        fields: list[str] | None = None,
+        defaults: dict[str, Any] | None = None,
     ):
         """
         strategy: NullStrategy enum (DROP/DEFAULT/PROPAGATE)
@@ -167,13 +164,10 @@ class NullHandler(PipelineStage):
         self.defaults = defaults or {}
         self.dropped_count = 0
 
-    def _has_null(self, record: Dict[str, Any], fields_to_check: List[str]) -> bool:
-        for f in fields_to_check:
-            if record.get(f) is None:
-                return True
-        return False
+    def _has_null(self, record: dict[str, Any], fields_to_check: list[str]) -> bool:
+        return any(record.get(f) is None for f in fields_to_check)
 
-    def process(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def process(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         self.dropped_count = 0
         result = []
         for record in records:
@@ -202,7 +196,7 @@ class NullHandler(PipelineStage):
 class Deduplicator(PipelineStage):
     """Removes duplicate records by key field(s)."""
 
-    def __init__(self, key_fields: Union[str, List[str]], keep: str = "first"):
+    def __init__(self, key_fields: str | list[str], keep: str = "first"):
         """
         key_fields: field name or list of field names forming the unique key
         keep: 'first' or 'last' - which duplicate to keep
@@ -214,10 +208,10 @@ class Deduplicator(PipelineStage):
         self.keep = keep
         self.duplicate_count = 0
 
-    def _make_key(self, record: Dict[str, Any]) -> tuple:
+    def _make_key(self, record: dict[str, Any]) -> tuple:
         return tuple(record.get(f) for f in self.key_fields)
 
-    def process(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def process(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         self.duplicate_count = 0
         seen = {}
 
@@ -251,7 +245,7 @@ class ReconciliationResult:
         dest_count: int,
         match: bool,
         discrepancy: int,
-        field_mismatches: Optional[List[Dict[str, Any]]] = None,
+        field_mismatches: list[dict[str, Any]] | None = None,
     ):
         self.source_count = source_count
         self.dest_count = dest_count
@@ -269,7 +263,7 @@ class ReconciliationResult:
 class Reconciler:
     """Checks row counts and optionally field values between source and destination."""
 
-    def __init__(self, tolerance: int = 0, check_fields: Optional[List[str]] = None):
+    def __init__(self, tolerance: int = 0, check_fields: list[str] | None = None):
         """
         tolerance: acceptable count discrepancy (0 = exact match required)
         check_fields: fields to check for value mismatches (None = no field check)
@@ -279,9 +273,9 @@ class Reconciler:
 
     def reconcile(
         self,
-        source: List[Dict[str, Any]],
-        destination: List[Dict[str, Any]],
-        key_field: Optional[str] = None,
+        source: list[dict[str, Any]],
+        destination: list[dict[str, Any]],
+        key_field: str | None = None,
     ) -> ReconciliationResult:
         """Compare source and destination datasets."""
         src_count = len(source)
@@ -333,8 +327,8 @@ class Aggregator(PipelineStage):
 
     def __init__(
         self,
-        group_by: Union[str, List[str]],
-        aggregations: Dict[str, AggregateFunction],
+        group_by: str | list[str],
+        aggregations: dict[str, AggregateFunction],
     ):
         """
         group_by: field(s) to group by
@@ -348,7 +342,7 @@ class Aggregator(PipelineStage):
             self.group_by = group_by
 
         # Normalize aggregations: can be AggregateFunction or (AggregateFunction, field_name)
-        self.aggregations: Dict[str, Tuple[AggregateFunction, str]] = {}
+        self.aggregations: dict[str, tuple[AggregateFunction, str]] = {}
         for out_field, agg_spec in aggregations.items():
             if isinstance(agg_spec, tuple):
                 func, src_field = agg_spec
@@ -357,11 +351,11 @@ class Aggregator(PipelineStage):
                 # Use out_field as source field too
                 self.aggregations[out_field] = (agg_spec, out_field)
 
-    def _make_group_key(self, record: Dict[str, Any]) -> tuple:
+    def _make_group_key(self, record: dict[str, Any]) -> tuple:
         return tuple(record.get(f) for f in self.group_by)
 
-    def process(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        groups: Dict[tuple, List[Dict[str, Any]]] = defaultdict(list)
+    def process(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        groups: dict[tuple, list[dict[str, Any]]] = defaultdict(list)
         for record in records:
             key = self._make_group_key(record)
             groups[key].append(record)
@@ -412,19 +406,19 @@ class Joiner:
 
     def join(
         self,
-        left: List[Dict[str, Any]],
-        right: List[Dict[str, Any]],
+        left: list[dict[str, Any]],
+        right: list[dict[str, Any]],
         left_prefix: str = "left_",
         right_prefix: str = "right_",
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Perform the join. Returns merged records."""
         # Index right by key
-        right_index: Dict[Any, List[Dict[str, Any]]] = defaultdict(list)
+        right_index: dict[Any, list[dict[str, Any]]] = defaultdict(list)
         for r in right:
             key = r.get(self.key_field)
             right_index[key].append(r)
 
-        left_index: Dict[Any, List[Dict[str, Any]]] = defaultdict(list)
+        left_index: dict[Any, list[dict[str, Any]]] = defaultdict(list)
         for r in left:
             key = r.get(self.key_field)
             left_index[key].append(r)
@@ -461,11 +455,11 @@ class Joiner:
 
     def _merge_records(
         self,
-        left: Dict[str, Any],
-        right: Dict[str, Any],
+        left: dict[str, Any],
+        right: dict[str, Any],
         left_prefix: str,
         right_prefix: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Merge two records, prefixing conflicting fields."""
         merged = {}
         # Add key field once
@@ -505,10 +499,10 @@ class PipelineReport:
         rows_in: int = 0,
         rows_out: int = 0,
         rows_dropped: int = 0,
-        errors: Optional[List[Any]] = None,
+        errors: list[Any] | None = None,
         throughput: float = 0.0,
         elapsed_seconds: float = 0.0,
-        stage_reports: Optional[List[Dict[str, Any]]] = None,
+        stage_reports: list[dict[str, Any]] | None = None,
     ):
         self.rows_in = rows_in
         self.rows_out = rows_out
@@ -525,7 +519,7 @@ class PipelineReport:
             f"throughput={self.throughput:.1f} rows/sec)"
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "rows_in": self.rows_in,
             "rows_out": self.rows_out,
@@ -541,15 +535,15 @@ class PipelineReport:
 class PipelineRunner:
     """Chains pipeline stages and runs them, measuring throughput."""
 
-    def __init__(self, stages: Optional[List[PipelineStage]] = None):
-        self.stages: List[PipelineStage] = stages or []
-        self._last_report: Optional[PipelineReport] = None
+    def __init__(self, stages: list[PipelineStage] | None = None):
+        self.stages: list[PipelineStage] = stages or []
+        self._last_report: PipelineReport | None = None
 
     def add_stage(self, stage: PipelineStage) -> "PipelineRunner":
         self.stages.append(stage)
         return self
 
-    def run(self, records: List[Dict[str, Any]]) -> PipelineReport:
+    def run(self, records: list[dict[str, Any]]) -> PipelineReport:
         """Run all stages and return a PipelineReport."""
         rows_in = len(records)
         all_errors = []
@@ -591,7 +585,7 @@ class PipelineRunner:
         )
         return self._last_report
 
-    def get_last_report(self) -> Optional[PipelineReport]:
+    def get_last_report(self) -> PipelineReport | None:
         return self._last_report
 
     def clear_stages(self) -> None:
@@ -606,8 +600,8 @@ class MockPipelineHandler(BaseHTTPRequestHandler):
     """HTTP handler for the mock pipeline server."""
 
     # Class-level pipeline state
-    pipeline_data: List[Dict[str, Any]] = []
-    pipeline_report: Optional[Dict[str, Any]] = None
+    pipeline_data: list[dict[str, Any]] = []
+    pipeline_report: dict[str, Any] | None = None
 
     def log_message(self, format: str, *args: Any) -> None:
         """Suppress default access logging."""
@@ -621,7 +615,7 @@ class MockPipelineHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _read_body(self) -> Optional[Any]:
+    def _read_body(self) -> Any | None:
         length = int(self.headers.get("Content-Length", 0))
         if length == 0:
             return None
@@ -705,8 +699,8 @@ class MockPipelineServer:
     def __init__(self, port: int = 0):
         """port=0 means OS assigns a dynamic port."""
         self.port = port
-        self._server: Optional[HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: HTTPServer | None = None
+        self._thread: threading.Thread | None = None
 
     def start(self) -> int:
         """Start server. Returns the actual port."""
@@ -746,7 +740,7 @@ class MockPipelineServer:
 # Utility: find free port
 # ---------------------------------------------------------------------------
 
-def find_free_port(preferred: int = DEFAULT_PORT if False else 19050) -> int:
+def find_free_port(preferred: int = 19050) -> int:
     """Find a free port, starting from preferred."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:

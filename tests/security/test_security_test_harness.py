@@ -6,12 +6,7 @@ Tests for security_test_harness.py  (Harness 6 of 36)
 
 import json
 import socket
-import threading
-import time
 import unittest
-import urllib.parse
-import urllib.request
-import urllib.error
 
 from harnesses.security.security_test_harness import (
     VALID_TOKEN,
@@ -29,7 +24,6 @@ from harnesses.security.security_test_harness import (
     Severity,
     XSSScan,
     _http_get,
-    _http_post,
 )
 
 
@@ -473,9 +467,8 @@ class TestMockSecurityServerLifecycle(unittest.TestCase):
         self.assertTrue(failed)
 
     def test_server_uses_dynamic_port(self):
-        with MockSecurityServer() as srv1:
-            with MockSecurityServer() as srv2:
-                self.assertNotEqual(srv1.port, srv2.port)
+        with MockSecurityServer() as srv1, MockSecurityServer() as srv2:
+            self.assertNotEqual(srv1.port, srv2.port)
 
 
 if __name__ == "__main__":

@@ -4,9 +4,9 @@ import unittest
 
 from harnesses.core.tracing_test_harness import (
     BUGGY_TRACES,
+    SCENARIOS,
     BuggyPropagator,
     Propagator,
-    SCENARIOS,
     Span,
     TraceConfig,
     TraceParent,

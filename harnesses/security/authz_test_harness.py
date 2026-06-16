@@ -8,24 +8,22 @@ from __future__ import annotations
 import argparse
 import base64
 import json
-import threading
-import time
-import urllib.request
-import urllib.error
-from dataclasses import dataclass, field
-from enum import IntEnum
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Callable, Dict, List, Optional, Set, Tuple
-import socket
 import sys
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+import threading
+import urllib.error
+import urllib.request
+from collections.abc import Callable
+from dataclasses import dataclass
+from enum import IntEnum
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path as _Path
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -65,9 +63,9 @@ class AccessControl:
 
     def __init__(self) -> None:
         # grants[role] = set of permissions
-        self._grants: Dict[Role, Set[Permission]] = {r: set() for r in Role}
+        self._grants: dict[Role, set[Permission]] = {r: set() for r in Role}
         # revocations[role] = set of permissions explicitly revoked
-        self._revocations: Dict[Role, Set[Permission]] = {r: set() for r in Role}
+        self._revocations: dict[Role, set[Permission]] = {r: set() for r in Role}
 
     def grant(self, role: Role, permission: Permission) -> None:
         self._grants[role].add(permission)
@@ -81,8 +79,8 @@ class AccessControl:
         self,
         role: Role,
         permission: Permission,
-        resource: Optional[Resource] = None,
-        requesting_user_id: Optional[str] = None,
+        resource: Resource | None = None,
+        requesting_user_id: str | None = None,
     ) -> bool:
         # ANONYMOUS can never write, delete, or perform admin actions
         if role == Role.ANONYMOUS and permission in (
@@ -113,13 +111,13 @@ class AccessControl:
 # Token helpers
 # ---------------------------------------------------------------------------
 
-def encode_token(user_id: str, role: Role, scopes: List[str]) -> str:
+def encode_token(user_id: str, role: Role, scopes: list[str]) -> str:
     """Encode a simple bearer token: base64(id:role:scope1,scope2)."""
     payload = f"{user_id}:{role.value}:{','.join(scopes)}"
     return base64.b64encode(payload.encode()).decode()
 
 
-def decode_token(token: str) -> Optional[Tuple[str, Role, List[str]]]:
+def decode_token(token: str) -> tuple[str, Role, list[str]] | None:
     """Decode token → (user_id, role, scopes) or None if invalid."""
     try:
         payload = base64.b64decode(token.encode()).decode()
@@ -155,7 +153,7 @@ class MockAuthzHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # silence default access log
         pass
 
-    def _parse_bearer(self) -> Optional[Tuple[str, Role, List[str]]]:
+    def _parse_bearer(self) -> tuple[str, Role, list[str]] | None:
         auth = self.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
             return None
@@ -170,7 +168,7 @@ class MockAuthzHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _get_resource(self, resource_id: str) -> Optional[Resource]:
+    def _get_resource(self, resource_id: str) -> Resource | None:
         return self.server.resources.get(resource_id)
 
     def _drain_body(self) -> None:
@@ -262,13 +260,13 @@ class AuthzServer:
 
     def __init__(self, host: str = "127.0.0.1", port: int = 0) -> None:
         self.ac = AccessControl()
-        self.resources: Dict[str, Resource] = {}
+        self.resources: dict[str, Resource] = {}
 
         self._server = HTTPServer((host, port), MockAuthzHandler)
         self._server.ac = self.ac  # type: ignore[attr-defined]
         self._server.resources = self.resources  # type: ignore[attr-defined]
         self.port = self._server.server_address[1]
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
@@ -298,8 +296,8 @@ class RBACTester:
     def __init__(self, ac: AccessControl) -> None:
         self.ac = ac
 
-    def matrix(self) -> Dict[Tuple[Role, Permission], bool]:
-        result: Dict[Tuple[Role, Permission], bool] = {}
+    def matrix(self) -> dict[tuple[Role, Permission], bool]:
+        result: dict[tuple[Role, Permission], bool] = {}
         for role in Role:
             for perm in Permission:
                 result[(role, perm)] = self.ac.can(role, perm)
@@ -336,7 +334,7 @@ class VerticalEscalationTester:
     def test_anonymous_cannot_delete(self) -> bool:
         return not self.ac.can(Role.ANONYMOUS, Permission.DELETE)
 
-    def run_all(self) -> Dict[str, bool]:
+    def run_all(self) -> dict[str, bool]:
         return {
             "user_cannot_admin": self.test_user_cannot_admin(),
             "editor_cannot_admin": self.test_editor_cannot_admin(),
@@ -378,7 +376,7 @@ class HorizontalEscalationTester:
         resource: Resource,
         owner_id: str,
         attacker_id: str,
-    ) -> Dict[str, bool]:
+    ) -> dict[str, bool]:
         return {
             "owner_can_read": self.test_owner_can_read(resource, owner_id),
             "non_owner_denied_write": self.test_non_owner_denied_write(resource, attacker_id),
@@ -423,7 +421,7 @@ class PrivilegeBoundaryTester:
         ac.revoke(role, perm)
         return not ac.can(role, perm)
 
-    def run_all(self) -> Dict[str, bool]:
+    def run_all(self) -> dict[str, bool]:
         return {
             "deny_by_default": self.test_deny_by_default(),
             "forged_role_denied": self.test_forged_role_denied(999),
@@ -436,10 +434,10 @@ class PrivilegeBoundaryTester:
 class TokenScopeTester:
     """Tests JWT-like bearer token parsing and scope enforcement."""
 
-    def encode(self, user_id: str, role: Role, scopes: List[str]) -> str:
+    def encode(self, user_id: str, role: Role, scopes: list[str]) -> str:
         return encode_token(user_id, role, scopes)
 
-    def decode(self, token: str) -> Optional[Tuple[str, Role, List[str]]]:
+    def decode(self, token: str) -> tuple[str, Role, list[str]] | None:
         return decode_token(token)
 
     def has_scope(self, token: str, scope: str) -> bool:
@@ -450,7 +448,7 @@ class TokenScopeTester:
         return scope in scopes
 
     def test_encode_decode_roundtrip(
-        self, user_id: str, role: Role, scopes: List[str]
+        self, user_id: str, role: Role, scopes: list[str]
     ) -> bool:
         token = self.encode(user_id, role, scopes)
         result = self.decode(token)
@@ -462,7 +460,7 @@ class TokenScopeTester:
     def test_invalid_token(self) -> bool:
         return self.decode("not-a-valid-token!!@#") is None
 
-    def test_tampered_role(self, user_id: str, original_role: Role, scopes: List[str]) -> bool:
+    def test_tampered_role(self, user_id: str, original_role: Role, scopes: list[str]) -> bool:
         """Tampered token (manually crafted with higher role) must still decode correctly
         so the caller can detect role mismatches; here we test that a crafted higher role
         token actually decodes to that role (i.e., the system is stateless and relies on
@@ -482,7 +480,7 @@ class TokenScopeTester:
         token = self.encode("u1", Role.USER, ["read"])
         return not self.has_scope(token, "write")
 
-    def run_all(self) -> Dict[str, bool]:
+    def run_all(self) -> dict[str, bool]:
         return {
             "roundtrip_user": self.test_encode_decode_roundtrip(
                 "user1", Role.USER, ["read", "write"]
@@ -501,7 +499,7 @@ class TokenScopeTester:
 # HTTP helpers used by tests
 # ---------------------------------------------------------------------------
 
-def http_get(url: str, token: Optional[str] = None) -> Tuple[int, dict]:
+def http_get(url: str, token: str | None = None) -> tuple[int, dict]:
     req = urllib.request.Request(url, method="GET")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
@@ -512,7 +510,7 @@ def http_get(url: str, token: Optional[str] = None) -> Tuple[int, dict]:
         return e.code, json.loads(e.read())
 
 
-def http_post(url: str, token: Optional[str] = None, data: Optional[dict] = None) -> Tuple[int, dict]:
+def http_post(url: str, token: str | None = None, data: dict | None = None) -> tuple[int, dict]:
     body = json.dumps(data or {}).encode()
     req = urllib.request.Request(url, data=body, method="POST")
     req.add_header("Content-Type", "application/json")
@@ -525,7 +523,7 @@ def http_post(url: str, token: Optional[str] = None, data: Optional[dict] = None
         return e.code, json.loads(e.read())
 
 
-def http_delete(url: str, token: Optional[str] = None) -> Tuple[int, dict]:
+def http_delete(url: str, token: str | None = None) -> tuple[int, dict]:
     req = urllib.request.Request(url, method="DELETE")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
@@ -562,12 +560,12 @@ class AuthzRequest:
     role: Role
     permission: Permission
     # Optional resource ownership context.
-    resource_id: Optional[str] = None
-    resource_owner: Optional[str] = None
-    requesting_user_id: Optional[str] = None
+    resource_id: str | None = None
+    resource_owner: str | None = None
+    requesting_user_id: str | None = None
     note: str = ""
 
-    def resource(self) -> Optional[Resource]:
+    def resource(self) -> Resource | None:
         if self.resource_id is None or self.resource_owner is None:
             return None
         return Resource(self.resource_id, self.resource_owner, "document")
@@ -629,10 +627,8 @@ class _DefaultAllowAC(AccessControl):
             and resource.owner_id == requesting_user_id
         ):
             return True
-        if permission in self._revocations[role]:
-            return False
         # BUG: missing grant no longer denies — anything not revoked is allowed.
-        return True
+        return permission not in self._revocations[role]
 
 
 class _DenyIgnoredAC(AccessControl):
@@ -716,7 +712,7 @@ mutant_ownership_over_grant = _decider_for(_OwnershipOverGrantAC)
 
 # --- Frozen corpus: (role, permission, ownership) -> expected decision -------
 
-AUTHZ_CORPUS: Tuple[AuthzRequest, ...] = (
+AUTHZ_CORPUS: tuple[AuthzRequest, ...] = (
     # deny-by-default: an unknown/ungranted combo MUST be denied
     # (catches _DefaultAllowAC fail-open).
     AuthzRequest("user_delete_denied", Role.USER, Permission.DELETE,
@@ -751,7 +747,7 @@ AUTHZ_CORPUS: Tuple[AuthzRequest, ...] = (
 
 # Literal expected decisions, computed by hand from the contract — NEVER read
 # back from the oracle object, which is what keeps prove() non-circular.
-EXPECTED_DECISIONS: Dict[str, str] = {
+EXPECTED_DECISIONS: dict[str, str] = {
     "user_delete_denied": DENY,
     "editor_admin_denied": DENY,
     "anon_read_denied": DENY,
@@ -801,7 +797,7 @@ TEETH = Teeth(
 )
 
 
-def list_oracle_cases() -> List[str]:
+def list_oracle_cases() -> list[str]:
     return [req.name for req in AUTHZ_CORPUS]
 
 
@@ -843,7 +839,7 @@ def _run_self_test(as_json: bool = False) -> int:
 # CLI entry point — default action is the self-test (repo convention).
 # ---------------------------------------------------------------------------
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Authorization / Access-Control Test Harness")
     parser.add_argument("--self-test", action="store_true", help="run built-in checks")
     parser.add_argument("--json", action="store_true",

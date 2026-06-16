@@ -31,9 +31,9 @@ import argparse
 import ast
 import sys
 import textwrap
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Coverage probe
@@ -56,7 +56,7 @@ class CoverageProbe:
         self.taken.add(frame.f_lineno)
         return self._trace
 
-    def __enter__(self) -> "CoverageProbe":
+    def __enter__(self) -> CoverageProbe:
         self._prev_trace = sys.gettrace()
         sys.settrace(self._trace)
         return self
@@ -143,18 +143,17 @@ TARGET_SOURCE = textwrap.dedent("""
 def _load_target_module() -> tuple[Any, str]:
     import importlib.util
     import tempfile
-    import os
 
-    tmp = tempfile.NamedTemporaryFile(
+    with tempfile.NamedTemporaryFile(
         mode="w", suffix=".py", delete=False, encoding="utf-8"
-    )
-    tmp.write(TARGET_SOURCE + "\n")
-    tmp.close()
-    spec = importlib.util.spec_from_file_location("dormant_target", tmp.name)
+    ) as tmp:
+        tmp.write(TARGET_SOURCE + "\n")
+        tmp_name = tmp.name
+    spec = importlib.util.spec_from_file_location("dormant_target", tmp_name)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module, tmp.name
+    return module, tmp_name
 
 
 def _baseline_workload(module: Any) -> None:

@@ -7,34 +7,30 @@ the mock HTTP server.
 
 import gc
 import json
-import os
-import sys
 import threading
 import time
 import tracemalloc
 import unittest
-from unittest.mock import patch, MagicMock
 
 from harnesses.core.memory_test_harness import (
-    MemorySnapshot,
-    LeakReport,
     GCPressureReport,
-    ObjectTracker,
-    SoakTestRunner,
-    SoakResult,
+    LeakReport,
+    MemoryAssertions,
+    MemorySnapshot,
     MockMemoryHandler,
     MockServer,
+    ObjectTracker,
+    SoakResult,
+    SoakTestRunner,
     TraceMallocMonitor,
-    MemoryAssertions,
-    _rss_bytes,
     _fd_count,
     _gc_object_count,
     _linear_regression,
+    _rss_bytes,
     analyze_snapshots,
     find_free_port,
     http_get,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper: shared server fixture
@@ -425,7 +421,6 @@ class TestMemoryAssertions(unittest.TestCase):
         # We patch analyze_snapshots result via a runner with absurdly low threshold
         # Instead: patch the runner so leak_report.leaked = True
         from harnesses.core import memory_test_harness as mh
-        original_analyze = mh.analyze_snapshots
 
         def fake_analyze(snaps, threshold=1024.0):
             return LeakReport(

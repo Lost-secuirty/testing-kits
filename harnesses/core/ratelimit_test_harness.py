@@ -8,18 +8,14 @@ per-key buckets, stats, reporting, and a mock HTTP server.
 
 from __future__ import annotations
 
-import collections
 import dataclasses
 import http.server
 import json
 import math
-import socket
 import threading
 import time
 import urllib.request
 from collections import deque
-from typing import Dict, Optional
-
 
 # ---------------------------------------------------------------------------
 # FakeClock
@@ -90,7 +86,7 @@ class TokenBucket:
         self,
         capacity: float,
         refill_rate: float,
-        clock: Optional[FakeClock] = None,
+        clock: FakeClock | None = None,
     ):
         if capacity <= 0:
             raise ValueError("capacity must be positive")
@@ -164,7 +160,7 @@ class LeakyBucket:
         self,
         capacity: float,
         drain_rate: float,
-        clock: Optional[FakeClock] = None,
+        clock: FakeClock | None = None,
     ):
         if capacity <= 0:
             raise ValueError("capacity must be positive")
@@ -240,7 +236,7 @@ class FixedWindow:
         self,
         max_requests: int,
         window_seconds: float,
-        clock: Optional[FakeClock] = None,
+        clock: FakeClock | None = None,
     ):
         if max_requests <= 0:
             raise ValueError("max_requests must be positive")
@@ -315,7 +311,7 @@ class SlidingWindow:
         self,
         max_requests: int,
         window_seconds: float,
-        clock: Optional[FakeClock] = None,
+        clock: FakeClock | None = None,
     ):
         if max_requests <= 0:
             raise ValueError("max_requests must be positive")
@@ -399,12 +395,12 @@ class PerKeyTokenBuckets:
         self,
         capacity: float,
         refill_rate: float,
-        clock: Optional[FakeClock] = None,
+        clock: FakeClock | None = None,
     ):
         self.capacity = capacity
         self.refill_rate = refill_rate
         self._clock = clock
-        self._buckets: Dict[str, TokenBucket] = {}
+        self._buckets: dict[str, TokenBucket] = {}
         self._lock = threading.Lock()
 
     def _get_or_create(self, key: str) -> TokenBucket:
@@ -419,7 +415,7 @@ class PerKeyTokenBuckets:
             bucket = self._get_or_create(key)
         return bucket.allow(n)
 
-    def stats(self, key: str) -> Optional[LimiterStats]:
+    def stats(self, key: str) -> LimiterStats | None:
         with self._lock:
             bucket = self._buckets.get(key)
         if bucket is None:
@@ -478,8 +474,8 @@ class RateLimitServer:
         self._limiter = limiter
         self._host = host
         self._port = port
-        self._server: Optional[http.server.HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: http.server.HTTPServer | None = None
+        self._thread: threading.Thread | None = None
 
     def start(self) -> int:
         """Start server; returns the bound port."""

@@ -9,17 +9,14 @@ import hashlib
 import hmac
 import http.server
 import json
-import math
-import queue
 import threading
 import time
-import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
-
 
 # ---------------------------------------------------------------------------
 # Clock abstraction
@@ -76,9 +73,9 @@ def verify(payload: bytes, secret: str, sig: str) -> bool:
 class WebhookEvent:
     event_id: str
     event_type: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     timestamp: float
-    sequence_number: Optional[int] = None
+    sequence_number: int | None = None
 
     def to_bytes(self) -> bytes:
         """Canonical serialisation for signing."""
@@ -97,9 +94,9 @@ class WebhookEvent:
 class DeliveryAttempt:
     attempt_number: int
     timestamp: float
-    status_code: Optional[int]
+    status_code: int | None
     success: bool
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class DeliveryResult(Enum):
@@ -114,15 +111,15 @@ class DeliveryReport:
     """Aggregate statistics for a single event's delivery."""
     event_id: str
     result: DeliveryResult
-    attempts: List[DeliveryAttempt] = field(default_factory=list)
-    dead_letter_reason: Optional[str] = None
+    attempts: list[DeliveryAttempt] = field(default_factory=list)
+    dead_letter_reason: str | None = None
 
     @property
     def attempt_count(self) -> int:
         return len(self.attempts)
 
     @property
-    def successful_attempt(self) -> Optional[DeliveryAttempt]:
+    def successful_attempt(self) -> DeliveryAttempt | None:
         for a in self.attempts:
             if a.success:
                 return a
@@ -132,7 +129,7 @@ class DeliveryReport:
 @dataclass
 class WebhookReport:
     """Aggregate statistics across multiple delivery reports."""
-    reports: List[DeliveryReport] = field(default_factory=list)
+    reports: list[DeliveryReport] = field(default_factory=list)
 
     @property
     def total(self) -> int:
@@ -167,20 +164,20 @@ class WebhookReport:
 
 class DeadLetterQueue:
     def __init__(self):
-        self._items: List[Tuple[WebhookEvent, str]] = []
+        self._items: list[tuple[WebhookEvent, str]] = []
         self._lock = threading.Lock()
 
     def enqueue(self, event: WebhookEvent, reason: str) -> None:
         with self._lock:
             self._items.append((event, reason))
 
-    def drain(self) -> List[Tuple[WebhookEvent, str]]:
+    def drain(self) -> list[tuple[WebhookEvent, str]]:
         with self._lock:
             items = list(self._items)
             self._items.clear()
             return items
 
-    def peek(self) -> List[Tuple[WebhookEvent, str]]:
+    def peek(self) -> list[tuple[WebhookEvent, str]]:
         with self._lock:
             return list(self._items)
 
@@ -201,12 +198,12 @@ class SignatureValidator:
         self,
         secret: str,
         tolerance_seconds: float = 300.0,
-        clock: Optional[Any] = None,
+        clock: Any | None = None,
     ):
         self.secret = secret
         self.tolerance_seconds = tolerance_seconds
         self._clock = clock or Clock()
-        self._seen_ids: Dict[str, float] = {}   # event_id -> first-seen time
+        self._seen_ids: dict[str, float] = {}   # event_id -> first-seen time
         self._lock = threading.Lock()
 
     def validate(
@@ -215,7 +212,7 @@ class SignatureValidator:
         sig: str,
         event_id: str,
         event_timestamp: float,
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """
         Returns (ok, reason).
         Checks: signature correct, timestamp within tolerance, not replayed.
@@ -255,7 +252,7 @@ class RetryConfig:
         base_backoff: float = 2.0,
         max_backoff: float = 60.0,
         timeout: float = 5.0,
-        retryable_status_codes: Optional[List[int]] = None,
+        retryable_status_codes: list[int] | None = None,
     ):
         self.max_attempts = max_attempts
         self.base_backoff = base_backoff
@@ -280,10 +277,10 @@ class WebhookSender:
         self,
         target_url: str,
         secret: str,
-        retry_config: Optional[RetryConfig] = None,
-        dlq: Optional[DeadLetterQueue] = None,
-        clock: Optional[Any] = None,
-        sleep_fn: Optional[Callable[[float], None]] = None,
+        retry_config: RetryConfig | None = None,
+        dlq: DeadLetterQueue | None = None,
+        clock: Any | None = None,
+        sleep_fn: Callable[[float], None] | None = None,
     ):
         self.target_url = target_url
         self.secret = secret
@@ -291,7 +288,7 @@ class WebhookSender:
         self.dlq = dlq or DeadLetterQueue()
         self._clock = clock or Clock()
         self._sleep = sleep_fn if sleep_fn is not None else time.sleep
-        self._seen: Dict[str, DeliveryReport] = {}
+        self._seen: dict[str, DeliveryReport] = {}
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -328,7 +325,7 @@ class WebhookSender:
     def _attempt_delivery(self, event: WebhookEvent) -> DeliveryReport:
         payload_bytes = event.to_bytes()
         sig = sign(payload_bytes, self.secret)
-        attempts: List[DeliveryAttempt] = []
+        attempts: list[DeliveryAttempt] = []
         cfg = self.retry_config
 
         for attempt_num in range(1, cfg.max_attempts + 1):
@@ -379,7 +376,7 @@ class WebhookSender:
 
     def _http_post(
         self, payload_bytes: bytes, sig: str, event: WebhookEvent
-    ) -> Tuple[Optional[int], Optional[str]]:
+    ) -> tuple[int | None, str | None]:
         headers = {
             "Content-Type": "application/json",
             "X-Webhook-Signature": sig,
@@ -407,9 +404,9 @@ class SequenceTracker:
     """Detects out-of-order and gapped event delivery."""
 
     def __init__(self):
-        self._expected: Optional[int] = None
-        self._gaps: List[Tuple[int, int]] = []      # (expected, received)
-        self._out_of_order: List[Tuple[int, int]] = []  # (expected, received)
+        self._expected: int | None = None
+        self._gaps: list[tuple[int, int]] = []      # (expected, received)
+        self._out_of_order: list[tuple[int, int]] = []  # (expected, received)
         self._lock = threading.Lock()
 
     def record(self, seq: int) -> str:
@@ -431,12 +428,12 @@ class SequenceTracker:
                 return "out_of_order"
 
     @property
-    def gaps(self) -> List[Tuple[int, int]]:
+    def gaps(self) -> list[tuple[int, int]]:
         with self._lock:
             return list(self._gaps)
 
     @property
-    def out_of_order_events(self) -> List[Tuple[int, int]]:
+    def out_of_order_events(self) -> list[tuple[int, int]]:
         with self._lock:
             return list(self._out_of_order)
 
@@ -491,13 +488,13 @@ class MockWebhookHandler:
     def __init__(self, host: str = "127.0.0.1", port: int = 0):
         self.host = host
         self.port = port
-        self._server: Optional[http.server.HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
-        self.received_requests: List[Dict[str, Any]] = []
+        self._server: http.server.HTTPServer | None = None
+        self._thread: threading.Thread | None = None
+        self.received_requests: list[dict[str, Any]] = []
         self._lock = threading.Lock()
 
         # Response configuration
-        self._status_sequence: List[int] = []   # pops from front; last repeats
+        self._status_sequence: list[int] = []   # pops from front; last repeats
         self._default_status: int = 200
         self._response_body: bytes = b'{"ok":true}'
 
@@ -543,7 +540,7 @@ class MockWebhookHandler:
         self._default_status = status
         self._response_body = body
 
-    def set_status_sequence(self, statuses: List[int]) -> None:
+    def set_status_sequence(self, statuses: list[int]) -> None:
         """Respond with each status in sequence; repeat last when exhausted."""
         with self._lock:
             self._status_sequence = list(statuses)
@@ -567,8 +564,8 @@ class MockWebhookHandler:
         sig: str,
         event_id: str,
         event_type: str,
-        headers: Dict[str, str],
-    ) -> Tuple[int, bytes]:
+        headers: dict[str, str],
+    ) -> tuple[int, bytes]:
         with self._lock:
             self.received_requests.append({
                 "path": path,
@@ -578,9 +575,6 @@ class MockWebhookHandler:
                 "event_type": event_type,
                 "headers": headers,
             })
-            if self._status_sequence:
-                status = self._status_sequence.pop(0)
-            else:
-                status = self._default_status
+            status = self._status_sequence.pop(0) if self._status_sequence else self._default_status
 
         return status, self._response_body

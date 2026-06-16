@@ -17,28 +17,26 @@ import json
 import threading
 import time
 import unittest
-import urllib.request
 import urllib.error
-from urllib.request import urlopen, Request
+import urllib.request
+from urllib.request import Request, urlopen
 
 from harnesses._teeth import verify
 from harnesses.core.cache_test_harness import (
     TEETH,
-    Cache,
     BuggyCache,
+    Cache,
     CacheEntry,
-    CacheStats,
     CacheReport,
+    CacheStats,
     FakeClock,
-    RealClock,
     MockCacheServer,
-    NamespacedCache,
     NaiveCache,
+    NamespacedCache,
+    RealClock,
     SingleFlightCacheV2,
-    TestResult,
     run_harness,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper

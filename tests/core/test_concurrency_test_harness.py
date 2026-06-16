@@ -5,43 +5,40 @@ Pure stdlib, zero external dependencies.
 All tests are deterministic (use locked/safe variants; avoid flaky unlocked tests).
 """
 
+import json
 import threading
 import time
 import unittest
 import urllib.request
-import json
 
 from harnesses._teeth import verify
 from harnesses.core.concurrency_test_harness import (
-    SharedCounter,
-    UnsafeCounter,
-    RaceDetector,
-    DeadlockDetector,
+    SCENARIOS,
+    TEETH,
     AtomicityChecker,
-    ConcurrentListTest,
-    ConcurrentDictTest,
-    ProducerConsumerTest,
     BarrierTest,
+    ConcurrencyTestHarness,
+    ConcurrentDictTest,
+    ConcurrentHTTPTest,
+    ConcurrentListTest,
+    ConditionVariableTest,
     CountdownLatch,
     CountdownLatchTest,
+    DeadlockDetector,
+    EventSignalingTest,
+    MockServer,
+    ProducerConsumerTest,
+    RaceDetector,
     ReadWriteLock,
     ReadWriteLockTest,
+    SemaphoreTest,
+    SharedCounter,
     SimpleThreadPool,
     ThreadPoolTest,
-    SemaphoreTest,
-    EventSignalingTest,
-    ConditionVariableTest,
-    MockServer,
-    ConcurrentHTTPTest,
-    ConcurrencyTestHarness,
-    TEETH,
-    prove,
-    oracle_impl,
-    simulate,
-    SCENARIOS,
     _final_state,
+    oracle_impl,
+    prove,
 )
-
 
 # ---------------------------------------------------------------------------
 # SharedCounter tests

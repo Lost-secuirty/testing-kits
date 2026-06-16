@@ -30,7 +30,6 @@ import json
 import math
 import sys
 import threading
-from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # ============================================================
@@ -65,7 +64,7 @@ def calc_bsa_mosteller(height_cm, weight_kg):
     try:
         h, w = float(height_cm), float(weight_kg)
     except (ValueError, TypeError):
-        raise ValueError("Invalid numeric inputs.")
+        raise ValueError("Invalid numeric inputs.") from None
     if not all(math.isfinite(v) for v in (h, w)):
         raise ValueError("Invalid numeric inputs.")
     if h <= 0 or h > 300:
@@ -80,7 +79,7 @@ def calc_crcl(age, weight_kg, scr, is_female=False):
     try:
         a, w, s = float(age), float(weight_kg), float(scr)
     except (ValueError, TypeError):
-        raise ValueError("Invalid numeric inputs.")
+        raise ValueError("Invalid numeric inputs.") from None
     if not all(math.isfinite(v) for v in (a, w, s)):
         raise ValueError("Invalid numeric inputs.")
     if a <= 0 or a > 130:
@@ -105,7 +104,7 @@ def calc_peds_dose(weight_kg, mg_per_kg_per_day, doses_per_day, conc_mg_per_ml):
         d = float(doses_per_day)
         conc = float(conc_mg_per_ml)
     except (ValueError, TypeError):
-        raise ValueError("Invalid numeric inputs.")
+        raise ValueError("Invalid numeric inputs.") from None
     if not all(math.isfinite(v) for v in (wt, mkd, d, conc)):
         raise ValueError("Invalid numeric inputs.")
     if wt <= 0 or wt > 200:
@@ -129,7 +128,7 @@ def calc_days_supply(qty, daily):
     try:
         q, d = float(qty), float(daily)
     except (ValueError, TypeError):
-        raise ValueError("Invalid quantity or daily-use value.")
+        raise ValueError("Invalid quantity or daily-use value.") from None
     if not all(math.isfinite(v) for v in (q, d)):
         raise ValueError("Invalid quantity or daily-use value.")
     if q <= 0 or d <= 0:
@@ -153,7 +152,7 @@ def calc_insulin_days(daily_units, total_ml, conc, priming=0):
         c = float(conc)
         p = float(priming)
     except (ValueError, TypeError):
-        raise ValueError("Invalid numeric inputs.")
+        raise ValueError("Invalid numeric inputs.") from None
     if not all(math.isfinite(v) for v in (daily, total, c, p)):
         raise ValueError("Invalid numeric inputs.")
     if daily <= 0 or total <= 0 or c <= 0:

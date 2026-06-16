@@ -7,26 +7,25 @@ help text, error messages, stdin piping, signal handling, and timeout handling.
 """
 
 import json
-import os
 import re
 import signal
 import subprocess
 import sys
-import tempfile
-import textwrap
-import time
-import unittest
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+import tempfile
+import textwrap
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
 from pathlib import Path as _Path
+from typing import Any
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Sample CLI script written to a temp file for testing
@@ -114,14 +113,14 @@ class CliTestCase:
     """Describes a single CLI test scenario."""
 
     name: str
-    args: List[str] = field(default_factory=list)
-    stdin_data: Optional[str] = None
+    args: list[str] = field(default_factory=list)
+    stdin_data: str | None = None
     expected_exit_code: int = 0
-    expected_stdout_contains: Optional[List[str]] = None
-    expected_stdout_exact: Optional[str] = None
-    expected_stdout_regex: Optional[str] = None
-    expected_stderr_contains: Optional[List[str]] = None
-    expected_stderr_regex: Optional[str] = None
+    expected_stdout_contains: list[str] | None = None
+    expected_stdout_exact: str | None = None
+    expected_stdout_regex: str | None = None
+    expected_stderr_contains: list[str] | None = None
+    expected_stderr_regex: str | None = None
     timeout_seconds: float = 10.0
     description: str = ""
 
@@ -135,8 +134,8 @@ class CliTestResult:
     actual_exit_code: int
     actual_stdout: str
     actual_stderr: str
-    failures: List[str] = field(default_factory=list)
-    error: Optional[str] = None
+    failures: list[str] = field(default_factory=list)
+    error: str | None = None
     duration_seconds: float = 0.0
 
 
@@ -144,7 +143,7 @@ class CliTestResult:
 class CliSuiteReport:
     """Aggregated report for a suite of CLI test cases."""
 
-    results: List[CliTestResult] = field(default_factory=list)
+    results: list[CliTestResult] = field(default_factory=list)
     total: int = 0
     passed: int = 0
     failed: int = 0
@@ -166,7 +165,7 @@ class CliSuiteReport:
 
     def summary(self) -> str:
         lines = [
-            f"CLI Test Suite Report",
+            "CLI Test Suite Report",
             f"  Total : {self.total}",
             f"  Passed: {self.passed}",
             f"  Failed: {self.failed}",
@@ -199,7 +198,7 @@ class OutputValidator:
     def contains(self, substring: str) -> bool:
         return substring in self._output
 
-    def contains_all(self, substrings: List[str]) -> Tuple[bool, List[str]]:
+    def contains_all(self, substrings: list[str]) -> tuple[bool, list[str]]:
         missing = [s for s in substrings if s not in self._output]
         return (len(missing) == 0, missing)
 
@@ -261,7 +260,7 @@ class ExitCodeChecker:
     def equals(self, expected: int) -> bool:
         return self._actual == expected
 
-    def is_in(self, codes: List[int]) -> bool:
+    def is_in(self, codes: list[int]) -> bool:
         return self._actual in codes
 
     def describe(self) -> str:
@@ -291,10 +290,10 @@ class CliTestRunner:
 
     def __init__(
         self,
-        command_prefix: Optional[List[str]] = None,
+        command_prefix: list[str] | None = None,
         default_timeout: float = 10.0,
-        cwd: Optional[Union[str, Path]] = None,
-        env: Optional[Dict[str, str]] = None,
+        cwd: str | Path | None = None,
+        env: dict[str, str] | None = None,
     ):
         """
         Args:
@@ -309,7 +308,7 @@ class CliTestRunner:
         self.cwd = str(cwd) if cwd else None
         self.env = env
 
-    def _build_command(self, args: List[str]) -> List[str]:
+    def _build_command(self, args: list[str]) -> list[str]:
         return self.command_prefix + args
 
     def run_case(self, test_case: CliTestCase) -> CliTestResult:
@@ -321,7 +320,7 @@ class CliTestRunner:
         actual_exit_code = -1
         actual_stdout = ""
         actual_stderr = ""
-        error_msg: Optional[str] = None
+        error_msg: str | None = None
 
         try:
             proc = subprocess.run(
@@ -348,7 +347,7 @@ class CliTestRunner:
 
         duration = time.monotonic() - start
 
-        failures: List[str] = []
+        failures: list[str] = []
 
         if error_msg is None:
             # Exit code check
@@ -361,13 +360,14 @@ class CliTestRunner:
             stderr_v = OutputValidator(actual_stderr)
 
             # stdout checks
-            if test_case.expected_stdout_exact is not None:
-                if not stdout_v.exact_match(test_case.expected_stdout_exact):
-                    failures.append(
-                        f"Stdout exact mismatch.\n"
-                        f"  Expected: {test_case.expected_stdout_exact!r}\n"
-                        f"  Actual  : {actual_stdout!r}"
-                    )
+            if test_case.expected_stdout_exact is not None and not stdout_v.exact_match(
+                test_case.expected_stdout_exact
+            ):
+                failures.append(
+                    f"Stdout exact mismatch.\n"
+                    f"  Expected: {test_case.expected_stdout_exact!r}\n"
+                    f"  Actual  : {actual_stdout!r}"
+                )
 
             if test_case.expected_stdout_contains:
                 ok, missing = stdout_v.contains_all(test_case.expected_stdout_contains)
@@ -375,11 +375,12 @@ class CliTestRunner:
                     for m in missing:
                         failures.append(f"Stdout missing: {m!r}")
 
-            if test_case.expected_stdout_regex is not None:
-                if not stdout_v.regex_match(test_case.expected_stdout_regex):
-                    failures.append(
-                        f"Stdout did not match regex: {test_case.expected_stdout_regex!r}"
-                    )
+            if test_case.expected_stdout_regex is not None and not stdout_v.regex_match(
+                test_case.expected_stdout_regex
+            ):
+                failures.append(
+                    f"Stdout did not match regex: {test_case.expected_stdout_regex!r}"
+                )
 
             # stderr checks
             if test_case.expected_stderr_contains:
@@ -388,11 +389,12 @@ class CliTestRunner:
                     for m in missing:
                         failures.append(f"Stderr missing: {m!r}")
 
-            if test_case.expected_stderr_regex is not None:
-                if not stderr_v.regex_match(test_case.expected_stderr_regex):
-                    failures.append(
-                        f"Stderr did not match regex: {test_case.expected_stderr_regex!r}"
-                    )
+            if test_case.expected_stderr_regex is not None and not stderr_v.regex_match(
+                test_case.expected_stderr_regex
+            ):
+                failures.append(
+                    f"Stderr did not match regex: {test_case.expected_stderr_regex!r}"
+                )
 
         passed = (error_msg is None) and (len(failures) == 0)
 
@@ -407,7 +409,7 @@ class CliTestRunner:
             duration_seconds=duration,
         )
 
-    def run_suite(self, test_cases: List[CliTestCase]) -> CliSuiteReport:
+    def run_suite(self, test_cases: list[CliTestCase]) -> CliSuiteReport:
         """Run a list of test cases and return a CliSuiteReport."""
         report = CliSuiteReport()
         for tc in test_cases:
@@ -419,17 +421,17 @@ class CliTestRunner:
     # Convenience helpers
     # ------------------------------------------------------------------
 
-    def assert_exits_zero(self, args: List[str], **kwargs) -> CliTestResult:
+    def assert_exits_zero(self, args: list[str], **kwargs) -> CliTestResult:
         tc = CliTestCase(name="assert_exits_zero", args=args, expected_exit_code=0, **kwargs)
         return self.run_case(tc)
 
-    def assert_exits_nonzero(self, args: List[str], **kwargs) -> CliTestResult:
+    def assert_exits_nonzero(self, args: list[str], **kwargs) -> CliTestResult:
         tc = CliTestCase(name="assert_exits_nonzero", args=args, expected_exit_code=1, **kwargs)
         return self.run_case(tc)
 
     def run_and_capture(
-        self, args: List[str], stdin_data: Optional[str] = None, timeout: float = 10.0
-    ) -> Tuple[int, str, str]:
+        self, args: list[str], stdin_data: str | None = None, timeout: float = 10.0
+    ) -> tuple[int, str, str]:
         """Run command and return (exit_code, stdout, stderr)."""
         cmd = self._build_command(args)
         try:
@@ -448,10 +450,10 @@ class CliTestRunner:
 
     def run_with_timeout(
         self,
-        args: List[str],
+        args: list[str],
         timeout_seconds: float,
         signal_on_timeout: int = signal.SIGTERM,
-    ) -> Tuple[int, str, str]:
+    ) -> tuple[int, str, str]:
         """
         Run a command, sending signal_on_timeout if it exceeds timeout_seconds.
         Returns (exit_code, stdout, stderr).
@@ -478,8 +480,8 @@ class CliTestRunner:
             return proc.returncode, stdout, stderr
 
     def pipe_input(
-        self, args: List[str], stdin_text: str, timeout: float = 10.0
-    ) -> Tuple[int, str, str]:
+        self, args: list[str], stdin_text: str, timeout: float = 10.0
+    ) -> tuple[int, str, str]:
         """Pipe stdin_text into the command and capture output."""
         return self.run_and_capture(args, stdin_data=stdin_text, timeout=timeout)
 
@@ -556,7 +558,7 @@ _SUBCOMMANDS = ("add", "list")
 _FORMATS = ("text", "json")
 
 
-def oracle_dispatch(argv: Tuple[str, ...]) -> CliOutcome:
+def oracle_dispatch(argv: tuple[str, ...]) -> CliOutcome:
     """Correct parse + dispatch + exit-code logic — the contract a real CLI
     parser (argparse-style) must honour."""
     args = list(argv)
@@ -610,7 +612,7 @@ def oracle_dispatch(argv: Tuple[str, ...]) -> CliOutcome:
 
 # --- Planted buggy twins (each models a real, common CLI defect) -----------
 
-def dispatch_usage_error_exits_zero(argv: Tuple[str, ...]) -> CliOutcome:
+def dispatch_usage_error_exits_zero(argv: tuple[str, ...]) -> CliOutcome:
     """BUG: a usage error exits 0 instead of 2.
 
     A pervasive real defect — a CLI that prints an error to stderr but forgets
@@ -623,7 +625,7 @@ def dispatch_usage_error_exits_zero(argv: Tuple[str, ...]) -> CliOutcome:
     return out
 
 
-def dispatch_accepts_mutually_exclusive(argv: Tuple[str, ...]) -> CliOutcome:
+def dispatch_accepts_mutually_exclusive(argv: tuple[str, ...]) -> CliOutcome:
     """BUG: accepts the mutually-exclusive `list --json --format …` combo.
 
     Models a CLI that declares two conflicting options but never enforces the
@@ -636,7 +638,7 @@ def dispatch_accepts_mutually_exclusive(argv: Tuple[str, ...]) -> CliOutcome:
     return oracle_dispatch(argv)
 
 
-def dispatch_misroutes_subcommand(argv: Tuple[str, ...]) -> CliOutcome:
+def dispatch_misroutes_subcommand(argv: tuple[str, ...]) -> CliOutcome:
     """BUG: mis-dispatches `list` to the `add` handler.
 
     Models a subcommand routing table wired to the wrong handler (a copy-paste
@@ -648,7 +650,7 @@ def dispatch_misroutes_subcommand(argv: Tuple[str, ...]) -> CliOutcome:
     return out
 
 
-def dispatch_skips_required_operands(argv: Tuple[str, ...]) -> CliOutcome:
+def dispatch_skips_required_operands(argv: tuple[str, ...]) -> CliOutcome:
     """BUG: `add` with too few operands runs anyway (exit 0) instead of erroring.
 
     Models missing required-argument validation — the handler dispatches with
@@ -665,12 +667,12 @@ def dispatch_skips_required_operands(argv: Tuple[str, ...]) -> CliOutcome:
 @dataclass(frozen=True)
 class CliOracleCase:
     name: str
-    argv: Tuple[str, ...]
+    argv: tuple[str, ...]
     expected: CliOutcome
     note: str = ""
 
 
-CLI_CORPUS: Tuple[CliOracleCase, ...] = (
+CLI_CORPUS: tuple[CliOracleCase, ...] = (
     CliOracleCase(
         "no_subcommand_usage_error",
         (),
@@ -734,7 +736,7 @@ CLI_CORPUS: Tuple[CliOracleCase, ...] = (
 )
 
 
-def prove(impl: Callable[[Tuple[str, ...]], CliOutcome]) -> bool:
+def prove(impl: Callable[[tuple[str, ...]], CliOutcome]) -> bool:
     """True iff parse/dispatch ``impl`` MISHANDLES any frozen corpus case.
 
     Non-circular and deterministic: each impl outcome is compared to the case's
@@ -772,7 +774,7 @@ TEETH = Teeth(
 )
 
 
-def list_oracle_cases() -> List[str]:
+def list_oracle_cases() -> list[str]:
     return [c.name for c in CLI_CORPUS]
 
 
@@ -780,7 +782,7 @@ def list_oracle_cases() -> List[str]:
 # Built-in self-test suite
 # ---------------------------------------------------------------------------
 
-def _build_self_test_suite(runner: SampleCliRunner) -> List[CliTestCase]:
+def _build_self_test_suite(runner: SampleCliRunner) -> list[CliTestCase]:
     return [
         CliTestCase(
             name="no_args_exits_zero",
@@ -925,7 +927,7 @@ def _run_self_test(as_json: bool = False, *, subprocess_smoke: bool = False) -> 
 # CLI entry point
 # ---------------------------------------------------------------------------
 
-def _parse_args(argv: Optional[List[str]] = None) -> Any:
+def _parse_args(argv: list[str] | None = None) -> Any:
     import argparse
 
     p = argparse.ArgumentParser(
@@ -960,7 +962,7 @@ def _parse_args(argv: Optional[List[str]] = None) -> Any:
     return p.parse_args(argv)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     if args.list_scenarios:
         print("\n".join(list_oracle_cases()))

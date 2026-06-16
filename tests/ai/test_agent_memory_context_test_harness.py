@@ -5,9 +5,9 @@ import unittest
 from harnesses._teeth import verify
 from harnesses.ai import agent_memory_context_test_harness as harness
 from harnesses.ai.agent_memory_context_test_harness import (
-    TEETH,
     EXPECTED_RETRIEVED,
     MEMORY_CORPUS,
+    TEETH,
     MemoryQuery,
     oracle_retrieve,
     prove,
@@ -29,8 +29,7 @@ class TestAgentMemoryContextHarness(unittest.TestCase):
         proc = subprocess.run(
             [sys.executable, harness.__file__, "--self-test"],
             text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             check=False,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)

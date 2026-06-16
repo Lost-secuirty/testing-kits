@@ -10,29 +10,30 @@ Pure stdlib, zero external dependencies.
 from __future__ import annotations
 
 import argparse
+import configparser
 import csv
 import io
 import json
 import math
 import pickle
 import struct
-import configparser
-import xml.etree.ElementTree as ET
-from dataclasses import dataclass, field
-from enum import Enum, auto
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from threading import Thread
-from typing import Any, Callable, Dict, List, Optional, Tuple
-import urllib.request
-import urllib.parse
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from enum import Enum, auto
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path as _Path
+from threading import Thread
+from typing import Any
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Enums and Dataclasses
@@ -54,12 +55,12 @@ class RoundtripResult:
     encoded: Any          # bytes or str after encoding
     decoded: Any          # value after decoding
     passed: bool
-    lossy_fields: List[str] = field(default_factory=list)
+    lossy_fields: list[str] = field(default_factory=list)
 
 
 @dataclass
 class SerializationReport:
-    results: List[RoundtripResult] = field(default_factory=list)
+    results: list[RoundtripResult] = field(default_factory=list)
 
     @property
     def lossless_count(self) -> int:
@@ -86,9 +87,9 @@ class LossDetector:
     """Identifies which fields changed type or value after a roundtrip."""
 
     @staticmethod
-    def detect(original: Dict[str, Any], decoded: Dict[str, Any]) -> List[str]:
+    def detect(original: dict[str, Any], decoded: dict[str, Any]) -> list[str]:
         """Return list of field names where data changed type or value."""
-        lossy: List[str] = []
+        lossy: list[str] = []
         all_keys = set(original.keys()) | set(decoded.keys())
         for key in all_keys:
             if key not in original:
@@ -106,7 +107,7 @@ class LossDetector:
     @staticmethod
     def _values_equal(a: Any, b: Any) -> bool:
         """Check if two values are semantically equal (handling NaN, inf, etc.)."""
-        if type(a) != type(b):
+        if type(a) is not type(b):
             # Allow int/float equivalence when value is the same
             if isinstance(a, (int, float)) and isinstance(b, (int, float)):
                 if math.isnan(a) and math.isnan(b):
@@ -127,7 +128,7 @@ class LossDetector:
         if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
             if len(a) != len(b):
                 return False
-            return all(LossDetector._values_equal(x, y) for x, y in zip(a, b))
+            return all(LossDetector._values_equal(x, y) for x, y in zip(a, b, strict=False))
         return a == b
 
 
@@ -140,7 +141,7 @@ class FormatTester:
 
     # ---- JSON ----
 
-    def test_json(self, data: Dict[str, Any]) -> RoundtripResult:
+    def test_json(self, data: dict[str, Any]) -> RoundtripResult:
         """JSON roundtrip. Known lossy: tuple→list, large floats may become inf."""
         try:
             encoded = json.dumps(data, allow_nan=True)
@@ -154,7 +155,7 @@ class FormatTester:
                 passed=True,
                 lossy_fields=lossy,
             )
-        except Exception as exc:
+        except Exception:
             return RoundtripResult(
                 format=SerializationFormat.JSON,
                 original=data,
@@ -164,8 +165,8 @@ class FormatTester:
                 lossy_fields=list(data.keys()),
             )
 
-    def _detect_json_loss(self, original: Dict, decoded: Dict) -> List[str]:
-        lossy: List[str] = []
+    def _detect_json_loss(self, original: dict, decoded: dict) -> list[str]:
+        lossy: list[str] = []
         for key in original:
             orig = original[key]
             dec = decoded.get(key)
@@ -180,7 +181,7 @@ class FormatTester:
                 if math.isinf(orig) and math.isinf(dec) and orig == dec:
                     continue
             # Type mismatch
-            if type(orig) != type(dec) and not (isinstance(orig, bool) and isinstance(dec, bool)):
+            if type(orig) is not type(dec) and not (isinstance(orig, bool) and isinstance(dec, bool)):
                 # bool is subclass of int; handle carefully
                 if isinstance(orig, bool) or isinstance(dec, bool):
                     if orig != dec:
@@ -194,7 +195,7 @@ class FormatTester:
 
     # ---- CSV ----
 
-    def test_csv(self, data: Dict[str, Any]) -> RoundtripResult:
+    def test_csv(self, data: dict[str, Any]) -> RoundtripResult:
         """CSV roundtrip. Everything becomes a string — always lossy for non-str."""
         try:
             buf = io.StringIO()
@@ -227,11 +228,11 @@ class FormatTester:
                 lossy_fields=list(data.keys()),
             )
 
-    def _detect_csv_loss(self, original: Dict, decoded: Dict) -> List[str]:
-        lossy: List[str] = []
+    def _detect_csv_loss(self, original: dict, decoded: dict) -> list[str]:
+        lossy: list[str] = []
         for key in original:
             orig = original[key]
-            dec = decoded.get(key, "")
+            decoded.get(key, "")
             # In CSV everything is a string; any non-string value is lossy
             if not isinstance(orig, str):
                 lossy.append(key)
@@ -246,7 +247,7 @@ class FormatTester:
     BINARY_KEYS = ["int_val", "double_val", "float_val", "bool_val"]
     BINARY_DEFAULTS = {"int_val": 0, "double_val": 0.0, "float_val": 0.0, "bool_val": False}
 
-    def test_binary(self, data: Dict[str, Any]) -> RoundtripResult:
+    def test_binary(self, data: dict[str, Any]) -> RoundtripResult:
         """Binary/struct roundtrip. Fixed-width schema; precision loss for floats."""
         try:
             int_val = int(data.get("int_val", 0))
@@ -290,8 +291,8 @@ class FormatTester:
                 lossy_fields=list(data.keys()),
             )
 
-    def _detect_binary_loss(self, original: Dict, decoded: Dict) -> List[str]:
-        lossy: List[str] = []
+    def _detect_binary_loss(self, original: dict, decoded: dict) -> list[str]:
+        lossy: list[str] = []
         for key in self.BINARY_KEYS:
             if key not in original:
                 continue
@@ -309,10 +310,7 @@ class FormatTester:
                     if abs(orig_f - dec_f) > 1e-5 * (abs(orig_f) + 1e-30):
                         lossy.append(key)
                         continue
-                elif math.isnan(orig_f) and not math.isnan(dec_f):
-                    lossy.append(key)
-                    continue
-                elif math.isinf(orig_f) and (not math.isinf(dec_f) or orig_f != dec_f):
+                elif math.isnan(orig_f) and not math.isnan(dec_f) or math.isinf(orig_f) and (not math.isinf(dec_f) or orig_f != dec_f):
                     lossy.append(key)
                     continue
             else:
@@ -350,10 +348,10 @@ class FormatTester:
                 lossy_fields=list(data.keys()) if isinstance(data, dict) else [],
             )
 
-    def _detect_pickle_loss(self, original: Any, decoded: Any) -> List[str]:
+    def _detect_pickle_loss(self, original: Any, decoded: Any) -> list[str]:
         if not isinstance(original, dict):
             return []
-        lossy: List[str] = []
+        lossy: list[str] = []
         for key in original:
             orig = original[key]
             dec = decoded.get(key)
@@ -363,7 +361,7 @@ class FormatTester:
 
     # ---- XML ----
 
-    def test_xml(self, data: Dict[str, Any]) -> RoundtripResult:
+    def test_xml(self, data: dict[str, Any]) -> RoundtripResult:
         """XML roundtrip. Values become text nodes; type info is lost."""
         try:
             root = ET.Element("root")
@@ -412,11 +410,11 @@ class FormatTester:
                 return "inf" if val > 0 else "-inf"
         return str(val)
 
-    def _detect_xml_loss(self, original: Dict, decoded: Dict) -> List[str]:
-        lossy: List[str] = []
+    def _detect_xml_loss(self, original: dict, decoded: dict) -> list[str]:
+        lossy: list[str] = []
         for key in original:
             orig = original[key]
-            dec = decoded.get(str(key), "")
+            decoded.get(str(key), "")
             # Everything becomes string in XML
             if not isinstance(orig, str):
                 lossy.append(key)
@@ -424,7 +422,7 @@ class FormatTester:
 
     # ---- INI ----
 
-    def test_ini(self, data: Dict[str, Any], section: str = "data") -> RoundtripResult:
+    def test_ini(self, data: dict[str, Any], section: str = "data") -> RoundtripResult:
         """INI/ConfigParser roundtrip. All values become strings; no nesting."""
         try:
             config = configparser.ConfigParser()
@@ -468,8 +466,8 @@ class FormatTester:
             return ""
         return str(val)
 
-    def _detect_ini_loss(self, original: Dict, decoded: Dict) -> List[str]:
-        lossy: List[str] = []
+    def _detect_ini_loss(self, original: dict, decoded: dict) -> list[str]:
+        lossy: list[str] = []
         for key in original:
             orig = original[key]
             # INI keys are lowercased; check the lowercased key
@@ -494,7 +492,7 @@ class RoundtripRunner:
     def __init__(self):
         self.tester = FormatTester()
 
-    def run_all(self, data: Dict[str, Any]) -> SerializationReport:
+    def run_all(self, data: dict[str, Any]) -> SerializationReport:
         """Run all formats on the given data dict."""
         report = SerializationReport()
 
@@ -650,7 +648,7 @@ class MockSerializationHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _result_to_dict(self, result: RoundtripResult) -> Dict:
+    def _result_to_dict(self, result: RoundtripResult) -> dict:
         return {
             "format": result.format.name,
             "passed": result.passed,
@@ -665,8 +663,8 @@ class SerializationServer:
 
     def __init__(self, port: int = DEFAULT_PORT):
         self.port = port
-        self.server: Optional[HTTPServer] = None
-        self._thread: Optional[Thread] = None
+        self.server: HTTPServer | None = None
+        self._thread: Thread | None = None
 
     def start(self):
         self.server = HTTPServer(("127.0.0.1", self.port), MockSerializationHandler)
@@ -738,7 +736,7 @@ _ANY = object()
 class SerCase:
     """One frozen roundtrip case with literal, hand-computed expectations."""
     name: str
-    value: Dict[str, Any]
+    value: dict[str, Any]
     fmt: str                       # "json" | "binary"
     field: str                     # the field whose loss-verdict is asserted
     expect_lossy: bool             # MUST this field be flagged as lossy?
@@ -749,7 +747,7 @@ class SerCase:
 # Cases chosen so the correct oracle agrees with every expectation AND at least
 # one planted mutant gets each one WRONG. All literals are computed by hand from
 # the serialization contract, never read back from the oracle.
-SER_CORPUS: Tuple[SerCase, ...] = (
+SER_CORPUS: tuple[SerCase, ...] = (
     # --- JSON: a present, non-falsy field is preserved losslessly -----------
     SerCase("json_keeps_string", {"name": "alice"}, "json", "name",
             expect_lossy=False, expect_decoded="alice",
@@ -796,7 +794,7 @@ SER_CORPUS: Tuple[SerCase, ...] = (
 
 # --- ORACLE: reuse the harness's own correct FormatTester + LossDetector ----
 
-def oracle_roundtrip(value: Dict[str, Any], fmt: str) -> Tuple[Any, List[str]]:
+def oracle_roundtrip(value: dict[str, Any], fmt: str) -> tuple[Any, list[str]]:
     """Correct roundtrip + loss detection, delegating to the harness's tested
     FormatTester. Returns (decoded, lossy_fields)."""
     tester = FormatTester()
@@ -811,7 +809,7 @@ def oracle_roundtrip(value: Dict[str, Any], fmt: str) -> Tuple[Any, List[str]]:
 
 # --- Planted buggy twins (each models a real serialization defect) ----------
 
-def drop_falsy_roundtrip(value: Dict[str, Any], fmt: str) -> Tuple[Any, List[str]]:
+def drop_falsy_roundtrip(value: dict[str, Any], fmt: str) -> tuple[Any, list[str]]:
     """BUG: the serializer silently DROPS any field whose value is falsy.
 
     A startlingly common 'optimization' (``{k: v for k, v in d.items() if v}``)
@@ -829,14 +827,14 @@ def drop_falsy_roundtrip(value: Dict[str, Any], fmt: str) -> Tuple[Any, List[str
     else:  # pragma: no cover
         raise ValueError(fmt)
     # BUG: detector only iterates decoded keys, so a dropped key is invisible.
-    lossy: List[str] = []
+    lossy: list[str] = []
     for key in decoded:
         if value.get(key) != decoded.get(key):
             lossy.append(key)
     return decoded, lossy
 
 
-def int_float_blind_roundtrip(value: Dict[str, Any], fmt: str) -> Tuple[Any, List[str]]:
+def int_float_blind_roundtrip(value: dict[str, Any], fmt: str) -> tuple[Any, list[str]]:
     """BUG: the JSON serializer silently widens every int to a float, AND the
     detector treats any int/float pair as interchangeable.
 
@@ -852,7 +850,7 @@ def int_float_blind_roundtrip(value: Dict[str, Any], fmt: str) -> Tuple[Any, Lis
                for k, v in value.items()}  # BUG: int -> float widening
     encoded = json.dumps(coerced, allow_nan=True)
     decoded = json.loads(encoded)
-    lossy: List[str] = []
+    lossy: list[str] = []
     for key in value:
         orig = value[key]
         dec = decoded.get(key)
@@ -864,7 +862,7 @@ def int_float_blind_roundtrip(value: Dict[str, Any], fmt: str) -> Tuple[Any, Lis
     return decoded, lossy
 
 
-def schema_drop_blind_roundtrip(value: Dict[str, Any], fmt: str) -> Tuple[Any, List[str]]:
+def schema_drop_blind_roundtrip(value: dict[str, Any], fmt: str) -> tuple[Any, list[str]]:
     """BUG: the binary loss-detector only inspects the four schema keys.
 
     The fixed struct schema (int/double/float/bool) physically cannot encode any
@@ -876,7 +874,7 @@ def schema_drop_blind_roundtrip(value: Dict[str, Any], fmt: str) -> Tuple[Any, L
     if fmt != "binary":
         return oracle_roundtrip(value, fmt)
     decoded, _ = oracle_roundtrip(value, fmt)
-    lossy: List[str] = []
+    lossy: list[str] = []
     for key in FormatTester.BINARY_KEYS:  # BUG: never looks at non-schema keys
         if key not in value:
             continue
@@ -885,7 +883,7 @@ def schema_drop_blind_roundtrip(value: Dict[str, Any], fmt: str) -> Tuple[Any, L
     return decoded, lossy
 
 
-def prove(impl: Callable[[Dict[str, Any], str], Tuple[Any, List[str]]]) -> bool:
+def prove(impl: Callable[[dict[str, Any], str], tuple[Any, list[str]]]) -> bool:
     """True iff ``impl`` MISHANDLES any frozen corpus case (i.e. the bug is
     caught): a real loss goes unflagged, a clean field is wrongly flagged, the
     decoded value diverges from the frozen literal, or a field is dropped.
@@ -935,7 +933,7 @@ TEETH = Teeth(
 )
 
 
-def list_scenarios() -> List[str]:
+def list_scenarios() -> list[str]:
     """Names of the frozen corpus cases (the teeth scenarios)."""
     return [c.name for c in SER_CORPUS]
 
@@ -967,7 +965,7 @@ def _run_self_test(as_json: bool = False) -> int:
 # CLI — default action is the self-test (repo convention).
 # ---------------------------------------------------------------------------
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Serialization / roundtrip controls")
     parser.add_argument("--self-test", action="store_true", help="run built-in checks")
     parser.add_argument("--json", action="store_true",

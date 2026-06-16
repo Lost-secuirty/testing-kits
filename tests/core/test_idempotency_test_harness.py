@@ -14,28 +14,27 @@ Tests for the Idempotency / Retry-Safety Test Harness (Harness 21 of 36)
 - MockIdempotencyServer (full HTTP integration tests)
 """
 
-import json
 import threading
 import time
 import unittest
 import uuid
 
 from harnesses.core.idempotency_test_harness import (
+    ConcurrentDedupTester,
     IdempotencyEntry,
     IdempotencyState,
     IdempotencyStore,
-    StateOnlyStore,
-    KeyDedupTester,
-    RetryConvergenceTester,
-    ConcurrentDedupTester,
     InProgressTester,
-    TTLTester,
-    ResponsePersistenceTester,
-    SafeMethodTester,
+    KeyDedupTester,
     MockIdempotencyServer,
+    ResponsePersistenceTester,
+    RetryConvergenceTester,
+    SafeMethodTester,
+    StateOnlyStore,
+    TTLTester,
     generate_idempotency_key,
-    http_post,
     http_get,
+    http_post,
 )
 
 
@@ -419,7 +418,7 @@ class TestConcurrentDedupTester(unittest.TestCase):
     # 41. Exactly one thread executes the side effect
     def test_exactly_one_execution(self):
         k = _key()
-        results = self.tester.run_concurrent(k, {"data": "x"}, n_threads=10)
+        self.tester.run_concurrent(k, {"data": "x"}, n_threads=10)
         self.assertEqual(self.tester.execution_count, 1)
 
     # 42. All threads get a result (none left as None)

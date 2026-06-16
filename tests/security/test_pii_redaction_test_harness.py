@@ -3,8 +3,8 @@
 import unittest
 
 from harnesses.security.pii_redaction_test_harness import (
-    Redactor,
     RedactionOracle,
+    Redactor,
     _luhn_ok,
     run_all_scenarios,
 )

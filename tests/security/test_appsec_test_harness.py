@@ -3,33 +3,28 @@ Test suite for appsec_test_harness.py — 129 tests.
 Pure stdlib, zero external dependencies.
 """
 
-import base64
-import hashlib
-import hmac
+import contextlib
 import json
 import pickle
-import struct
 import time
 import unittest
-import urllib.request
 import urllib.error
+import urllib.request
 
 from harnesses.security.appsec_test_harness import (
-    SSRFChecker,
+    AppSecReport,
     DeserializationChecker,
     JWTChecker,
-    OpenRedirectChecker,
     MassAssignmentChecker,
-    XXEChecker,
+    OpenRedirectChecker,
     SecFinding,
-    AppSecReport,
-    MockAppSecHandler,
-    start_mock_server,
-    stop_mock_server,
+    SSRFChecker,
+    XXEChecker,
     _b64url_decode,
     _b64url_encode,
+    start_mock_server,
+    stop_mock_server,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper
@@ -529,7 +524,7 @@ class TestOpenRedirectChecker(unittest.TestCase):
 
     def test_block_no_allowed_domains_configured(self):
         checker = OpenRedirectChecker()  # no domains
-        ok, reason = self.checker.check("https://evil.com/")
+        ok, _ = checker.check("https://evil.com/")
         self.assertFalse(ok)
 
     def test_allow_http_allowed_domain(self):
@@ -738,19 +733,17 @@ class TestMockAppSecServer(unittest.TestCase):
 
     def test_safe_redirect_allowed(self):
         url = self.base + "/safe/redirect?to=https://example.com/page"
-        req = urllib.request.Request(url)
+        urllib.request.Request(url)
         import urllib.request as ur
         # Don't follow redirects
-        opener = ur.build_opener(ur.HTTPRedirectHandler())
+        ur.build_opener(ur.HTTPRedirectHandler())
         class NoRedirect(ur.HTTPRedirectHandler):
             def redirect_request(self, req, fp, code, msg, headers, newurl):
                 return None
         opener2 = ur.build_opener(NoRedirect())
-        try:
-            resp = opener2.open(url, timeout=5)
+        with contextlib.suppress(Exception):
+            opener2.open(url, timeout=5)
             # If no redirect, might be a 302 handled or 200
-        except Exception:
-            pass
         # Just check the safe redirect blocks bad ones
         status, body = self._get("/safe/redirect?to=https://evil.com/phish")
         self.assertEqual(status, 400)
@@ -800,9 +793,7 @@ class TestMockAppSecServer(unittest.TestCase):
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 body = json.loads(resp.read())
-                status = resp.status
         except urllib.error.HTTPError as e:
-            status = e.code
             body = json.loads(e.read())
         self.assertTrue(body.get("dangerous", False))
 

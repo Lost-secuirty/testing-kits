@@ -10,12 +10,8 @@ Tests for cli_test_harness.py (Harness 5 of 36)
 """
 
 import json
-import os
-import signal
 import subprocess
 import sys
-import tempfile
-import time
 import unittest
 from pathlib import Path
 
@@ -37,7 +33,6 @@ from harnesses.core.cli_test_harness import (
     prove,
     run_self_test,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -364,7 +359,7 @@ class TestSampleCliEndToEnd(unittest.TestCase):
         )
         r = self.runner.run_case(tc)
         self.assertTrue(r.passed, r.failures)
-        lines = [l for l in r.actual_stdout.strip().splitlines() if l]
+        lines = [line for line in r.actual_stdout.strip().splitlines() if line]
         self.assertEqual(len(lines), 2)
         for line in lines:
             data = json.loads(line)

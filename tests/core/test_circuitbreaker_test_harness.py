@@ -1,11 +1,12 @@
 """test_circuitbreaker_test_harness.py â€” unittest suite for circuitbreaker_test_harness (44)."""
 
+import contextlib
 import unittest
 
 from harnesses.core.circuitbreaker_test_harness import (
     CLOSED,
-    OPEN,
     HALF_OPEN,
+    OPEN,
     CircuitBreaker,
     CircuitBreakerOracle,
     CircuitOpenError,
@@ -136,15 +137,11 @@ class TestOracle(unittest.TestCase):
             if ev[0] == "advance":
                 clk.advance(ev[1])
             elif ev[0] == "ok":
-                try:
+                with contextlib.suppress(CircuitOpenError):
                     cb.call(lambda: "ok")
-                except CircuitOpenError:
-                    pass
             else:
-                try:
+                with contextlib.suppress(RuntimeError, CircuitOpenError):
                     cb.call(boom)
-                except (RuntimeError, CircuitOpenError):
-                    pass
         return cb.state
 
     def test_oracle_matches_mixed_log(self):

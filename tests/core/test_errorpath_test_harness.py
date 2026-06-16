@@ -3,29 +3,29 @@ Tests for Error-Path / Negative Coverage Test Harness (Harness 26 of 36)
 ~107 tests, pure stdlib.
 """
 
-import unittest
+import contextlib
+import json
 import threading
 import time
-import json
-import urllib.request
+import unittest
 import urllib.error
+import urllib.request
 from dataclasses import fields as dc_fields
 
 from harnesses.core.errorpath_test_harness import (
-    BranchResult,
-    NegativeCaseResult,
-    ErrorPathReport,
-    CoverageProbe,
-    ExceptionPathTester,
-    NullHandlingTester,
     BoundaryTester,
-    TimeoutTester,
-    ResourceCleanupTester,
-    MockErrorPathHandler,
+    BranchResult,
+    CoverageProbe,
+    ErrorPathReport,
     ErrorPathServer,
+    ExceptionPathTester,
+    MockErrorPathHandler,
+    NegativeCaseResult,
+    NullHandlingTester,
+    ResourceCleanupTester,
+    TimeoutTester,
     find_free_port,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper functions used by multiple tests
@@ -450,7 +450,7 @@ class TestNullHandlingTester(unittest.TestCase):
         self.assertEqual(len(self.tester.results()), 4)
 
     def test_all_passed_when_all_handle_gracefully(self):
-        results = self.tester.test_function(_concat, ["x", "y"])
+        self.tester.test_function(_concat, ["x", "y"])
         self.assertTrue(self.tester.all_passed())
 
     def test_param_index_recorded(self):
@@ -891,7 +891,7 @@ class TestErrorPathServer(unittest.TestCase):
 
     def test_context_manager(self):
         with ErrorPathServer() as srv:
-            status, body = urllib.request.urlopen(
+            _status, _body = urllib.request.urlopen(
                 srv.base_url + "/ok", timeout=5
             ).read(), None
         # Just verify it exited cleanly
@@ -1039,12 +1039,10 @@ class TestIntegration(unittest.TestCase):
             import urllib.request
 
             def slow_request():
-                try:
+                with contextlib.suppress(Exception):
                     urllib.request.urlopen(
                         server.base_url + "/timeout", timeout=0.2
                     )
-                except Exception:
-                    pass
                 time.sleep(5)  # ensure we time out in the test
 
             tester = TimeoutTester()

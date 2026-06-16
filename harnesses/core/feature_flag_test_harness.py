@@ -30,11 +30,12 @@ from __future__ import annotations
 import argparse
 import itertools
 import sys
-from dataclasses import dataclass, field
-from typing import Any, Callable
-
 import sys as _sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path as _Path
+from typing import Any
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Teeth  # noqa: E402
@@ -116,7 +117,7 @@ class FlagMatrixRunner:
         for subset in itertools.combinations(names, arity):
             for vals in itertools.product([False, True], repeat=arity):
                 assignment = dict(defaults)
-                for n, v in zip(subset, vals):
+                for n, v in zip(subset, vals, strict=False):
                     assignment[n] = v
                 key = tuple(sorted(assignment.items()))
                 if key in seen:
@@ -145,11 +146,10 @@ class FlagMatrixRunner:
 
             # Check expectations.
             for exp_combo, exp_return in expects:
-                if all(combo.get(k) == v for k, v in exp_combo.items()):
-                    if ret != exp_return:
-                        outcome = "expectation_violation"
-                        detail = f"expected {exp_return!r}, got {ret!r}"
-                        break
+                if all(combo.get(k) == v for k, v in exp_combo.items()) and ret != exp_return:
+                    outcome = "expectation_violation"
+                    detail = f"expected {exp_return!r}, got {ret!r}"
+                    break
 
             return_types[tuple(sorted(combo.items()))] = ret_type
             results.append(ComboResult(combo=dict(combo), outcome=outcome,
@@ -206,10 +206,7 @@ def good_pricer(flags: dict[str, bool], flip_flag: str | None = None,
         base = 90
     if flags.get("loyalty_v2"):
         base -= 5
-    if flags.get("tax_calc_v2"):
-        base = int(base * 1.08)
-    else:
-        base = int(base * 1.05)
+    base = int(base * 1.08) if flags.get("tax_calc_v2") else int(base * 1.05)
     if flip_flag is not None:
         return base  # ignores mid-call flip — deterministic
     return base
@@ -225,10 +222,7 @@ def buggy_pricer_combo(flags: dict[str, bool], flip_flag: str | None = None,
     if flags.get("loyalty_v2"):
         # BUG: should subtract 1 to satisfy the assertion (89), but adds.
         base += 5
-    if flags.get("tax_calc_v2"):
-        base = int(base * 1.08)
-    else:
-        base = int(base * 1.05)
+    base = int(base * 1.08) if flags.get("tax_calc_v2") else int(base * 1.05)
     return base
 
 
@@ -361,7 +355,7 @@ def _run_self_test(config: FlagMatrixConfig, verbose: bool = False) -> int:
     crashes = sum(1 for x in r if x.outcome == "crash")
     print(f"flip_mid_call (good):     {len(r)} flips, {crashes} crashes")
     if crashes:
-        failures.append(f"flip_mid_call: good_pricer should be deterministic but crashed")
+        failures.append("flip_mid_call: good_pricer should be deterministic but crashed")
 
     if failures:
         print("FAILED:", file=sys.stderr)

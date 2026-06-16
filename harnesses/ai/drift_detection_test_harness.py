@@ -27,19 +27,20 @@ from __future__ import annotations
 import argparse
 import math
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 # Make the shared teeth contract importable whether run as a module or a script.
 from pathlib import Path as _Path
+
 if str(_Path(__file__).resolve().parents[2]) not in sys.path:
     sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+import contextlib
+
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
-try:
+with contextlib.suppress(Exception):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
 
 EPS = 1e-6
 
@@ -62,7 +63,7 @@ CHURN_ALERT = 0.20
 def psi(base: tuple[float, ...], cur: tuple[float, ...]) -> float:
     """Population Stability Index with an epsilon floor on empty bins."""
     s = 0.0
-    for b, c in zip(base, cur):
+    for b, c in zip(base, cur, strict=False):
         bb, cc = max(b, EPS), max(c, EPS)
         s += (cc - bb) * math.log(cc / bb)
     return s
@@ -71,7 +72,7 @@ def psi(base: tuple[float, ...], cur: tuple[float, ...]) -> float:
 def psi_zero_floor(base: tuple[float, ...], cur: tuple[float, ...]) -> float:
     """Buggy: no epsilon floor — skips empty bins, dropping their dominant terms."""
     s = 0.0
-    for b, c in zip(base, cur):
+    for b, c in zip(base, cur, strict=False):
         if b == 0 or c == 0:
             continue
         s += (c - b) * math.log(c / b)
@@ -81,7 +82,7 @@ def psi_zero_floor(base: tuple[float, ...], cur: tuple[float, ...]) -> float:
 def kl_div(p: tuple[float, ...], q: tuple[float, ...]) -> float:
     """KL(p || q) with q floored; 0*log0 contributes 0 per convention."""
     s = 0.0
-    for pi, qi in zip(p, q):
+    for pi, qi in zip(p, q, strict=False):
         if pi <= 0:
             continue
         s += pi * math.log(pi / max(qi, EPS))
@@ -90,12 +91,12 @@ def kl_div(p: tuple[float, ...], q: tuple[float, ...]) -> float:
 
 def js_div(p: tuple[float, ...], q: tuple[float, ...]) -> float:
     """Jensen-Shannon divergence (symmetric, bounded [0, ln2])."""
-    m = tuple((pi + qi) / 2 for pi, qi in zip(p, q))
+    m = tuple((pi + qi) / 2 for pi, qi in zip(p, q, strict=False))
     return 0.5 * kl_div(p, m) + 0.5 * kl_div(q, m)
 
 
 def hellinger(p: tuple[float, ...], q: tuple[float, ...]) -> float:
-    s = sum((math.sqrt(pi) - math.sqrt(qi)) ** 2 for pi, qi in zip(p, q))
+    s = sum((math.sqrt(pi) - math.sqrt(qi)) ** 2 for pi, qi in zip(p, q, strict=False))
     return math.sqrt(s / 2)
 
 
@@ -106,7 +107,7 @@ def _mean_vec(vecs: tuple[tuple[float, ...], ...]) -> tuple[float, ...]:
 
 
 def _euclid(a: tuple[float, ...], b: tuple[float, ...]) -> float:
-    return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a, b)))
+    return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a, b, strict=False)))
 
 
 def centroid_distance(base: tuple[tuple[float, ...], ...],
@@ -122,7 +123,7 @@ def centroid_averaged(base: tuple[tuple[float, ...], ...],
 
 
 def _dot(a: tuple[float, ...], b: tuple[float, ...]) -> float:
-    return sum(ai * bi for ai, bi in zip(a, b))
+    return sum(ai * bi for ai, bi in zip(a, b, strict=False))
 
 
 def _cosine(a: tuple[float, ...], b: tuple[float, ...]) -> float:

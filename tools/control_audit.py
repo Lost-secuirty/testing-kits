@@ -12,7 +12,7 @@ try:
     import yaml
 except ImportError:
     print("control-audit: PyYAML is required (pip install PyYAML==6.0.3)", file=sys.stderr)
-    raise SystemExit(2)
+    raise SystemExit(2) from None
 
 ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = ROOT / ".github" / "control-policy.json"

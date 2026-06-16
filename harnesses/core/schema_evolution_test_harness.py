@@ -27,16 +27,17 @@ from __future__ import annotations
 import argparse
 import sqlite3
 import sys
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path as _Path
+from typing import Any
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Schema states + drivers
@@ -293,7 +294,7 @@ def list_scenarios() -> list[str]:
     return list(SCENARIOS.keys())
 
 
-def _run_scenarios(verbose: bool = False) -> List[ScenarioResult]:
+def _run_scenarios(verbose: bool = False) -> list[ScenarioResult]:
     """Run the in-process expand-contract scenarios (kept for legacy callers)."""
     return [fn() for fn in SCENARIOS.values()]
 
@@ -329,7 +330,7 @@ class Field:
     """One column in a relational schema, as a compatibility checker sees it."""
     type: str                      # "TEXT" | "INTEGER" | "REAL" | "BLOB"
     required: bool = False         # NOT NULL with no usable default
-    default: Optional[Any] = None  # server-side default, if any
+    default: Any | None = None  # server-side default, if any
 
     @property
     def has_default(self) -> bool:
@@ -337,11 +338,11 @@ class Field:
 
 
 # A schema is an ordered mapping of field name -> Field.
-SchemaT = Dict[str, Field]
+SchemaT = dict[str, Field]
 
 # Type-widening lattice: a value of `key` can be safely read as any type in its
 # set. Narrowing the other direction (e.g. TEXT -> INTEGER) is a breaking change.
-_WIDENS_TO: Dict[str, set] = {
+_WIDENS_TO: dict[str, set] = {
     "INTEGER": {"INTEGER", "REAL", "TEXT"},  # int promotes to real / text safely
     "REAL": {"REAL", "TEXT"},                # real promotes to text safely
     "TEXT": {"TEXT"},                        # text only stays text
@@ -369,7 +370,7 @@ class MigrationCase:
 # Cases chosen so the correct oracle agrees with every verdict AND at least one
 # planted mutant gets each breaking case WRONG (calls it compatible). All verdicts
 # are computed by hand from the compatibility contract, never read from the oracle.
-MIGRATION_CORPUS: Tuple[MigrationCase, ...] = (
+MIGRATION_CORPUS: tuple[MigrationCase, ...] = (
     # --- ADDITIVE: a new OPTIONAL column is backward-compatible ---------------
     MigrationCase(
         "add_optional_column",
@@ -574,7 +575,7 @@ TEETH = Teeth(
 )
 
 
-def teeth_scenarios() -> List[str]:
+def teeth_scenarios() -> list[str]:
     """Names of the frozen migration corpus cases (the teeth scenarios)."""
     return [c.name for c in MIGRATION_CORPUS]
 
@@ -616,7 +617,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.list_scenarios:
         for s in list_scenarios() + teeth_scenarios():

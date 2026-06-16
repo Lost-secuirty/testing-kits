@@ -4,30 +4,28 @@ Tests for pipeline_test_harness.py
 """
 
 import json
-import time
 import unittest
-import urllib.request
 import urllib.error
+import urllib.request
+
 from harnesses.core.pipeline_test_harness import (
-    PipelineStage,
-    SchemaSpec,
-    SchemaValidator,
-    NullStrategy,
-    NullHandler,
-    Deduplicator,
-    ReconciliationResult,
-    Reconciler,
+    DEFAULT_PORT,
     AggregateFunction,
     Aggregator,
-    JoinType,
+    Deduplicator,
     Joiner,
+    JoinType,
+    MockPipelineServer,
+    NullHandler,
+    NullStrategy,
     PipelineReport,
     PipelineRunner,
-    MockPipelineHandler,
-    MockPipelineServer,
-    DEFAULT_PORT,
+    PipelineStage,
+    Reconciler,
+    ReconciliationResult,
+    SchemaSpec,
+    SchemaValidator,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper

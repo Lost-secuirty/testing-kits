@@ -25,23 +25,23 @@ Author: Scott (codeing testing harnesses project)
 
 import argparse
 import asyncio
+import contextlib
 import json
 import math
+import random
 import signal
 import statistics
 import sys
-import time
-import random
 import threading
+import time
 from collections import defaultdict
-from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Optional
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
 from urllib.parse import urlparse
-from concurrent.futures import ThreadPoolExecutor
-
 
 # ============================================================
 # CONFIGURATION & DATA CLASSES
@@ -79,7 +79,7 @@ class RequestResult:
     scheduled_at: float        # when the request SHOULD have been sent
     sent_at: float             # when the request WAS actually sent
     completed_at: float
-    error: Optional[str] = None
+    error: str | None = None
 
     @property
     def corrected_latency_ms(self) -> float:
@@ -237,8 +237,8 @@ class TaskDef:
     method: str
     path: str
     weight: int = 1
-    body: Optional[dict] = None
-    headers: Optional[dict] = None
+    body: dict | None = None
+    headers: dict | None = None
 
 
 SCENARIOS: dict[str, list[TaskDef]] = {
@@ -279,7 +279,7 @@ def build_weighted_task_list(tasks: list[TaskDef]) -> list[TaskDef]:
     return expanded
 
 
-def resolve_body(body: Optional[dict], seq: int) -> Optional[bytes]:
+def resolve_body(body: dict | None, seq: int) -> bytes | None:
     """Replace template placeholders in request bodies."""
     if body is None:
         return None
@@ -296,10 +296,10 @@ def resolve_body(body: Optional[dict], seq: int) -> Optional[bytes]:
 def _do_http_request(
     method: str,
     url: str,
-    body: Optional[bytes],
+    body: bytes | None,
     headers: dict[str, str],
     timeout: float,
-) -> tuple[int, Optional[str]]:
+) -> tuple[int, str | None]:
     """
     Perform a single HTTP request using http.client (stdlib).
     Uses persistent connections (keep-alive) for connection pooling.
@@ -449,7 +449,7 @@ class StressEngine:
         """
         cfg = self.config
         print(f"\n{'=' * 66}")
-        print(f"  STRESS HARNESS — starting run")
+        print("  STRESS HARNESS — starting run")
         print(f"{'=' * 66}")
         print(f"  Target:     {cfg.target_url}")
         print(f"  Rate:       {cfg.rate} req/s")
@@ -479,9 +479,9 @@ class StressEngine:
 
                 # Compute current rate (with optional ramp-up)
                 if cfg.ramp_up > 0 and elapsed < cfg.ramp_up:
-                    current_rate = max(1, int(cfg.rate * (elapsed / cfg.ramp_up)))
+                    max(1, int(cfg.rate * (elapsed / cfg.ramp_up)))
                 else:
-                    current_rate = cfg.rate
+                    pass
 
                 # Schedule time for THIS request
                 scheduled_at = start + (request_idx / cfg.rate)
@@ -531,10 +531,8 @@ class StressEngine:
 
             self._stop = True
             reporter_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await reporter_task
-            except asyncio.CancelledError:
-                pass
 
             pool.shutdown(wait=False)
 
@@ -714,10 +712,8 @@ async def async_main():
     # Graceful shutdown on Ctrl+C
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
+        with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, engine.stop)
-        except NotImplementedError:
-            pass
 
     mock_server = None
     if args.self_test:

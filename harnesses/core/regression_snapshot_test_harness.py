@@ -8,6 +8,7 @@ Includes a mock HTTP server on a dynamic port (default 18990).
 
 from __future__ import annotations
 
+import builtins
 import dataclasses
 import difflib
 import hashlib
@@ -21,8 +22,9 @@ import time
 import traceback
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Snapshot dataclass
@@ -43,7 +45,7 @@ class Snapshot:
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     @classmethod
-    def create(cls, name: str, value: Any) -> "Snapshot":
+    def create(cls, name: str, value: Any) -> Snapshot:
         """Create a new Snapshot, computing the checksum automatically."""
         checksum = cls._compute_checksum(value)
         created_at = datetime.now(timezone.utc).isoformat()
@@ -62,7 +64,7 @@ class Snapshot:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Snapshot":
+    def from_dict(cls, data: dict) -> Snapshot:
         return cls(
             name=data["name"],
             value=data["value"],
@@ -78,7 +80,7 @@ class Snapshot:
 class SnapshotStore:
     """Persists snapshots as JSON files inside a directory."""
 
-    def __init__(self, directory: Optional[str] = None) -> None:
+    def __init__(self, directory: str | None = None) -> None:
         if directory is None:
             directory = tempfile.mkdtemp(prefix="snapshot_store_")
         self.directory = directory
@@ -96,12 +98,12 @@ class SnapshotStore:
             json.dump(snapshot.to_dict(), fh, indent=2, ensure_ascii=False)
         return snapshot
 
-    def load(self, name: str) -> Optional[Snapshot]:
+    def load(self, name: str) -> Snapshot | None:
         """Load a snapshot by name; returns None if it does not exist."""
         path = self._path(name)
         if not os.path.isfile(path):
             return None
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
         return Snapshot.from_dict(data)
 
@@ -117,7 +119,7 @@ class SnapshotStore:
             return True
         return False
 
-    def list(self) -> List[str]:
+    def list(self) -> builtins.list[str]:
         """Return a sorted list of all snapshot names."""
         names = []
         for fname in os.listdir(self.directory):
@@ -144,8 +146,8 @@ class ComparisonResult:
     """Outcome of a single snapshot comparison."""
     match: bool
     mode: str
-    diff: Optional[str] = None        # unified diff text when available
-    message: Optional[str] = None
+    diff: str | None = None        # unified diff text when available
+    message: str | None = None
 
     def __bool__(self) -> bool:
         return self.match
@@ -212,7 +214,7 @@ class SnapshotComparator:
                 f"compare_lines: stored snapshot value must be str, got {type(stored).__name__}"
             )
 
-        def _lines(text: str) -> List[str]:
+        def _lines(text: str) -> list[str]:
             lines = text.splitlines(keepends=True)
             if ignore_whitespace:
                 lines = [line.strip() + "\n" for line in lines]
@@ -269,8 +271,8 @@ class RegressionResult:
     test_name: str
     passed: bool
     first_run: bool          # True when no snapshot existed and one was created
-    comparison: Optional[ComparisonResult] = None
-    error: Optional[str] = None
+    comparison: ComparisonResult | None = None
+    error: str | None = None
     duration_seconds: float = 0.0
 
     @property
@@ -290,11 +292,11 @@ class RegressionTest:
 @dataclasses.dataclass
 class SuiteReport:
     """Aggregate results for a test suite run."""
-    results: List[RegressionResult] = dataclasses.field(default_factory=list)
+    results: list[RegressionResult] = dataclasses.field(default_factory=list)
     started_at: str = dataclasses.field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
-    finished_at: Optional[str] = None
+    finished_at: str | None = None
 
     @property
     def total(self) -> int:
@@ -394,7 +396,7 @@ class RegressionRunner:
             duration_seconds=duration,
         )
 
-    def run_all(self, tests: List[RegressionTest]) -> SuiteReport:
+    def run_all(self, tests: list[RegressionTest]) -> SuiteReport:
         """Run a list of tests and return an aggregate SuiteReport."""
         report = SuiteReport()
         for test in tests:
@@ -517,7 +519,7 @@ class MockRegressionServer:
 
     def __init__(
         self,
-        store: Optional[SnapshotStore] = None,
+        store: SnapshotStore | None = None,
         port: int = 0,   # 0 = let the OS pick
     ) -> None:
         self.store = store or SnapshotStore()
@@ -531,8 +533,8 @@ class MockRegressionServer:
 
         _Handler.store = store_ref  # type: ignore[attr-defined]
         self._handler_class = _Handler
-        self._server: Optional[http.server.HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: http.server.HTTPServer | None = None
+        self._thread: threading.Thread | None = None
 
     def start(self) -> None:
         self._server = http.server.HTTPServer(
@@ -558,7 +560,7 @@ class MockRegressionServer:
     def base_url(self) -> str:
         return f"http://127.0.0.1:{self.port}"
 
-    def __enter__(self) -> "MockRegressionServer":
+    def __enter__(self) -> MockRegressionServer:
         self.start()
         return self
 
@@ -569,7 +571,7 @@ class MockRegressionServer:
     # Convenience HTTP helpers
     # ------------------------------------------------------------------
 
-    def get(self, path: str) -> Tuple[int, Any]:
+    def get(self, path: str) -> tuple[int, Any]:
         url = self.base_url + path
         req = urllib.request.Request(url, method="GET")
         try:
@@ -578,7 +580,7 @@ class MockRegressionServer:
         except urllib.error.HTTPError as exc:
             return exc.code, json.loads(exc.read())
 
-    def post(self, path: str, value: Any) -> Tuple[int, Any]:
+    def post(self, path: str, value: Any) -> tuple[int, Any]:
         url = self.base_url + path
         body = json.dumps(value).encode("utf-8")
         req = urllib.request.Request(
@@ -593,7 +595,7 @@ class MockRegressionServer:
         except urllib.error.HTTPError as exc:
             return exc.code, json.loads(exc.read())
 
-    def delete(self, path: str) -> Tuple[int, Any]:
+    def delete(self, path: str) -> tuple[int, Any]:
         url = self.base_url + path
         req = urllib.request.Request(url, method="DELETE")
         try:
@@ -607,12 +609,12 @@ class MockRegressionServer:
 # Convenience factory functions
 # ---------------------------------------------------------------------------
 
-def make_store(directory: Optional[str] = None) -> SnapshotStore:
+def make_store(directory: str | None = None) -> SnapshotStore:
     """Create a SnapshotStore (temp dir if directory is None)."""
     return SnapshotStore(directory)
 
 
-def make_runner(store: Optional[SnapshotStore] = None) -> RegressionRunner:
+def make_runner(store: SnapshotStore | None = None) -> RegressionRunner:
     """Create a RegressionRunner with an optional existing store."""
     return RegressionRunner(store or make_store())
 

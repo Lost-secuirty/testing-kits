@@ -6,40 +6,35 @@ Pure stdlib, zero external dependencies.
 import gzip
 import io
 import os
-import struct
 import sys
-import time
 import unittest
-import urllib.request
 import urllib.error
-import zlib
+import urllib.request
 import zipfile
+import zlib
 
 # Ensure parent dir is importable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from harnesses._teeth import verify
 from harnesses.security.upload_test_harness import (
-    MultipartParser,
+    TEETH,
+    ContentTypeSniffer,
     DecompressionBombChecker,
     DecompressionBombError,
-    ContentTypeSniffer,
-    SizeLimitChecker,
     FilenameSanitizer,
-    PartialStreamTester,
-    UploadPart,
-    UploadResult,
-    UploadReport,
-    MockUploadHandler,
     MockUploadServer,
-    build_multipart_body,
+    MultipartParser,
+    PartialStreamTester,
+    SizeLimitChecker,
+    UploadPart,
+    UploadReport,
+    UploadResult,
     UploadValidator,
-    DEFAULT_ALLOWED_TYPES,
-    TEETH,
-    prove,
+    build_multipart_body,
     oracle_validate,
+    prove,
 )
-
 
 # ===========================================================================
 # Helpers
@@ -271,10 +266,10 @@ class TestMultipartParserBasic(unittest.TestCase):
         self.assertEqual(parts[0].content_type, "text/plain")
 
     def test_unicode_field_value(self):
-        body = self._build([{"name": "msg", "data": "héllo wörld".encode("utf-8")}])
+        body = self._build([{"name": "msg", "data": "héllo wörld".encode()}])
         parser = MultipartParser("BOUNDARY")
         parts, _ = parser.parse(body)
-        self.assertEqual(parts[0].data, "héllo wörld".encode("utf-8"))
+        self.assertEqual(parts[0].data, "héllo wörld".encode())
 
     def test_complex_boundary(self):
         boundary = "---=_Part_123_456789.0987654321"
@@ -453,7 +448,7 @@ class TestDecompressionBombChecker(unittest.TestCase):
 
     def test_zip_nested_depth_limit(self):
         """Nested zip exceeding max_depth should raise."""
-        checker = DecompressionBombChecker(max_output_bytes=10 * 1024 * 1024,
+        DecompressionBombChecker(max_output_bytes=10 * 1024 * 1024,
                                            max_ratio=100, max_depth=1)
         # Create inner zip
         inner = make_zip({"inner.txt": b"deep content"})

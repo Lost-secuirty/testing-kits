@@ -32,9 +32,10 @@ import os
 import random
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 
 @dataclass
@@ -135,7 +136,7 @@ def audit(fn: Callable[[], Any], config: AuditConfig) -> AuditResult:
 
     # Vary time only.
     samples = []
-    for i in range(config.iterations):
+    for _ in range(config.iterations):
         with _MockEnv(True, False, False, False, seed=rng.randint(1, 10_000)):
             samples.append(_capture(fn))
     if len({s for s in samples}) > 1:
@@ -143,7 +144,7 @@ def audit(fn: Callable[[], Any], config: AuditConfig) -> AuditResult:
 
     # Vary random only.
     samples = []
-    for i in range(config.iterations):
+    for _ in range(config.iterations):
         with _MockEnv(False, True, False, False, seed=rng.randint(1, 10_000)):
             samples.append(_capture(fn))
     if len({s for s in samples}) > 1:
@@ -160,7 +161,7 @@ def audit(fn: Callable[[], Any], config: AuditConfig) -> AuditResult:
 
     # Vary $HOME only.
     samples = []
-    for i in range(config.iterations):
+    for _ in range(config.iterations):
         with _MockEnv(False, False, False, True, seed=rng.randint(1, 10_000)):
             samples.append(_capture(fn))
     if len({s for s in samples}) > 1:
@@ -189,7 +190,7 @@ def audit_suite(fns: list[Callable], config: AuditConfig) -> list[AuditResult]:
         shuffled = list(fns)
         rng.shuffle(shuffled)
         run = {id(fn): _capture(fn) for fn in shuffled}
-        for fn, expected in zip(fns, baseline):
+        for fn, expected in zip(fns, baseline, strict=False):
             got = run[id(fn)]
             if got != expected:
                 order_failures[getattr(fn, "__name__", "anon")] = True

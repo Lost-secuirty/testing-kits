@@ -13,25 +13,25 @@ Tests retry-safety and idempotency patterns including:
 - Mock HTTP server with idempotency key enforcement
 """
 
-import json
-import threading
-import time
-import uuid
 import http.server
-import socket
-import urllib.request
-import urllib.error
-from enum import Enum
-from typing import Any, Dict, Optional, Callable
-from dataclasses import dataclass, field
+import json
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+import threading
+import time
+import urllib.error
+import urllib.request
+import uuid
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path as _Path
+from typing import Any
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Teeth  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Enums and Data Types
@@ -47,10 +47,10 @@ class IdempotencyState(Enum):
 class IdempotencyEntry:
     key: str
     state: IdempotencyState
-    response: Optional[Any] = None
-    error: Optional[str] = None
+    response: Any | None = None
+    error: str | None = None
     created_at: float = field(default_factory=time.time)
-    ttl: Optional[float] = None  # seconds; None = never expires
+    ttl: float | None = None  # seconds; None = never expires
 
     def is_expired(self) -> bool:
         if self.ttl is None:
@@ -70,10 +70,10 @@ class IdempotencyStore:
     """
 
     def __init__(self):
-        self._store: Dict[str, IdempotencyEntry] = {}
+        self._store: dict[str, IdempotencyEntry] = {}
         self._lock = threading.Lock()
 
-    def start(self, key: str, ttl: Optional[float] = None) -> bool:
+    def start(self, key: str, ttl: float | None = None) -> bool:
         """
         Atomically check if key exists; if not, insert with PENDING state.
         Returns True if this call "won" the slot (first to register).
@@ -108,7 +108,7 @@ class IdempotencyStore:
             entry.state = IdempotencyState.FAILED
             entry.error = error
 
-    def get(self, key: str) -> Optional[IdempotencyEntry]:
+    def get(self, key: str) -> IdempotencyEntry | None:
         """Return the entry for key, or None if not found."""
         with self._lock:
             entry = self._store.get(key)
@@ -157,7 +157,7 @@ class StateOnlyStore:
     """
 
     def __init__(self):
-        self._store: Dict[str, Dict[str, Any]] = {}
+        self._store: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
 
     def start(self, key: str) -> bool:
@@ -178,7 +178,7 @@ class StateOnlyStore:
             # BUG: response is not stored
             self._store[key]["state"] = IdempotencyState.COMPLETED
 
-    def get_response(self, key: str) -> Optional[Any]:
+    def get_response(self, key: str) -> Any | None:
         """Returns None because response was never saved — the bug."""
         with self._lock:
             entry = self._store.get(key)
@@ -187,7 +187,7 @@ class StateOnlyStore:
             # BUG: can never return original response
             return entry.get("response", None)
 
-    def get_state(self, key: str) -> Optional[IdempotencyState]:
+    def get_state(self, key: str) -> IdempotencyState | None:
         with self._lock:
             entry = self._store.get(key)
             if entry is None:
@@ -205,12 +205,12 @@ class KeyDedupTester:
     cached response without re-executing the side effect.
     """
 
-    def __init__(self, store: Optional[IdempotencyStore] = None):
+    def __init__(self, store: IdempotencyStore | None = None):
         self.store = store or IdempotencyStore()
         self.side_effect_count = 0
         self._lock = threading.Lock()
 
-    def _execute_side_effect(self, payload: Any) -> Dict[str, Any]:
+    def _execute_side_effect(self, payload: Any) -> dict[str, Any]:
         """Simulates a non-idempotent side effect (e.g., charging a card)."""
         with self._lock:
             self.side_effect_count += 1
@@ -220,7 +220,7 @@ class KeyDedupTester:
             "execution_count": self.side_effect_count
         }
 
-    def process_request(self, idempotency_key: str, payload: Any) -> Dict[str, Any]:
+    def process_request(self, idempotency_key: str, payload: Any) -> dict[str, Any]:
         """
         Process a request with deduplication.
         If key already exists and is COMPLETED, return cached response.
@@ -267,7 +267,7 @@ class RetryConvergenceTester:
     cached response each time (idempotent replay convergence).
     """
 
-    def __init__(self, store: Optional[IdempotencyStore] = None):
+    def __init__(self, store: IdempotencyStore | None = None):
         self.store = store or IdempotencyStore()
         self.execution_count = 0
 
@@ -315,12 +315,12 @@ class ConcurrentDedupTester:
     Others get the cached response.
     """
 
-    def __init__(self, store: Optional[IdempotencyStore] = None):
+    def __init__(self, store: IdempotencyStore | None = None):
         self.store = store or IdempotencyStore()
         self.execution_count = 0
         self._exec_lock = threading.Lock()
 
-    def _side_effect(self, payload: Any) -> Dict[str, Any]:
+    def _side_effect(self, payload: Any) -> dict[str, Any]:
         with self._exec_lock:
             self.execution_count += 1
         # Simulate some work
@@ -379,10 +379,10 @@ class InProgressTester:
     returns 409 Conflict (or a PENDING status) rather than executing again.
     """
 
-    def __init__(self, store: Optional[IdempotencyStore] = None):
+    def __init__(self, store: IdempotencyStore | None = None):
         self.store = store or IdempotencyStore()
 
-    def handle_request(self, key: str, payload: Any, execution_fn: Callable) -> Dict[str, Any]:
+    def handle_request(self, key: str, payload: Any, execution_fn: Callable) -> dict[str, Any]:
         """
         Returns:
           - 409 dict if key is PENDING
@@ -420,7 +420,7 @@ class TTLTester:
     Verifies that entries expire after TTL and are cleaned up.
     """
 
-    def __init__(self, store: Optional[IdempotencyStore] = None):
+    def __init__(self, store: IdempotencyStore | None = None):
         self.store = store or IdempotencyStore()
 
     def add_entry_with_ttl(self, key: str, response: Any, ttl: float) -> None:
@@ -474,7 +474,7 @@ class ResponsePersistenceTester:
         self.buggy_store.complete(key, response)  # Response is NOT saved
         return self.buggy_store.get_response(key)  # Returns None
 
-    def demonstrate_failure(self, key: str, response: Any) -> Dict[str, Any]:
+    def demonstrate_failure(self, key: str, response: Any) -> dict[str, Any]:
         """
         Demonstrates that:
         - Correct store returns original response on replay
@@ -581,7 +581,7 @@ class SafeMethodTester:
         """
         return method.upper() in {"GET", "HEAD", "OPTIONS", "TRACE"}
 
-    def classify(self, method: str) -> Dict[str, Any]:
+    def classify(self, method: str) -> dict[str, Any]:
         """Return full classification of an HTTP method."""
         m = method.upper()
         return {
@@ -617,7 +617,7 @@ class MockIdempotencyHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # Suppress default logging
 
-    def _send_json(self, status_code: int, data: Dict[str, Any]) -> None:
+    def _send_json(self, status_code: int, data: dict[str, Any]) -> None:
         body = json.dumps(data).encode("utf-8")
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json")
@@ -643,7 +643,7 @@ class MockIdempotencyHandler(http.server.BaseHTTPRequestHandler):
         self._send_json(200, {"method": "DELETE", "path": self.path, "idempotent": True})
 
     def do_PUT(self):
-        body = self._read_body()
+        self._read_body()
         self._send_json(200, {"method": "PUT", "path": self.path, "idempotent": True})
 
     def do_POST(self):
@@ -728,7 +728,7 @@ class MockIdempotencyServer:
 
     DEFAULT_PORT = 19070
 
-    def __init__(self, port: int = 0, store: Optional[IdempotencyStore] = None):
+    def __init__(self, port: int = 0, store: IdempotencyStore | None = None):
         """
         port=0 means OS assigns a free port (recommended for tests).
         port=DEFAULT_PORT (19070) uses the default port.
@@ -783,7 +783,7 @@ def generate_idempotency_key() -> str:
     return str(uuid.uuid4())
 
 
-def http_post(url: str, data: Dict, headers: Optional[Dict] = None) -> Dict[str, Any]:
+def http_post(url: str, data: dict, headers: dict | None = None) -> dict[str, Any]:
     """Simple HTTP POST helper using stdlib urllib."""
     body = json.dumps(data).encode("utf-8")
     req_headers = {"Content-Type": "application/json"}
@@ -804,7 +804,7 @@ def http_post(url: str, data: Dict, headers: Optional[Dict] = None) -> Dict[str,
         }
 
 
-def http_get(url: str) -> Dict[str, Any]:
+def http_get(url: str) -> dict[str, Any]:
     """Simple HTTP GET helper using stdlib urllib."""
     req = urllib.request.Request(url, method="GET")
     try:

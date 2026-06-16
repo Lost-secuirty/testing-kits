@@ -3,10 +3,7 @@ Unit tests for scraper_test_harness.py
 46 tests covering all major components.
 """
 
-import threading
-import time
 import unittest
-import urllib.parse
 
 from harnesses._teeth import verify
 from harnesses.core.scraper_test_harness import (
@@ -92,18 +89,18 @@ class TestSimpleHTMLParser(unittest.TestCase):
 
     def test_get_links_hrefs(self):
         links = self.parser.get_links()
-        hrefs = [l['href'] for l in links]
+        hrefs = [link['href'] for link in links]
         self.assertIn('/page2', hrefs)
         self.assertIn('https://example.com', hrefs)
 
     def test_get_links_with_base_url(self):
         links = self.parser.get_links(base_url='http://test.local')
-        hrefs = [l['href'] for l in links]
+        hrefs = [link['href'] for link in links]
         self.assertIn('http://test.local/page2', hrefs)
 
     def test_get_links_text(self):
         links = self.parser.get_links()
-        texts = [l['text'] for l in links]
+        texts = [link['text'] for link in links]
         self.assertIn('Next Page', texts)
 
     def test_get_images_count(self):

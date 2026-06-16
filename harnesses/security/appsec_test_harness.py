@@ -11,15 +11,12 @@ import ipaddress
 import json
 import pickle
 import re
-import struct
 import threading
 import time
 import urllib.parse
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, Dict, List, Optional, Tuple
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # SecFinding & AppSecReport
@@ -42,12 +39,12 @@ class SecFinding:
 
 @dataclass
 class AppSecReport:
-    findings: List[SecFinding] = field(default_factory=list)
+    findings: list[SecFinding] = field(default_factory=list)
 
     def add(self, finding: SecFinding) -> None:
         self.findings.append(finding)
 
-    def counts_by_severity(self) -> Dict[str, int]:
+    def counts_by_severity(self) -> dict[str, int]:
         counts = {s: 0 for s in SEVERITY_ORDER}
         for f in self.findings:
             counts[f.severity] += 1
@@ -95,13 +92,13 @@ class SSRFChecker:
     check(url) -> (allowed: bool, reason: str)
     """
 
-    def __init__(self, allowed_hosts: Optional[List[str]] = None,
-                 allowed_schemes: Optional[List[str]] = None):
-        self.allowed_hosts: List[str] = [h.lower() for h in (allowed_hosts or [])]
-        self.allowed_schemes: List[str] = [s.lower() for s in (allowed_schemes or ["https", "http"])]
+    def __init__(self, allowed_hosts: list[str] | None = None,
+                 allowed_schemes: list[str] | None = None):
+        self.allowed_hosts: list[str] = [h.lower() for h in (allowed_hosts or [])]
+        self.allowed_schemes: list[str] = [s.lower() for s in (allowed_schemes or ["https", "http"])]
 
     # ------------------------------------------------------------------
-    def check(self, url: str) -> Tuple[bool, str]:
+    def check(self, url: str) -> tuple[bool, str]:
         if not url or not url.strip():
             return False, "Empty URL"
 
@@ -181,7 +178,7 @@ class DeserializationChecker:
     Detects dangerous deserialization patterns without executing payloads.
     """
 
-    def check_pickle(self, data: bytes) -> Tuple[bool, str]:
+    def check_pickle(self, data: bytes) -> tuple[bool, str]:
         """Returns (dangerous, reason)."""
         if not isinstance(data, bytes):
             return False, "Not bytes"
@@ -197,14 +194,14 @@ class DeserializationChecker:
                 return True, f"Dangerous pickle opcode '{opcode_name}' at offset {i}"
         return False, "No dangerous opcodes found"
 
-    def check_yaml(self, yaml_str: str) -> Tuple[bool, str]:
+    def check_yaml(self, yaml_str: str) -> tuple[bool, str]:
         """Returns (dangerous, reason)."""
         m = _PYYAML_DANGEROUS.search(yaml_str)
         if m:
             return True, f"Dangerous PyYAML tag: {m.group(0)}"
         return False, "No dangerous YAML tags found"
 
-    def check_java(self, data: bytes) -> Tuple[bool, str]:
+    def check_java(self, data: bytes) -> tuple[bool, str]:
         """Returns (dangerous, reason)."""
         if not isinstance(data, bytes):
             return False, "Not bytes"
@@ -212,7 +209,7 @@ class DeserializationChecker:
             return True, "Java serialization magic bytes detected (0xACED)"
         return False, "No Java serialization magic bytes"
 
-    def check(self, data: Any) -> Tuple[bool, str]:
+    def check(self, data: Any) -> tuple[bool, str]:
         """
         Auto-detect format and check.
         Accepts bytes (pickle/java check) or str (yaml check).
@@ -253,14 +250,14 @@ class JWTChecker:
     Parses and validates JWT tokens without external libraries.
     """
 
-    def __init__(self, allowed_algorithms: Optional[List[str]] = None,
-                 allowed_issuers: Optional[List[str]] = None,
-                 allowed_audiences: Optional[List[str]] = None):
+    def __init__(self, allowed_algorithms: list[str] | None = None,
+                 allowed_issuers: list[str] | None = None,
+                 allowed_audiences: list[str] | None = None):
         self.allowed_algorithms = [a.upper() for a in (allowed_algorithms or ["HS256"])]
         self.allowed_issuers = allowed_issuers  # None = no check
         self.allowed_audiences = allowed_audiences  # None = no check
 
-    def decode_token(self, token: str) -> Tuple[Optional[Dict], Optional[Dict], Optional[str]]:
+    def decode_token(self, token: str) -> tuple[dict | None, dict | None, str | None]:
         """
         Returns (header, payload, signature_b64) or raises ValueError.
         """
@@ -272,10 +269,10 @@ class JWTChecker:
             payload = json.loads(_b64url_decode(parts[1]))
             signature = parts[2]
         except Exception as exc:
-            raise ValueError(f"JWT decode error: {exc}")
+            raise ValueError(f"JWT decode error: {exc}") from exc
         return header, payload, signature
 
-    def check_alg_none(self, token: str) -> Tuple[bool, str]:
+    def check_alg_none(self, token: str) -> tuple[bool, str]:
         """Returns (vulnerable, reason)."""
         try:
             header, _, _ = self.decode_token(token)
@@ -286,7 +283,7 @@ class JWTChecker:
             return True, f"Algorithm 'none' attack detected: alg={header.get('alg')!r}"
         return False, "Algorithm is not 'none'"
 
-    def check_algorithm_confusion(self, token: str) -> Tuple[bool, str]:
+    def check_algorithm_confusion(self, token: str) -> tuple[bool, str]:
         """
         Detect HS/RS algorithm confusion: token claims RS* but we'd verify with HS*.
         Returns (confused, reason).
@@ -300,7 +297,7 @@ class JWTChecker:
             return True, f"Algorithm '{alg}' not in allowed list {self.allowed_algorithms}"
         return False, "Algorithm is allowed"
 
-    def check_expiry(self, token: str) -> Tuple[bool, str]:
+    def check_expiry(self, token: str) -> tuple[bool, str]:
         """Returns (expired, reason)."""
         try:
             _, payload, _ = self.decode_token(token)
@@ -314,7 +311,7 @@ class JWTChecker:
             return True, f"Token expired at {exp}, current time {now:.0f}"
         return False, f"Token valid until {exp}"
 
-    def check_issuer(self, token: str) -> Tuple[bool, str]:
+    def check_issuer(self, token: str) -> tuple[bool, str]:
         """Returns (invalid, reason)."""
         if self.allowed_issuers is None:
             return False, "Issuer check not configured"
@@ -329,7 +326,7 @@ class JWTChecker:
             return True, f"Issuer '{iss}' not in allowed list"
         return False, f"Issuer '{iss}' is allowed"
 
-    def check_audience(self, token: str) -> Tuple[bool, str]:
+    def check_audience(self, token: str) -> tuple[bool, str]:
         """Returns (invalid, reason)."""
         if self.allowed_audiences is None:
             return False, "Audience check not configured"
@@ -341,17 +338,14 @@ class JWTChecker:
         if aud is None:
             return True, "Missing 'aud' claim"
         # aud can be string or list
-        if isinstance(aud, str):
-            aud_list = [aud]
-        else:
-            aud_list = list(aud)
+        aud_list = [aud] if isinstance(aud, str) else list(aud)
         # At least one must match
         for a in aud_list:
             if a in self.allowed_audiences:
                 return False, f"Audience '{a}' is allowed"
         return True, f"Audience {aud_list} not in allowed list"
 
-    def sign_hs256(self, payload: Dict, secret: str, extra_header: Optional[Dict] = None) -> str:
+    def sign_hs256(self, payload: dict, secret: str, extra_header: dict | None = None) -> str:
         """Create a signed HS256 JWT."""
         header = {"alg": "HS256", "typ": "JWT"}
         if extra_header:
@@ -363,7 +357,7 @@ class JWTChecker:
         sig_b64 = _b64url_encode(sig)
         return f"{header_b64}.{payload_b64}.{sig_b64}"
 
-    def verify_hs256(self, token: str, secret: str) -> Tuple[bool, str]:
+    def verify_hs256(self, token: str, secret: str) -> tuple[bool, str]:
         """Returns (valid, reason)."""
         parts = token.split(".")
         if len(parts) != 3:
@@ -381,7 +375,7 @@ class JWTChecker:
             return True, "Signature valid"
         return False, "Signature mismatch"
 
-    def validate(self, token: str, secret: Optional[str] = None) -> AppSecReport:
+    def validate(self, token: str, secret: str | None = None) -> AppSecReport:
         """Full validation — returns AppSecReport."""
         report = AppSecReport()
 
@@ -428,10 +422,10 @@ class OpenRedirectChecker:
     Validates redirect URLs against allowed domains.
     """
 
-    def __init__(self, allowed_domains: Optional[List[str]] = None):
-        self.allowed_domains: List[str] = [d.lower() for d in (allowed_domains or [])]
+    def __init__(self, allowed_domains: list[str] | None = None):
+        self.allowed_domains: list[str] = [d.lower() for d in (allowed_domains or [])]
 
-    def check(self, redirect_url: str) -> Tuple[bool, str]:
+    def check(self, redirect_url: str) -> tuple[bool, str]:
         """Returns (safe, reason)."""
         if not redirect_url or not redirect_url.strip():
             return False, "Empty redirect URL"
@@ -495,27 +489,27 @@ class MassAssignmentChecker:
     Detects attempted assignment of sensitive fields.
     """
 
-    def __init__(self, allowed_fields: List[str],
-                 sensitive_fields: Optional[List[str]] = None):
+    def __init__(self, allowed_fields: list[str],
+                 sensitive_fields: list[str] | None = None):
         self.allowed_fields: set = set(allowed_fields)
         self.sensitive_fields: set = (
             set(sensitive_fields) if sensitive_fields is not None
             else _DEFAULT_SENSITIVE_FIELDS
         )
 
-    def filter(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def filter(self, data: dict[str, Any]) -> dict[str, Any]:
         """Return only the allowed fields from data."""
         return {k: v for k, v in data.items() if k in self.allowed_fields}
 
-    def detect_violations(self, data: Dict[str, Any]) -> List[str]:
+    def detect_violations(self, data: dict[str, Any]) -> list[str]:
         """Return list of field names that are not in allowed list."""
         return [k for k in data if k not in self.allowed_fields]
 
-    def detect_sensitive_violations(self, data: Dict[str, Any]) -> List[str]:
+    def detect_sensitive_violations(self, data: dict[str, Any]) -> list[str]:
         """Return list of sensitive field names attempted in data."""
         return [k for k in data if k in self.sensitive_fields and k not in self.allowed_fields]
 
-    def check(self, data: Dict[str, Any]) -> Tuple[Dict[str, Any], AppSecReport]:
+    def check(self, data: dict[str, Any]) -> tuple[dict[str, Any], AppSecReport]:
         """
         Filter data and return (filtered_data, report).
         Report contains findings for any sensitive field violations.
@@ -562,7 +556,7 @@ class XXEChecker:
     Scans XML strings for XXE patterns without parsing/resolving them.
     """
 
-    def check(self, xml_string: str) -> Tuple[bool, str]:
+    def check(self, xml_string: str) -> tuple[bool, str]:
         """Returns (dangerous, reason)."""
         if not isinstance(xml_string, str):
             xml_string = xml_string.decode("utf-8", errors="replace")
@@ -580,7 +574,7 @@ class XXEChecker:
 
         return False, "No DOCTYPE or ENTITY definitions found"
 
-    def check_bytes(self, xml_bytes: bytes) -> Tuple[bool, str]:
+    def check_bytes(self, xml_bytes: bytes) -> tuple[bool, str]:
         return self.check(xml_bytes.decode("utf-8", errors="replace"))
 
 
@@ -711,7 +705,7 @@ class MockAppSecHandler(BaseHTTPRequestHandler):
 # Server start/stop helpers
 # ---------------------------------------------------------------------------
 
-def start_mock_server(port: int = 0) -> Tuple[HTTPServer, int]:
+def start_mock_server(port: int = 0) -> tuple[HTTPServer, int]:
     """Start the mock server. Returns (server, port)."""
     server = HTTPServer(("127.0.0.1", port), MockAppSecHandler)
     actual_port = server.server_address[1]

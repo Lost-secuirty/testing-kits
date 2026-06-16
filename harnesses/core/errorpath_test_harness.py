@@ -6,18 +6,15 @@ Mock HTTP server on dynamic port (default 19120).
 
 from __future__ import annotations
 
+import json
+import socket
+import sys
 import threading
 import time
-import socket
-import json
-import traceback
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from io import StringIO
-import sys
-import concurrent.futures
-
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Dataclasses
@@ -43,13 +40,13 @@ class NegativeCaseResult:
 @dataclass
 class ErrorPathReport:
     """Aggregate report for an error-path test run."""
-    branch_results: List[BranchResult] = field(default_factory=list)
-    negative_results: List[NegativeCaseResult] = field(default_factory=list)
-    exception_results: List[Dict[str, Any]] = field(default_factory=list)
-    null_results: List[Dict[str, Any]] = field(default_factory=list)
-    boundary_results: List[Dict[str, Any]] = field(default_factory=list)
-    timeout_results: List[Dict[str, Any]] = field(default_factory=list)
-    cleanup_results: List[Dict[str, Any]] = field(default_factory=list)
+    branch_results: list[BranchResult] = field(default_factory=list)
+    negative_results: list[NegativeCaseResult] = field(default_factory=list)
+    exception_results: list[dict[str, Any]] = field(default_factory=list)
+    null_results: list[dict[str, Any]] = field(default_factory=list)
+    boundary_results: list[dict[str, Any]] = field(default_factory=list)
+    timeout_results: list[dict[str, Any]] = field(default_factory=list)
+    cleanup_results: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def total_tests(self) -> int:
@@ -93,10 +90,10 @@ class CoverageProbe:
     """Records which labelled branches execute."""
 
     def __init__(self) -> None:
-        self._counts: Dict[str, int] = {}
+        self._counts: dict[str, int] = {}
         self._registered: set = set()
 
-    def register(self, labels: List[str]) -> None:
+    def register(self, labels: list[str]) -> None:
         """Pre-register expected labels so never_hit() can report them."""
         for label in labels:
             self._registered.add(label)
@@ -112,7 +109,7 @@ class CoverageProbe:
         """Return True if the label was ever probed."""
         return self._counts.get(label, 0) > 0
 
-    def never_hit(self) -> List[str]:
+    def never_hit(self) -> list[str]:
         """Return labels that were registered but never executed."""
         return [label for label in self._registered
                 if self._counts.get(label, 0) == 0]
@@ -121,11 +118,11 @@ class CoverageProbe:
         """Return number of times a label was probed."""
         return self._counts.get(label, 0)
 
-    def all_labels(self) -> List[str]:
+    def all_labels(self) -> list[str]:
         """Return all known labels."""
         return list(self._registered)
 
-    def get_branch_results(self) -> List[BranchResult]:
+    def get_branch_results(self) -> list[BranchResult]:
         """Return BranchResult list for all registered labels."""
         results = []
         for label in sorted(self._registered):
@@ -156,17 +153,17 @@ class ExceptionPathTester:
     """Forces exception paths and verifies correct behavior."""
 
     def __init__(self) -> None:
-        self._results: List[Dict[str, Any]] = []
+        self._results: list[dict[str, Any]] = []
 
     def test(
         self,
         func: Callable,
         bad_input: Any,
-        expected_exc_type: Type[Exception],
+        expected_exc_type: type[Exception],
         expected_msg_fragment: str = "",
         state_obj: Any = None,
-        state_snapshot_fn: Optional[Callable] = None,
-    ) -> Dict[str, Any]:
+        state_snapshot_fn: Callable | None = None,
+    ) -> dict[str, Any]:
         """
         Call func(bad_input), verifying:
         (a) correct exception type raised
@@ -214,13 +211,13 @@ class ExceptionPathTester:
         self._results.append(result)
         return result
 
-    def results(self) -> List[Dict[str, Any]]:
+    def results(self) -> list[dict[str, Any]]:
         return list(self._results)
 
     def all_passed(self) -> bool:
         return all(r["passed"] for r in self._results)
 
-    def failed(self) -> List[Dict[str, Any]]:
+    def failed(self) -> list[dict[str, Any]]:
         return [r for r in self._results if not r["passed"]]
 
 
@@ -231,19 +228,19 @@ class ExceptionPathTester:
 class NullHandlingTester:
     """Injects None into every parameter position of a function."""
 
-    def __init__(self, allowed_exc_types: Optional[List[Type[Exception]]] = None) -> None:
+    def __init__(self, allowed_exc_types: list[type[Exception]] | None = None) -> None:
         # These exception types are acceptable when None is passed
         self._allowed = set(allowed_exc_types or [TypeError, ValueError])
         # Crashes with unexpected exceptions are failures
         self._crash_types = {AttributeError}
-        self._results: List[Dict[str, Any]] = []
+        self._results: list[dict[str, Any]] = []
 
     def test_function(
         self,
         func: Callable,
-        baseline_args: List[Any],
-        allowed_exc_types: Optional[List[Type[Exception]]] = None,
-    ) -> List[Dict[str, Any]]:
+        baseline_args: list[Any],
+        allowed_exc_types: list[type[Exception]] | None = None,
+    ) -> list[dict[str, Any]]:
         """
         For each positional argument in baseline_args, replace it with None
         and call func. Record whether it handles gracefully (returns a value
@@ -282,7 +279,7 @@ class NullHandlingTester:
 
         return run_results
 
-    def results(self) -> List[Dict[str, Any]]:
+    def results(self) -> list[dict[str, Any]]:
         return list(self._results)
 
     def all_passed(self) -> bool:
@@ -310,7 +307,7 @@ class BoundaryTester:
     ]
 
     def __init__(self) -> None:
-        self._results: List[Dict[str, Any]] = []
+        self._results: list[dict[str, Any]] = []
 
     def test(
         self,
@@ -318,10 +315,10 @@ class BoundaryTester:
         boundary_input: Any,
         label: str = "",
         expect_raises: bool = True,
-        allowed_exc_types: Optional[List[Type[Exception]]] = None,
+        allowed_exc_types: list[type[Exception]] | None = None,
         expect_return_value: Any = None,
-        check_return_fn: Optional[Callable] = None,
-    ) -> Dict[str, Any]:
+        check_return_fn: Callable | None = None,
+    ) -> dict[str, Any]:
         """
         Call func(boundary_input). By default expects an exception to be raised.
         If expect_raises=False, checks the return value or calls check_return_fn.
@@ -375,8 +372,8 @@ class BoundaryTester:
     def test_all_defaults(
         self,
         func: Callable,
-        allowed_exc_types: Optional[List[Type[Exception]]] = None,
-    ) -> List[Dict[str, Any]]:
+        allowed_exc_types: list[type[Exception]] | None = None,
+    ) -> list[dict[str, Any]]:
         """Run all default boundary inputs against func."""
         results = []
         for label, val in self.BOUNDARY_INPUTS:
@@ -384,7 +381,7 @@ class BoundaryTester:
                                      allowed_exc_types=allowed_exc_types))
         return results
 
-    def results(self) -> List[Dict[str, Any]]:
+    def results(self) -> list[dict[str, Any]]:
         return list(self._results)
 
     def all_passed(self) -> bool:
@@ -399,16 +396,16 @@ class TimeoutTester:
     """Calls a slow function with a timeout; verifies clean abort."""
 
     def __init__(self) -> None:
-        self._results: List[Dict[str, Any]] = []
+        self._results: list[dict[str, Any]] = []
 
     def test(
         self,
         func: Callable,
         args: tuple = (),
-        kwargs: Optional[Dict] = None,
+        kwargs: dict | None = None,
         timeout_seconds: float = 1.0,
-        check_no_partial_data: Optional[Callable] = None,
-    ) -> Dict[str, Any]:
+        check_no_partial_data: Callable | None = None,
+    ) -> dict[str, Any]:
         """
         Run func(*args, **kwargs) in a thread. If it doesn't finish within
         timeout_seconds, consider it timed out. Optionally verify no partial
@@ -466,10 +463,10 @@ class TimeoutTester:
         self,
         func: Callable,
         args: tuple = (),
-        kwargs: Optional[Dict] = None,
+        kwargs: dict | None = None,
         timeout_seconds: float = 1.0,
-        check_no_partial_data: Optional[Callable] = None,
-    ) -> Dict[str, Any]:
+        check_no_partial_data: Callable | None = None,
+    ) -> dict[str, Any]:
         """Like test() but fails if the function does NOT time out."""
         kwargs = kwargs or {}
         result = {
@@ -518,7 +515,7 @@ class TimeoutTester:
         self._results.append(result)
         return result
 
-    def results(self) -> List[Dict[str, Any]]:
+    def results(self) -> list[dict[str, Any]]:
         return list(self._results)
 
     def all_passed(self) -> bool:
@@ -533,7 +530,7 @@ class ResourceCleanupTester:
     """Verifies try/finally resource release via acquire/release counters."""
 
     def __init__(self) -> None:
-        self._results: List[Dict[str, Any]] = []
+        self._results: list[dict[str, Any]] = []
 
     def test(
         self,
@@ -541,9 +538,9 @@ class ResourceCleanupTester:
         acquire_fn: Callable,
         release_fn: Callable,
         args: tuple = (),
-        kwargs: Optional[Dict] = None,
+        kwargs: dict | None = None,
         expect_exception: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Run func(*args, **kwargs). Track acquire/release counts via the
         provided callables. A proper implementation always calls release,
@@ -594,8 +591,8 @@ class ResourceCleanupTester:
         self,
         func: Callable,
         args: tuple = (),
-        kwargs: Optional[Dict] = None,
-    ) -> Dict[str, Any]:
+        kwargs: dict | None = None,
+    ) -> dict[str, Any]:
         """
         Simpler API: func receives a counter dict and should increment
         counter['acquired'] and counter['released']. We check for balance.
@@ -627,7 +624,7 @@ class ResourceCleanupTester:
         self._results.append(result)
         return result
 
-    def results(self) -> List[Dict[str, Any]]:
+    def results(self) -> list[dict[str, Any]]:
         return list(self._results)
 
     def all_passed(self) -> bool:
@@ -652,7 +649,7 @@ class MockErrorPathHandler(BaseHTTPRequestHandler):
     """
 
     # Class-level probe storage shared across all handler instances
-    _probe_hits: Dict[str, int] = {}
+    _probe_hits: dict[str, int] = {}
     _probe_lock = threading.Lock()
 
     def log_message(self, format, *args):
@@ -733,7 +730,7 @@ class MockErrorPathHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"status": "error", "message": "unknown path"})
 
     @classmethod
-    def get_probe_hits(cls) -> Dict[str, int]:
+    def get_probe_hits(cls) -> dict[str, int]:
         with cls._probe_lock:
             return dict(cls._probe_hits)
 
@@ -770,10 +767,10 @@ class ErrorPathServer:
 
     def __init__(self, port: int = 0) -> None:
         self.port = find_free_port(port if port else 19120)
-        self._server: Optional[HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: HTTPServer | None = None
+        self._thread: threading.Thread | None = None
 
-    def start(self) -> "ErrorPathServer":
+    def start(self) -> ErrorPathServer:
         self._server = QuietHTTPServer(("127.0.0.1", self.port), MockErrorPathHandler)
         self.port = self._server.server_address[1]
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
@@ -793,7 +790,7 @@ class ErrorPathServer:
     def base_url(self) -> str:
         return f"http://127.0.0.1:{self.port}"
 
-    def __enter__(self) -> "ErrorPathServer":
+    def __enter__(self) -> ErrorPathServer:
         return self.start()
 
     def __exit__(self, *args) -> None:

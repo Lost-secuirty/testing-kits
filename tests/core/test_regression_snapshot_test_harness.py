@@ -5,16 +5,12 @@ Tests for regression_snapshot_test_harness.py
 
 import hashlib
 import json
-import os
-import tempfile
-import time
 import unittest
 
 from harnesses.core.regression_snapshot_test_harness import (
     CompareMode,
     ComparisonResult,
     MockRegressionServer,
-    RegressionResult,
     RegressionRunner,
     RegressionTest,
     Snapshot,
@@ -25,7 +21,6 @@ from harnesses.core.regression_snapshot_test_harness import (
     make_store,
     make_test,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper
@@ -506,7 +501,7 @@ class TestEdgeCases(unittest.TestCase):
         self.store.destroy()
 
     def test_snapshot_with_none_value(self):
-        snap = self.store.save("null_snap", None)
+        self.store.save("null_snap", None)
         loaded = self.store.load("null_snap")
         self.assertIsNone(loaded.value)
         self.assertTrue(loaded.verify_checksum())

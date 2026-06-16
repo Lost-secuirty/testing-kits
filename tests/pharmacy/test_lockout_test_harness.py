@@ -8,8 +8,6 @@ from harnesses.pharmacy.lockout_test_harness import (
     BuggyLockoutManager2,
     FakeClock,
     LockoutManager,
-    LOCKOUT_THRESHOLD,
-    LOCKOUT_SECONDS,
     run_all_scenarios,
 )
 

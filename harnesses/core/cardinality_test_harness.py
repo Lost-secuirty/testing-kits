@@ -25,8 +25,9 @@ from __future__ import annotations
 import argparse
 import sys
 import uuid
-from dataclasses import dataclass, field
-from typing import Any, Callable
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -100,7 +101,7 @@ def emit_metric_labels_bounded(probe: CardinalityProbe, samples: int) -> None:
 
 def emit_metric_labels_unbounded(probe: CardinalityProbe, samples: int) -> None:
     """Request-ID label: unique per request, unbounded — the classic bug."""
-    for i in range(samples):
+    for _i in range(samples):
         probe.emit("request_id", str(uuid.uuid4()))
 
 

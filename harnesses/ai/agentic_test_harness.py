@@ -8,15 +8,13 @@ scripted MockAgent. Pure stdlib, zero external dependencies.
 from __future__ import annotations
 
 import copy
-import dataclasses
 import json
 import threading
 import uuid
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from urllib.parse import urlparse
-
 
 # ---------------------------------------------------------------------------
 # ToolSchema
@@ -27,10 +25,10 @@ class ToolSchema:
     """Schema definition for a single tool."""
     name: str
     description: str
-    required_args: List[str] = field(default_factory=list)
-    optional_args: List[str] = field(default_factory=list)
-    arg_types: Dict[str, str] = field(default_factory=dict)
-    enum_constraints: Dict[str, List[Any]] = field(default_factory=dict)
+    required_args: list[str] = field(default_factory=list)
+    optional_args: list[str] = field(default_factory=list)
+    arg_types: dict[str, str] = field(default_factory=dict)
+    enum_constraints: dict[str, list[Any]] = field(default_factory=dict)
     dangerous: bool = False
 
 
@@ -42,18 +40,18 @@ class ToolRegistry:
     """Register and lookup ToolSchema objects by name."""
 
     def __init__(self) -> None:
-        self._registry: Dict[str, ToolSchema] = {}
+        self._registry: dict[str, ToolSchema] = {}
 
     def register(self, schema: ToolSchema) -> None:
         self._registry[schema.name] = schema
 
-    def lookup(self, name: str) -> Optional[ToolSchema]:
+    def lookup(self, name: str) -> ToolSchema | None:
         return self._registry.get(name)
 
     def is_known(self, name: str) -> bool:
         return name in self._registry
 
-    def all_schemas(self) -> List[ToolSchema]:
+    def all_schemas(self) -> list[ToolSchema]:
         return list(self._registry.values())
 
     def unregister(self, name: str) -> None:
@@ -68,7 +66,7 @@ class ToolRegistry:
 class ToolCall:
     """Represents a single tool invocation by an agent."""
     tool_name: str
-    args: Dict[str, Any] = field(default_factory=dict)
+    args: dict[str, Any] = field(default_factory=dict)
     call_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 
@@ -80,18 +78,18 @@ class MockAgent:
     """A deterministic scripted agent that replays a sequence of ToolCalls."""
 
     def __init__(self) -> None:
-        self._script: List[ToolCall] = []
+        self._script: list[ToolCall] = []
 
     def add_step(self, tool_call: ToolCall) -> None:
         """Append a ToolCall to the agent's script."""
         self._script.append(tool_call)
 
-    def run(self, max_rounds: int = 10) -> List[ToolCall]:
+    def run(self, max_rounds: int = 10) -> list[ToolCall]:
         """
         Execute the scripted sequence up to max_rounds steps.
         Returns the list of executed ToolCalls.
         """
-        executed: List[ToolCall] = []
+        executed: list[ToolCall] = []
         for i, call in enumerate(self._script):
             if i >= max_rounds:
                 break
@@ -110,7 +108,7 @@ class MockAgent:
 class FidelityResult:
     valid_calls: int
     total_calls: int
-    errors: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     @property
     def fidelity_ratio(self) -> float:
@@ -119,7 +117,7 @@ class FidelityResult:
         return self.valid_calls / self.total_calls
 
 
-_PYTHON_TYPE_MAP: Dict[str, type] = {
+_PYTHON_TYPE_MAP: dict[str, type] = {
     "str": str,
     "string": str,
     "int": int,
@@ -164,9 +162,9 @@ class ToolCallFidelityTester:
         self.registry = registry
         self.strict = strict
 
-    def evaluate(self, calls: List[ToolCall]) -> FidelityResult:
+    def evaluate(self, calls: list[ToolCall]) -> FidelityResult:
         valid = 0
-        errors: List[str] = []
+        errors: list[str] = []
 
         for call in calls:
             call_errors = self._validate_call(call)
@@ -177,8 +175,8 @@ class ToolCallFidelityTester:
 
         return FidelityResult(valid_calls=valid, total_calls=len(calls), errors=errors)
 
-    def _validate_call(self, call: ToolCall) -> List[str]:
-        errs: List[str] = []
+    def _validate_call(self, call: ToolCall) -> list[str]:
+        errs: list[str] = []
 
         if not self.registry.is_known(call.tool_name):
             errs.append(f"[{call.call_id}] Unknown tool: '{call.tool_name}'")
@@ -232,7 +230,7 @@ class ToolCallFidelityTester:
 class LoopDetectionResult:
     exceeded_max_rounds: bool
     repeated_signature: bool
-    repeated_signature_details: Optional[str] = None
+    repeated_signature_details: str | None = None
 
     @property
     def loop_detected(self) -> bool:
@@ -257,11 +255,11 @@ class RunawayLoopDetector:
         self.max_rounds = max_rounds
         self.repeat_threshold = repeat_threshold
 
-    def analyze(self, calls: List[ToolCall]) -> LoopDetectionResult:
+    def analyze(self, calls: list[ToolCall]) -> LoopDetectionResult:
         exceeded = len(calls) >= self.max_rounds
 
-        sig_counts: Dict[str, int] = {}
-        repeated_sig: Optional[str] = None
+        sig_counts: dict[str, int] = {}
+        repeated_sig: str | None = None
         for call in calls:
             sig = _call_signature(call)
             sig_counts[sig] = sig_counts.get(sig, 0) + 1
@@ -285,17 +283,17 @@ class StateTurn:
     """A single turn in a multi-turn conversation."""
     tool_call: ToolCall
     # key set in this turn that future turns should use
-    state_key: Optional[str] = None
-    state_value: Optional[Any] = None
+    state_key: str | None = None
+    state_value: Any | None = None
     # if set, verify this key appears in the turn's args
-    verify_state_key: Optional[str] = None
-    verify_state_value: Optional[Any] = None
+    verify_state_key: str | None = None
+    verify_state_value: Any | None = None
 
 
 @dataclass
 class MultiTurnResult:
     passed: bool
-    errors: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
 
 class MultiTurnStateTester:
@@ -305,14 +303,14 @@ class MultiTurnStateTester:
     """
 
     def __init__(self) -> None:
-        self._turns: List[StateTurn] = []
+        self._turns: list[StateTurn] = []
 
     def add_turn(self, turn: StateTurn) -> None:
         self._turns.append(turn)
 
     def run(self) -> MultiTurnResult:
-        state: Dict[str, Any] = {}
-        errors: List[str] = []
+        state: dict[str, Any] = {}
+        errors: list[str] = []
 
         for i, turn in enumerate(self._turns):
             # Store any state emitted by this turn
@@ -342,7 +340,7 @@ class MultiTurnStateTester:
 
 @dataclass
 class SchemaDriftResult:
-    drifts: List[str] = field(default_factory=list)
+    drifts: list[str] = field(default_factory=list)
 
     @property
     def has_drifts(self) -> bool:
@@ -357,7 +355,7 @@ class ArgSchemaDriftTester:
 
     def __init__(self, registry: ToolRegistry) -> None:
         self._registry = registry
-        self._snapshots: Dict[str, ToolSchema] = {}
+        self._snapshots: dict[str, ToolSchema] = {}
 
     def snapshot(self) -> None:
         """Take a snapshot of all current schemas."""
@@ -366,7 +364,7 @@ class ArgSchemaDriftTester:
 
     def detect_drifts(self) -> SchemaDriftResult:
         """Compare current schemas against snapshots."""
-        drifts: List[str] = []
+        drifts: list[str] = []
 
         for name, old in self._snapshots.items():
             new = self._registry.lookup(name)
@@ -414,7 +412,7 @@ class ArgSchemaDriftTester:
 @dataclass
 class PlanVsExecutionResult:
     matches: bool
-    violations: List[str] = field(default_factory=list)
+    violations: list[str] = field(default_factory=list)
 
 
 class PlanVsExecutionTester:
@@ -424,11 +422,11 @@ class PlanVsExecutionTester:
     - Does not skip steps
     """
 
-    def __init__(self, plan: List[str]) -> None:
+    def __init__(self, plan: list[str]) -> None:
         self.plan = plan
 
-    def verify(self, calls: List[ToolCall]) -> PlanVsExecutionResult:
-        violations: List[str] = []
+    def verify(self, calls: list[ToolCall]) -> PlanVsExecutionResult:
+        violations: list[str] = []
         executed_names = [c.tool_name for c in calls]
 
         # Check length
@@ -467,7 +465,7 @@ GUARD_TOOL_NAME = "__confirm__"
 
 @dataclass
 class UnsafeToolUseResult:
-    unsafe_calls: List[str] = field(default_factory=list)
+    unsafe_calls: list[str] = field(default_factory=list)
 
     @property
     def has_unsafe_calls(self) -> bool:
@@ -484,8 +482,8 @@ class UnsafeToolUseTester:
         self.registry = registry
         self.guard_tool = guard_tool
 
-    def analyze(self, calls: List[ToolCall]) -> UnsafeToolUseResult:
-        unsafe: List[str] = []
+    def analyze(self, calls: list[ToolCall]) -> UnsafeToolUseResult:
+        unsafe: list[str] = []
 
         for i, call in enumerate(calls):
             schema = self.registry.lookup(call.tool_name)
@@ -509,9 +507,9 @@ class UnsafeToolUseTester:
 class AgentEvalReport:
     fidelity_ratio: float
     loop_detected: bool
-    schema_drifts: List[str]
-    plan_violations: List[str]
-    unsafe_calls: List[str]
+    schema_drifts: list[str]
+    plan_violations: list[str]
+    unsafe_calls: list[str]
 
     def is_clean(self) -> bool:
         return (
@@ -522,7 +520,7 @@ class AgentEvalReport:
             and not self.unsafe_calls
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "fidelity_ratio": self.fidelity_ratio,
             "loop_detected": self.loop_detected,
@@ -551,7 +549,7 @@ class MockAgenticHandler(BaseHTTPRequestHandler):
 
     # Shared server state; populated by MockAgenticServer
     _registry: ToolRegistry
-    _calls: List[Dict[str, Any]]
+    _calls: list[dict[str, Any]]
     _lock: threading.Lock
 
     def log_message(self, fmt: str, *args: Any) -> None:  # silence default logging
@@ -600,12 +598,12 @@ class MockAgenticHandler(BaseHTTPRequestHandler):
     # Handlers
     # ------------------------------------------------------------------
 
-    def _handle_tool_call(self, body: Dict[str, Any]) -> None:
+    def _handle_tool_call(self, body: dict[str, Any]) -> None:
         tool_name = body.get("tool_name", "")
         args = body.get("args", {})
         call_id = body.get("call_id", str(uuid.uuid4()))
 
-        call = ToolCall(tool_name=tool_name, args=args, call_id=call_id)
+        ToolCall(tool_name=tool_name, args=args, call_id=call_id)
 
         if not self._registry.is_known(tool_name):
             self._send_json(400, {"error": f"Unknown tool '{tool_name}'", "call_id": call_id})
@@ -626,7 +624,7 @@ class MockAgenticHandler(BaseHTTPRequestHandler):
             self._calls.append(record)
         self._send_json(200, {"status": "ok", "call_id": call_id})
 
-    def _handle_register_tool(self, body: Dict[str, Any]) -> None:
+    def _handle_register_tool(self, body: dict[str, Any]) -> None:
         try:
             schema = _dict_to_schema(body)
             self._registry.register(schema)
@@ -638,7 +636,7 @@ class MockAgenticHandler(BaseHTTPRequestHandler):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _read_body(self) -> Dict[str, Any]:
+    def _read_body(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length) if length else b"{}"
         try:
@@ -655,7 +653,7 @@ class MockAgenticHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
-def _schema_to_dict(schema: ToolSchema) -> Dict[str, Any]:
+def _schema_to_dict(schema: ToolSchema) -> dict[str, Any]:
     return {
         "name": schema.name,
         "description": schema.description,
@@ -667,7 +665,7 @@ def _schema_to_dict(schema: ToolSchema) -> Dict[str, Any]:
     }
 
 
-def _dict_to_schema(d: Dict[str, Any]) -> ToolSchema:
+def _dict_to_schema(d: dict[str, Any]) -> ToolSchema:
     return ToolSchema(
         name=d["name"],
         description=d.get("description", ""),
@@ -700,10 +698,10 @@ class MockAgenticServer:
     def __init__(self, port: int = 0) -> None:
         self._port = port
         self._registry = ToolRegistry()
-        self._calls: List[Dict[str, Any]] = []
+        self._calls: list[dict[str, Any]] = []
         self._lock = threading.Lock()
-        self._server: Optional[HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: HTTPServer | None = None
+        self._thread: threading.Thread | None = None
 
     def start(self) -> None:
         registry = self._registry
@@ -739,6 +737,6 @@ class MockAgenticServer:
         return self._registry
 
     @property
-    def recorded_calls(self) -> List[Dict[str, Any]]:
+    def recorded_calls(self) -> list[dict[str, Any]]:
         with self._lock:
             return list(self._calls)

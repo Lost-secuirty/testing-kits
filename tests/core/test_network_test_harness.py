@@ -5,13 +5,11 @@ test_network_test_harness.py — Unit tests for network_test_harness.py
 """
 
 import json
-import socket
 import threading
 import time
 import unittest
 import urllib.error
 import urllib.request
-from unittest.mock import patch
 
 from harnesses.core.network_test_harness import (
     ConnectionConfig,
@@ -19,7 +17,6 @@ from harnesses.core.network_test_harness import (
     ConnectionPoolTester,
     ConnectionResult,
     DNSTester,
-    MockNetworkHandler,
     NetworkReport,
     PayloadTester,
     ProtocolTester,
@@ -27,11 +24,9 @@ from harnesses.core.network_test_harness import (
     RetryTester,
     ShutdownTester,
     TimeoutTester,
-    _PooledConnection,
     _start_mock_server,
     run_all,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

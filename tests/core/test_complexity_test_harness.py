@@ -12,13 +12,13 @@ from harnesses.core.complexity_test_harness import (
     FunctionMetrics,
     Thresholds,
     _collect_py_files,
+    _run_self_test,
     analyze_path,
     analyze_source,
     cognitive_complexity,
     cyclomatic_complexity,
     list_scenarios,
     max_nesting_depth,
-    _run_self_test,
 )
 
 

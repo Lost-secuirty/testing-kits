@@ -3,26 +3,21 @@ Tests for DateTime Test Harness (Harness 20 of 36).
 ~73 tests. Pure stdlib, no zoneinfo — uses datetime.timezone(timedelta(hours=N)).
 """
 
-import unittest
 import datetime
-from datetime import timezone, timedelta
 import time
-import json
-import urllib.request
-import threading
+import unittest
+from datetime import timedelta, timezone
 
 from harnesses.core.datetime_test_harness import (
-    Clock,
-    TimezoneTester,
-    DSTTester,
-    LeapYearTester,
     BoundaryTester,
-    ParseFormatTester,
+    Clock,
+    DSTTester,
     DurationTester,
+    LeapYearTester,
+    ParseFormatTester,
     ServerTimeTester,
-    MockDateTimeHandler,
+    TimezoneTester,
 )
-
 
 # ===========================================================================
 # Clock Tests (12 tests)
@@ -174,7 +169,7 @@ class TestTimezoneTester(unittest.TestCase):
         with self.assertRaises((ValueError, TypeError)):
             # Our implementation raises ValueError; Python might raise TypeError
             # on astimezone for naive on some platforms, so accept both
-            result = self.tz.utc_to_est(naive)
+            self.tz.utc_to_est(naive)
             # If no exception, something is wrong
             raise AssertionError("Expected exception not raised")
 

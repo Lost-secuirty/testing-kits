@@ -6,27 +6,18 @@ test suite catches them. Provides a mock HTTP server on a dynamic port
 (default 18980) for reporting results.
 """
 
-import ast
-import code
-import copy
 import enum
-import http.server
 import json
-import os
 import re
-import signal
-import socket
-import sys
 import threading
 import time
 import traceback
-import types
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, Callable, Dict, List, Optional, Tuple
-from urllib.parse import parse_qs, urlparse
-
+from typing import Any
+from urllib.parse import urlparse
 
 # ---------------------------------------------------------------------------
 # MutationResult enum
@@ -61,10 +52,10 @@ class Mutant:
     mutated_source: str
     operator: MutationOperator
     description: str
-    location: Optional[str] = None   # e.g. "line 42"
+    location: str | None = None   # e.g. "line 42"
     mutant_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
-    result: Optional[MutationResult] = None
-    error_message: Optional[str] = None
+    result: MutationResult | None = None
+    error_message: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -85,12 +76,12 @@ class Mutator:
 
     # We swap one operator at a time, being careful not to double-count
     # compound operators like ** or //
-    _ARITH_SWAPS: List[Tuple[str, str]] = [
+    _ARITH_SWAPS: list[tuple[str, str]] = [
         (r'\*\*', '@@POWER@@'),   # protect ** first
         (r'//',   '@@FLOOR@@'),   # protect // first
     ]
 
-    _ARITH_REPLACEMENTS: Dict[str, str] = {
+    _ARITH_REPLACEMENTS: dict[str, str] = {
         '+':  '-',
         '-':  '+',
         '*':  '/',
@@ -100,9 +91,8 @@ class Mutator:
         '%':  '*',
     }
 
-    def arithmetic_swap(self, source: str) -> List[Tuple[str, str]]:
+    def arithmetic_swap(self, source: str) -> list[tuple[str, str]]:
         """Swap arithmetic operators one at a time."""
-        results = []
         # Pattern matches arithmetic operators not part of augmented assignment,
         # comparison operators, or decorators.
         # We find all candidate positions and create one mutant per position.
@@ -130,7 +120,7 @@ class Mutator:
                 pattern = self._arith_pattern(op)
                 for m in re.finditer(pattern, masked):
                     # Reconstruct source with this single substitution
-                    orig_char_offset = sum(len(l) for l in lines[:line_idx]) + m.start()
+                    sum(len(line) for line in lines[:line_idx]) + m.start()
                     new_line = (
                         code_part[:m.start()]
                         + m.group().replace(op, replacement, 1)
@@ -165,7 +155,7 @@ class Mutator:
             return r'\*\*(?!=)'
         return re.escape(op)
 
-    def _split_comment(self, line: str) -> Tuple[str, str, str]:
+    def _split_comment(self, line: str) -> tuple[str, str, str]:
         """Split a line into (code_part, '#', comment) outside of strings."""
         in_string = False
         string_char = ''
@@ -210,7 +200,7 @@ class Mutator:
     # 2. Comparison swap
     # ------------------------------------------------------------------
 
-    _COMPARISON_PAIRS: List[Tuple[str, str]] = [
+    _COMPARISON_PAIRS: list[tuple[str, str]] = [
         ('==', '!='),
         ('!=', '=='),
         ('<=', '>='),
@@ -223,7 +213,7 @@ class Mutator:
         ('in', 'not in'),
     ]
 
-    def comparison_swap(self, source: str) -> List[Tuple[str, str]]:
+    def comparison_swap(self, source: str) -> list[tuple[str, str]]:
         """Swap comparison operators one at a time."""
         results = []
         lines = source.splitlines(keepends=True)
@@ -273,7 +263,7 @@ class Mutator:
     # 3. Constant swap
     # ------------------------------------------------------------------
 
-    _CONSTANT_PAIRS: List[Tuple[str, str]] = [
+    _CONSTANT_PAIRS: list[tuple[str, str]] = [
         (r'\bTrue\b',  'False'),
         (r'\bFalse\b', 'True'),
         (r'\bNone\b',  '0'),
@@ -284,7 +274,7 @@ class Mutator:
         (r"''",        "'MUTATION'"),
     ]
 
-    def constant_swap(self, source: str) -> List[Tuple[str, str]]:
+    def constant_swap(self, source: str) -> list[tuple[str, str]]:
         """Swap constants one at a time."""
         results = []
         lines = source.splitlines(keepends=True)
@@ -313,7 +303,7 @@ class Mutator:
     # 4. Boolean swap
     # ------------------------------------------------------------------
 
-    def boolean_swap(self, source: str) -> List[Tuple[str, str]]:
+    def boolean_swap(self, source: str) -> list[tuple[str, str]]:
         """Swap 'and' <-> 'or' one at a time."""
         results = []
         lines = source.splitlines(keepends=True)
@@ -343,7 +333,7 @@ class Mutator:
     # 5. Return swap
     # ------------------------------------------------------------------
 
-    def return_swap(self, source: str) -> List[Tuple[str, str]]:
+    def return_swap(self, source: str) -> list[tuple[str, str]]:
         """Swap 'return True' <-> 'return False' one at a time."""
         results = []
         lines = source.splitlines(keepends=True)
@@ -378,7 +368,7 @@ class Mutator:
     # 6. Condition negation
     # ------------------------------------------------------------------
 
-    def condition_negation(self, source: str) -> List[Tuple[str, str]]:
+    def condition_negation(self, source: str) -> list[tuple[str, str]]:
         """
         Negate conditions in if/while/elif statements.
         'if x:' -> 'if not x:' and 'if not x:' -> 'if x:'
@@ -389,7 +379,7 @@ class Mutator:
         for line_idx, line in enumerate(lines):
             line_no = line_idx + 1
             code_part, sep, comment = self._split_comment(line)
-            stripped = code_part.strip()
+            code_part.strip()
 
             for keyword in ('if', 'elif', 'while'):
                 kw_pattern = r'^(\s*)(' + keyword + r')\s+'
@@ -449,8 +439,8 @@ class SourceMutator:
     def generate_mutants(
         self,
         source: str,
-        operators: Optional[List[MutationOperator]] = None,
-    ) -> List[Mutant]:
+        operators: list[MutationOperator] | None = None,
+    ) -> list[Mutant]:
         """
         Generate all possible mutants for the given source.
 
@@ -468,7 +458,7 @@ class SourceMutator:
         if operators is None:
             operators = list(MutationOperator)
 
-        all_mutants: List[Mutant] = []
+        all_mutants: list[Mutant] = []
 
         op_method_map = {
             MutationOperator.ARITHMETIC_SWAP:   self._mutator.arithmetic_swap,
@@ -483,7 +473,7 @@ class SourceMutator:
             method = op_method_map[operator]
             try:
                 pairs = method(source)
-            except Exception as exc:
+            except Exception:
                 # If the operator itself crashes, skip it
                 continue
 
@@ -500,7 +490,7 @@ class SourceMutator:
 
     def generate_mutants_for_operator(
         self, source: str, operator: MutationOperator
-    ) -> List[Mutant]:
+    ) -> list[Mutant]:
         """Convenience: generate mutants for a single operator."""
         return self.generate_mutants(source, operators=[operator])
 
@@ -536,11 +526,11 @@ class MutationRunner:
     def run(
         self,
         source: str,
-        operators: Optional[List[MutationOperator]] = None,
+        operators: list[MutationOperator] | None = None,
     ) -> 'MutationReport':
         """Run all mutants and return a MutationReport."""
         mutants = self._source_mutator.generate_mutants(source, operators)
-        results: List[Mutant] = []
+        results: list[Mutant] = []
 
         for mutant in mutants:
             result = self._run_one(mutant)
@@ -552,15 +542,15 @@ class MutationRunner:
         """Run a single mutant and classify the result."""
         # First, try to compile the mutant
         try:
-            compiled = compile(mutant.mutated_source, '<mutant>', 'exec')
+            compile(mutant.mutated_source, '<mutant>', 'exec')
         except SyntaxError as exc:
             mutant.result = MutationResult.ERROR
             mutant.error_message = f"SyntaxError: {exc}"
             return mutant
 
         # Run the test function in a thread with timeout
-        result_holder: Dict[str, Any] = {}
-        error_holder: Dict[str, Any] = {}
+        result_holder: dict[str, Any] = {}
+        error_holder: dict[str, Any] = {}
 
         def run_test():
             try:
@@ -599,13 +589,13 @@ class MutationRunner:
         return mutant
 
     @staticmethod
-    def exec_in_sandbox(source: str) -> Dict[str, Any]:
+    def exec_in_sandbox(source: str) -> dict[str, Any]:
         """
         Execute source in a fresh sandbox namespace.
         Returns the namespace dict after execution.
         Raises on any exception.
         """
-        namespace: Dict[str, Any] = {}
+        namespace: dict[str, Any] = {}
         compiled = compile(source, '<mutant>', 'exec')
         exec(compiled, namespace)
         return namespace
@@ -628,7 +618,7 @@ class MutationReport:
         All mutants with their results filled in.
     """
     source: str
-    mutants: List[Mutant] = field(default_factory=list)
+    mutants: list[Mutant] = field(default_factory=list)
 
     # ------------------------------------------------------------------
     # Computed properties
@@ -663,18 +653,18 @@ class MutationReport:
         return self.killed / eligible
 
     @property
-    def survived_mutants(self) -> List[Mutant]:
+    def survived_mutants(self) -> list[Mutant]:
         return [m for m in self.mutants if m.result == MutationResult.SURVIVED]
 
     @property
-    def killed_mutants(self) -> List[Mutant]:
+    def killed_mutants(self) -> list[Mutant]:
         return [m for m in self.mutants if m.result == MutationResult.KILLED]
 
     @property
-    def error_mutants(self) -> List[Mutant]:
+    def error_mutants(self) -> list[Mutant]:
         return [m for m in self.mutants if m.result == MutationResult.ERROR]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dict (JSON-friendly)."""
         return {
             'total': self.total,
@@ -733,7 +723,7 @@ class MockMutationHandler(BaseHTTPRequestHandler):
     """
 
     # Class-level storage shared across requests
-    _last_report: Optional[Dict[str, Any]] = None
+    _last_report: dict[str, Any] | None = None
     _lock = threading.Lock()
 
     def log_message(self, fmt, *args):
@@ -866,8 +856,8 @@ class MutationHTTPServer:
     def __init__(self, host: str = '127.0.0.1', port: int = 0):
         self.host = host
         self.port = port  # 0 = OS picks a free port
-        self._server: Optional[HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: HTTPServer | None = None
+        self._thread: threading.Thread | None = None
 
     @property
     def actual_port(self) -> int:
@@ -918,7 +908,7 @@ def make_exec_test(assertions: str) -> Callable[[str], bool]:
     report = runner.run(source)
     """
     def test_function(mutated_source: str) -> bool:
-        namespace: Dict[str, Any] = {}
+        namespace: dict[str, Any] = {}
         try:
             compiled = compile(mutated_source, '<mutant>', 'exec')
             exec(compiled, namespace)
@@ -933,9 +923,9 @@ def make_exec_test(assertions: str) -> Callable[[str], bool]:
     return test_function
 
 
-def sandbox_exec(source: str) -> Dict[str, Any]:
+def sandbox_exec(source: str) -> dict[str, Any]:
     """Execute source in a fresh sandbox namespace and return the namespace."""
-    namespace: Dict[str, Any] = {}
+    namespace: dict[str, Any] = {}
     exec(compile(source, '<mutant>', 'exec'), namespace)
     return namespace
 

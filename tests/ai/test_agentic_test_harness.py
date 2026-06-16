@@ -4,21 +4,18 @@ Pure stdlib, zero external dependencies.
 """
 
 import json
-import threading
-import time
 import unittest
-import urllib.request
 import urllib.error
-from http.client import HTTPConnection
+import urllib.request
 
 from harnesses.ai.agentic_test_harness import (
+    GUARD_TOOL_NAME,
     AgentEvalReport,
     ArgSchemaDriftTester,
     FidelityResult,
     LoopDetectionResult,
     MockAgent,
     MockAgenticServer,
-    MultiTurnResult,
     MultiTurnStateTester,
     PlanVsExecutionResult,
     PlanVsExecutionTester,
@@ -29,15 +26,13 @@ from harnesses.ai.agentic_test_harness import (
     ToolCallFidelityTester,
     ToolRegistry,
     ToolSchema,
-    UnsafeToolUseTester,
     UnsafeToolUseResult,
-    GUARD_TOOL_NAME,
+    UnsafeToolUseTester,
     _call_signature,
     _check_type,
-    _schema_to_dict,
     _dict_to_schema,
+    _schema_to_dict,
 )
-
 
 # ===========================================================================
 # ToolSchema tests
@@ -182,7 +177,7 @@ class TestMockAgent(unittest.TestCase):
         self.assertEqual(len(result), 5)
 
     def test_max_rounds_limits_execution(self):
-        for i in range(10):
+        for _i in range(10):
             self.agent.add_step(ToolCall(tool_name="x"))
         result = self.agent.run(max_rounds=3)
         self.assertEqual(len(result), 3)

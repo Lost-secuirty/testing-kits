@@ -12,18 +12,19 @@ import argparse
 import collections
 import dataclasses
 import json
-import threading
-import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, Callable, Dict, Optional, Tuple
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+import threading
+import time
+from collections.abc import Callable
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path as _Path
+from typing import Any
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Clock abstraction
@@ -60,7 +61,7 @@ class FakeClock:
 class CacheEntry:
     """A single cache entry."""
     value: Any
-    expires_at: Optional[float]  # None means no expiry
+    expires_at: float | None  # None means no expiry
     created_at: float
 
 
@@ -95,8 +96,8 @@ class Cache:
     def __init__(
         self,
         max_size: int = 0,
-        default_ttl: Optional[float] = None,
-        clock: Optional[Any] = None,
+        default_ttl: float | None = None,
+        clock: Any | None = None,
     ) -> None:
         self._max_size = max_size
         self._default_ttl = default_ttl
@@ -124,7 +125,7 @@ class Cache:
     # Public API
     # ------------------------------------------------------------------
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         with self._lock:
             entry = self._store.get(key)
             if entry is None:
@@ -139,7 +140,7 @@ class Cache:
             self.stats.hits += 1
             return entry.value
 
-    def set(self, key: str, value: Any, ttl: Optional[float] = None) -> None:
+    def set(self, key: str, value: Any, ttl: float | None = None) -> None:
         with self._lock:
             effective_ttl = ttl if ttl is not None else self._default_ttl
             now = self._clock.now()
@@ -181,9 +182,7 @@ class Cache:
             entry = self._store.get(key)
             if entry is None:
                 return False
-            if self._is_expired(entry):
-                return False
-            return True
+            return not self._is_expired(entry)
 
 
 # ---------------------------------------------------------------------------
@@ -199,13 +198,13 @@ class BuggyCache:
     def __init__(
         self,
         max_size: int = 0,
-        default_ttl: Optional[float] = None,
-        clock: Optional[Any] = None,
+        default_ttl: float | None = None,
+        clock: Any | None = None,
     ) -> None:
         self._max_size = max_size
         self._default_ttl = default_ttl
         self._clock = clock if clock is not None else RealClock()
-        self._store: Dict[str, CacheEntry] = {}
+        self._store: dict[str, CacheEntry] = {}
         self._lock = threading.Lock()
         self.stats = CacheStats()
 
@@ -214,7 +213,7 @@ class BuggyCache:
             return False
         return self._clock.now() >= entry.expires_at
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         with self._lock:
             entry = self._store.get(key)
             if entry is None:
@@ -227,7 +226,7 @@ class BuggyCache:
             self.stats.hits += 1
             return entry.value
 
-    def set(self, key: str, value: Any, ttl: Optional[float] = None) -> None:
+    def set(self, key: str, value: Any, ttl: float | None = None) -> None:
         with self._lock:
             # BUG: skip write if key already exists — stale-after-write
             if key in self._store:
@@ -268,8 +267,8 @@ class StaleTTLCache:
     def __init__(
         self,
         max_size: int = 0,
-        default_ttl: Optional[float] = None,
-        clock: Optional[Any] = None,
+        default_ttl: float | None = None,
+        clock: Any | None = None,
     ) -> None:
         self._max_size = max_size
         self._default_ttl = default_ttl
@@ -278,7 +277,7 @@ class StaleTTLCache:
         self._lock = threading.Lock()
         self.stats = CacheStats()
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         with self._lock:
             entry = self._store.get(key)
             if entry is None:
@@ -289,7 +288,7 @@ class StaleTTLCache:
             self.stats.hits += 1
             return entry.value
 
-    def set(self, key: str, value: Any, ttl: Optional[float] = None) -> None:
+    def set(self, key: str, value: Any, ttl: float | None = None) -> None:
         with self._lock:
             effective_ttl = ttl if ttl is not None else self._default_ttl
             now = self._clock.now()
@@ -333,8 +332,8 @@ class NoEvictCache:
     def __init__(
         self,
         max_size: int = 0,
-        default_ttl: Optional[float] = None,
-        clock: Optional[Any] = None,
+        default_ttl: float | None = None,
+        clock: Any | None = None,
     ) -> None:
         self._max_size = max_size
         self._default_ttl = default_ttl
@@ -348,7 +347,7 @@ class NoEvictCache:
             return False
         return self._clock.now() >= entry.expires_at
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         with self._lock:
             entry = self._store.get(key)
             if entry is None:
@@ -362,7 +361,7 @@ class NoEvictCache:
             self.stats.hits += 1
             return entry.value
 
-    def set(self, key: str, value: Any, ttl: Optional[float] = None) -> None:
+    def set(self, key: str, value: Any, ttl: float | None = None) -> None:
         with self._lock:
             effective_ttl = ttl if ttl is not None else self._default_ttl
             now = self._clock.now()
@@ -402,10 +401,10 @@ class NamespacedCache:
     def _ns_key(self, key: str) -> str:
         return f"{self._namespace}:{key}"
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         return self._cache.get(self._ns_key(key))
 
-    def set(self, key: str, value: Any, ttl: Optional[float] = None) -> None:
+    def set(self, key: str, value: Any, ttl: float | None = None) -> None:
         self._cache.set(self._ns_key(key), value, ttl=ttl)
 
     def delete(self, key: str) -> bool:
@@ -426,8 +425,8 @@ class NamespacedCache:
 class NaiveCache:
     """Simple cache with no thundering-herd protection (for comparison)."""
 
-    def __init__(self, clock: Optional[Any] = None) -> None:
-        self._store: Dict[str, Any] = {}
+    def __init__(self, clock: Any | None = None) -> None:
+        self._store: dict[str, Any] = {}
         self._clock = clock if clock is not None else RealClock()
         self.loader_call_count = 0
 
@@ -451,11 +450,11 @@ class SingleFlightCache:
     all other concurrent requests for the same key wait and get the result.
     """
 
-    def __init__(self, clock: Optional[Any] = None) -> None:
-        self._store: Dict[str, Any] = {}
+    def __init__(self, clock: Any | None = None) -> None:
+        self._store: dict[str, Any] = {}
         self._clock = clock if clock is not None else RealClock()
-        self._inflight: Dict[str, threading.Event] = {}
-        self._inflight_results: Dict[str, Any] = {}
+        self._inflight: dict[str, threading.Event] = {}
+        self._inflight_results: dict[str, Any] = {}
         self._meta_lock = threading.Lock()
         self.loader_call_count = 0
 
@@ -474,10 +473,7 @@ class SingleFlightCache:
             with self._meta_lock:
                 if key in self._store:
                     return self._store[key]
-                if key in self._inflight:
-                    event = self._inflight[key]
-                else:
-                    event = None
+                event = self._inflight.get(key, None)
 
             if event is not None:
                 event.wait()
@@ -490,7 +486,6 @@ class SingleFlightCache:
             if key in self._store:
                 return self._store[key]
             if key in self._inflight:
-                ev = self._inflight[key]
                 ev_wait = True
             else:
                 self._inflight[key] = event
@@ -527,10 +522,10 @@ class SingleFlightCacheV2:
     Only one loader executes per key; waiters get the cached result.
     """
 
-    def __init__(self, clock: Optional[Any] = None) -> None:
-        self._store: Dict[str, Any] = {}
+    def __init__(self, clock: Any | None = None) -> None:
+        self._store: dict[str, Any] = {}
         self._clock = clock if clock is not None else RealClock()
-        self._key_locks: Dict[str, threading.Lock] = {}
+        self._key_locks: dict[str, threading.Lock] = {}
         self._meta_lock = threading.Lock()
         self.loader_call_count = 0
 
@@ -624,7 +619,7 @@ class MockCacheHandler(BaseHTTPRequestHandler):
     """
 
     # Shared cache instance (set by MockCacheServer)
-    _cache: Optional[Cache] = None
+    _cache: Cache | None = None
 
     def log_message(self, fmt: str, *args: Any) -> None:
         # Suppress default request logging
@@ -709,13 +704,13 @@ class MockCacheServer:
         self,
         host: str = "127.0.0.1",
         port: int = 0,  # 0 = OS chooses
-        cache: Optional[Cache] = None,
+        cache: Cache | None = None,
     ) -> None:
         self._host = host
         self._requested_port = port
         self._cache = cache if cache is not None else Cache()
-        self._server: Optional[HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: HTTPServer | None = None
+        self._thread: threading.Thread | None = None
 
     @property
     def cache(self) -> Cache:
@@ -731,7 +726,7 @@ class MockCacheServer:
     def base_url(self) -> str:
         return f"http://{self._host}:{self.port}"
 
-    def start(self) -> "MockCacheServer":
+    def start(self) -> MockCacheServer:
         # Create a subclass with the cache bound
         cache_ref = self._cache
 
@@ -753,7 +748,7 @@ class MockCacheServer:
             self._thread.join(timeout=2)
             self._thread = None
 
-    def __enter__(self) -> "MockCacheServer":
+    def __enter__(self) -> MockCacheServer:
         return self.start()
 
     def __exit__(self, *args: Any) -> None:
@@ -778,7 +773,7 @@ class CacheOp:
     op: str            # "set" | "get" | "delete" | "advance"
     key: str = ""
     value: Any = None
-    ttl: Optional[float] = None
+    ttl: float | None = None
     advance: float = 0.0
     # For "get" ops only: the value the CORRECT cache must return (a literal
     # constant, computed by hand from the cache contract — not from the oracle).
@@ -843,10 +838,7 @@ def prove(impl: Callable[..., Any]) -> bool:
         observed = _run_corpus(impl)
     except Exception:  # noqa: BLE001 — raising while driving the corpus counts as caught
         return True
-    for _name, expected, actual in observed:
-        if actual != expected:
-            return True
-    return False
+    return any(actual != expected for _name, expected, actual in observed)
 
 
 TEETH = Teeth(
@@ -1003,7 +995,7 @@ def _run_self_test(as_json: bool = False) -> int:
 # CLI — default action is the self-test (repo convention).
 # ---------------------------------------------------------------------------
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     parser = argparse.ArgumentParser(description="Caching correctness controls")
     parser.add_argument("--self-test", action="store_true", help="run built-in checks")
     parser.add_argument("--json", action="store_true",

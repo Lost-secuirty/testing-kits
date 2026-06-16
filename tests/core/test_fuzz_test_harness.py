@@ -6,33 +6,53 @@ Uses seeded random for reproducible results.
 
 import math
 import random
-import sys
-import time
 import unittest
 
 from harnesses._teeth import verify
 from harnesses.core.fuzz_test_harness import (
-    # Constants
-    MIN_INT, MAX_INT, SQL_INJECTION_STRINGS, XSS_STRINGS,
-    BOUNDARY_INTS, BOUNDARY_FLOATS, BOUNDARY_STRINGS, UNICODE_STRINGS,
+    BOUNDARY_FLOATS,
+    BOUNDARY_INTS,
     DEFAULT_PORT,
-    # Dataclasses
-    CrashRecord, FuzzReport,
-    # Classes
-    CrashClassifier, FuzzRunner, BoundaryExplorer,
-    MockFuzzHandler, FuzzHTTPServer, HTTPFuzzClient,
-    MutationEngine, CorpusManager, DifferentialFuzzer,
-    # Generators
-    fuzz_int, fuzz_float, fuzz_string, fuzz_bytes,
-    fuzz_list, fuzz_dict, fuzz_none, fuzz_bool,
-    # Utilities
-    compute_entropy, is_valid_utf8, truncate_repr,
-    generate_seed_sequence, quick_fuzz, explore_boundaries,
-    _make_fingerprint,
+    MAX_INT,
+    # Constants
+    MIN_INT,
+    SQL_INJECTION_STRINGS,
     # Teeth
-    TEETH, prove, oracle_target,
+    TEETH,
+    XSS_STRINGS,
+    BoundaryExplorer,
+    CorpusManager,
+    # Classes
+    CrashClassifier,
+    # Dataclasses
+    CrashRecord,
+    DifferentialFuzzer,
+    FuzzHTTPServer,
+    FuzzReport,
+    FuzzRunner,
+    HTTPFuzzClient,
+    MockFuzzHandler,
+    MutationEngine,
+    _make_fingerprint,
+    # Utilities
+    compute_entropy,
+    explore_boundaries,
+    fuzz_bool,
+    fuzz_bytes,
+    fuzz_dict,
+    fuzz_float,
+    # Generators
+    fuzz_int,
+    fuzz_list,
+    fuzz_none,
+    fuzz_string,
+    generate_seed_sequence,
+    is_valid_utf8,
+    oracle_target,
+    prove,
+    quick_fuzz,
+    truncate_repr,
 )
-
 
 # ─── Helper functions ─────────────────────────────────────────────────────────
 
@@ -543,22 +563,28 @@ class TestDifferentialFuzzer(unittest.TestCase):
 
     def test_no_divergence_identical(self):
         df = DifferentialFuzzer(seed=42)
-        impl_a = lambda x: x * 2
-        impl_b = lambda x: x * 2
+        def impl_a(x):
+            return x * 2
+        def impl_b(x):
+            return x * 2
         divs = df.compare(impl_a, impl_b, [1, 2, 3, 4])
         self.assertEqual(len(divs), 0)
 
     def test_divergence_detected(self):
         df = DifferentialFuzzer(seed=42)
-        impl_a = lambda x: x + 1
-        impl_b = lambda x: x + 2
+        def impl_a(x):
+            return x + 1
+        def impl_b(x):
+            return x + 2
         divs = df.compare(impl_a, impl_b, [0, 1, 2])
         self.assertGreater(len(divs), 0)
 
     def test_exception_mismatch_detected(self):
         df = DifferentialFuzzer(seed=42)
-        impl_a = lambda x: 1 / x
-        impl_b = lambda x: x
+        def impl_a(x):
+            return 1 / x
+        def impl_b(x):
+            return x
         divs = df.compare(impl_a, impl_b, [0])
         self.assertEqual(len(divs), 1)
         self.assertEqual(divs[0]["divergence_type"], "exception_mismatch")

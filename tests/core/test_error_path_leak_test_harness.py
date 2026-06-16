@@ -10,7 +10,6 @@ from harnesses.core.error_path_leak_test_harness import (
     LeakProbeResult,
     LeakRunner,
     ResourceTracker,
-    TargetSpec,
     TransientError,
     _make_double_release,
     _make_good_pool,

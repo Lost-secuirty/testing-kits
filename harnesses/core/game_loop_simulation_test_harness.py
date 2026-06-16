@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, List, Tuple
 
 # Make the shared teeth contract importable whether run as a module or a script.
 from pathlib import Path as _Path
+
 if str(_Path(__file__).resolve().parents[2]) not in sys.path:
     sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
@@ -188,9 +189,9 @@ class TickCase:
     name: str
     x0: int
     y0: int
-    pressed: Tuple[str, ...]
+    pressed: tuple[str, ...]
     n_ticks: int
-    expected: Tuple[int, int]   # the EXACT (x, y) a correct N-tick loop yields
+    expected: tuple[int, int]   # the EXACT (x, y) a correct N-tick loop yields
     note: str = ""
 
 
@@ -200,7 +201,7 @@ class TickCase:
 # never derived at runtime. Idle / fully-opposing cases are decoys that the
 # count/ordering bugs cannot distinguish, ensuring the teeth come from real
 # movement, not coincidence.
-TICK_CORPUS: Tuple[TickCase, ...] = (
+TICK_CORPUS: tuple[TickCase, ...] = (
     # Hold right for 5 ticks: x advances +1 each tick -> (5, 0). A double-step
     # loop lands on 10; a skip-last loop lands on 4.
     TickCase("right_5", 0, 0, ("right",), 5, (5, 0),
@@ -228,7 +229,7 @@ TICK_CORPUS: Tuple[TickCase, ...] = (
 
 # --- ORACLE: reuse the harness's own correct MiniGameEngine.tick loop --------
 
-def oracle_simulate(x0: int, y0: int, pressed: Tuple[str, ...], n_ticks: int) -> Tuple[int, int]:
+def oracle_simulate(x0: int, y0: int, pressed: tuple[str, ...], n_ticks: int) -> tuple[int, int]:
     """Correct fixed-step simulation, delegating to the harness's own
     ``MiniGameEngine.tick``. Holds ``pressed`` down, advances exactly
     ``n_ticks`` ticks from the initial position, and returns the final
@@ -245,7 +246,7 @@ def oracle_simulate(x0: int, y0: int, pressed: Tuple[str, ...], n_ticks: int) ->
 
 # --- Planted buggy twins (each models a real tick-loop defect) ---------------
 
-def double_step_per_tick(x0: int, y0: int, pressed: Tuple[str, ...], n_ticks: int) -> Tuple[int, int]:
+def double_step_per_tick(x0: int, y0: int, pressed: tuple[str, ...], n_ticks: int) -> tuple[int, int]:
     """BUG: advances the per-tick physics TWICE inside a single tick.
 
     Models the classic "update() got called from both the fixed-timestep path
@@ -263,7 +264,7 @@ def double_step_per_tick(x0: int, y0: int, pressed: Tuple[str, ...], n_ticks: in
     return (engine.state.x, engine.state.y)
 
 
-def skip_last_tick(x0: int, y0: int, pressed: Tuple[str, ...], n_ticks: int) -> Tuple[int, int]:
+def skip_last_tick(x0: int, y0: int, pressed: tuple[str, ...], n_ticks: int) -> tuple[int, int]:
     """BUG: an off-by-one ``range(n_ticks - 1)`` loop drops the final frame.
 
     Models a dropped-tick / early-exit bug (e.g. the loop's exit condition fires
@@ -280,7 +281,7 @@ def skip_last_tick(x0: int, y0: int, pressed: Tuple[str, ...], n_ticks: int) -> 
     return (engine.state.x, engine.state.y)
 
 
-def input_starvation(x0: int, y0: int, pressed: Tuple[str, ...], n_ticks: int) -> Tuple[int, int]:
+def input_starvation(x0: int, y0: int, pressed: tuple[str, ...], n_ticks: int) -> tuple[int, int]:
     """BUG: drains only ONE held key per tick instead of applying every pressed
     input, so multi-key movement loses an axis.
 
@@ -300,7 +301,7 @@ def input_starvation(x0: int, y0: int, pressed: Tuple[str, ...], n_ticks: int) -
     return (engine.state.x, engine.state.y)
 
 
-def prove(impl: Callable[[int, int, Tuple[str, ...], int], Tuple[int, int]]) -> bool:
+def prove(impl: Callable[[int, int, tuple[str, ...], int], tuple[int, int]]) -> bool:
     """True iff ``impl`` produces the WRONG end position for any frozen corpus
     case (i.e. the loop bug is caught): the final ``(x, y)`` diverges from the
     hand-computed literal, or the impl raises.
@@ -341,7 +342,7 @@ TEETH = Teeth(
 )
 
 
-def list_teeth_scenarios() -> List[str]:
+def list_teeth_scenarios() -> list[str]:
     """Names of the frozen tick-simulation corpus cases (the teeth scenarios)."""
     return [c.name for c in TICK_CORPUS]
 

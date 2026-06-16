@@ -31,11 +31,12 @@ Usage:
 """
 
 import argparse
+import contextlib
 import json
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
 CLOSED = "CLOSED"
 OPEN = "OPEN"
@@ -342,36 +343,26 @@ def run_all_scenarios(verbose=False):
     # 2. Trips to OPEN after threshold consecutive failures
     cb = CircuitBreaker(failure_threshold=3, clock=FakeClock())
     for _ in range(3):
-        try:
+        with contextlib.suppress(RuntimeError):
             cb.call(boom)
-        except RuntimeError:
-            pass
     check("2. OPEN after 3 consecutive failures", cb.state == OPEN, cb.state)
 
     # 3. Below threshold stays CLOSED
     cb = CircuitBreaker(failure_threshold=3, clock=FakeClock())
     for _ in range(2):
-        try:
+        with contextlib.suppress(RuntimeError):
             cb.call(boom)
-        except RuntimeError:
-            pass
     check("3. Stays CLOSED below threshold (2<3)", cb.state == CLOSED, cb.state)
 
     # 4. A success resets the failure counter
     cb = CircuitBreaker(failure_threshold=3, clock=FakeClock())
-    try:
+    with contextlib.suppress(RuntimeError):
         cb.call(boom)
-    except RuntimeError:
-        pass
-    try:
+    with contextlib.suppress(RuntimeError):
         cb.call(boom)
-    except RuntimeError:
-        pass
     cb.call(lambda: "ok")          # reset
-    try:
+    with contextlib.suppress(RuntimeError):
         cb.call(boom)              # only 1 failure since reset
-    except RuntimeError:
-        pass
     check("4. Success resets counter (1 fail after reset != trip)",
           cb.state == CLOSED, cb.state)
 
@@ -379,10 +370,8 @@ def run_all_scenarios(verbose=False):
     clk = FakeClock()
     cb = CircuitBreaker(failure_threshold=2, reset_timeout=10.0, clock=clk)
     for _ in range(2):
-        try:
+        with contextlib.suppress(RuntimeError):
             cb.call(boom)
-        except RuntimeError:
-            pass
     rejected = False
     try:
         cb.call(lambda: "ok")
@@ -401,25 +390,19 @@ def run_all_scenarios(verbose=False):
     # 8. Trial failure in HALF_OPEN re-trips to OPEN
     clk2 = FakeClock()
     cb = CircuitBreaker(failure_threshold=1, reset_timeout=5.0, clock=clk2)
-    try:
+    with contextlib.suppress(RuntimeError):
         cb.call(boom)
-    except RuntimeError:
-        pass
     clk2.advance(5.0)                # -> HALF_OPEN
-    try:
+    with contextlib.suppress(RuntimeError):
         cb.call(boom)               # trial fails
-    except RuntimeError:
-        pass
     check("8. Trial failure re-trips to OPEN", cb.state == OPEN, cb.state)
 
     # 9. Half-open admits at most half_open_max_calls trials
     clk3 = FakeClock()
     cb = CircuitBreaker(failure_threshold=1, reset_timeout=5.0,
                         half_open_max_calls=1, success_threshold=2, clock=clk3)
-    try:
+    with contextlib.suppress(RuntimeError):
         cb.call(boom)
-    except RuntimeError:
-        pass
     clk3.advance(5.0)               # -> HALF_OPEN
     first = cb.allow()             # admits the single trial
     second = cb.allow()           # over the cap -> rejected
@@ -430,10 +413,8 @@ def run_all_scenarios(verbose=False):
     clk4 = FakeClock()
     cb = CircuitBreaker(failure_threshold=1, reset_timeout=5.0,
                         half_open_max_calls=3, success_threshold=2, clock=clk4)
-    try:
+    with contextlib.suppress(RuntimeError):
         cb.call(boom)
-    except RuntimeError:
-        pass
     clk4.advance(5.0)
     cb.call(lambda: "ok")          # 1st trial success
     mid = cb.state
@@ -453,25 +434,19 @@ def run_all_scenarios(verbose=False):
         if ev[0] == "advance":
             clk5.advance(ev[1])
         elif ev[0] == "ok":
-            try:
+            with contextlib.suppress(CircuitOpenError):
                 cb.call(lambda: "ok")
-            except CircuitOpenError:
-                pass
         else:
-            try:
+            with contextlib.suppress(RuntimeError, CircuitOpenError):
                 cb.call(boom)
-            except (RuntimeError, CircuitOpenError):
-                pass
     check("11. Oracle agrees on mixed event log",
           cb.state == expected, f"breaker={cb.state} oracle={expected}")
 
     # 12. Reading state while OPEN before timeout does not admit a call
     clk6 = FakeClock()
     cb = CircuitBreaker(failure_threshold=1, reset_timeout=10.0, clock=clk6)
-    try:
+    with contextlib.suppress(RuntimeError):
         cb.call(boom)
-    except RuntimeError:
-        pass
     clk6.advance(5.0)               # not yet elapsed
     still_open = cb.state == OPEN
     rejected = not cb.allow()

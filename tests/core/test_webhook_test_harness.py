@@ -4,13 +4,10 @@ Pure stdlib, zero external dependencies.
 """
 
 import json
-import math
 import threading
 import time
 import unittest
 import uuid
-from typing import List, Optional
-from unittest.mock import patch
 
 from harnesses.core.webhook_test_harness import (
     Clock,
@@ -30,16 +27,15 @@ from harnesses.core.webhook_test_harness import (
     verify,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def make_event(
     event_type: str = "order.created",
-    payload: Optional[dict] = None,
+    payload: dict | None = None,
     timestamp: float = 1000.0,
-    seq: Optional[int] = None,
+    seq: int | None = None,
 ) -> WebhookEvent:
     return WebhookEvent(
         event_id=str(uuid.uuid4()),
@@ -54,7 +50,7 @@ class NoSleepSender(WebhookSender):
     """WebhookSender that records sleeps without actually sleeping."""
 
     def __init__(self, *args, **kwargs):
-        self.sleep_calls: List[float] = []
+        self.sleep_calls: list[float] = []
         super().__init__(*args, sleep_fn=self._record_sleep, **kwargs)
 
     def _record_sleep(self, secs: float) -> None:

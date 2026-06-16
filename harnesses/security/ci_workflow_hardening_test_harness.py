@@ -46,16 +46,16 @@ import argparse
 import json
 import re
 import sys
-from dataclasses import dataclass
-from typing import Any
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+from dataclasses import dataclass
 from pathlib import Path as _Path
+from typing import Any
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Teeth  # noqa: E402
-
 
 # ACTION uses-string regex, ported from the source control_audit.py.
 ACTION = re.compile(r"^(?P<owner>[^/]+)/(?P<repo>[^/@]+)(?:/[^@]+)?@(?P<ref>.+)$")
@@ -111,10 +111,8 @@ def _events(data: dict[str, Any]) -> list[str]:
         value = data[key]
         if isinstance(value, str):
             events.append(value)
-        elif isinstance(value, list):
+        elif isinstance(value, (list, dict)):
             events.extend(str(item) for item in value)
-        elif isinstance(value, dict):
-            events.extend(str(item) for item in value.keys())
     return events
 
 
@@ -129,9 +127,7 @@ def _check_concurrency(data: dict[str, Any]) -> bool:
     cancel = concurrency.get("cancel-in-progress")
     if cancel is True:
         return True
-    if isinstance(cancel, str) and cancel.startswith("${{"):
-        return True
-    return False
+    return bool(isinstance(cancel, str) and cancel.startswith("${{"))
 
 
 def audit_workflow(data: dict[str, Any]) -> list[Finding]:
@@ -228,15 +224,17 @@ def audit_workflow(data: dict[str, Any]) -> list[Finding]:
                             "ref, not a 40-hex commit SHA",
                         )
                     )
-                if uses.startswith("actions/checkout@"):
-                    if with_block.get("persist-credentials") is not False:
-                        findings.append(
-                            Finding(
-                                "checkout-credentials",
-                                f"job '{job_name}' checkout leaves persist-credentials "
-                                "on (token persisted in .git/config)",
-                            )
+                if (
+                    uses.startswith("actions/checkout@")
+                    and with_block.get("persist-credentials") is not False
+                ):
+                    findings.append(
+                        Finding(
+                            "checkout-credentials",
+                            f"job '{job_name}' checkout leaves persist-credentials "
+                            "on (token persisted in .git/config)",
                         )
+                    )
 
     return findings
 
@@ -306,16 +304,18 @@ def audit_workflow_naive(data: dict[str, Any]) -> list[Finding]:
                     Finding("fork-checkout", f"job '{job_name}' checks out fork ref")
                 )
             uses = step.get("uses")
-            if isinstance(uses, str):
-                # BUG: any '@'-pinned action is accepted; no SHA check at all.
-                if uses.startswith("actions/checkout@"):
-                    if with_block.get("persist-credentials") is not False:
-                        findings.append(
-                            Finding(
-                                "checkout-credentials",
-                                f"job '{job_name}' checkout persists credentials",
-                            )
-                        )
+            # BUG: any '@'-pinned action is accepted; no SHA check at all.
+            if (
+                isinstance(uses, str)
+                and uses.startswith("actions/checkout@")
+                and with_block.get("persist-credentials") is not False
+            ):
+                findings.append(
+                    Finding(
+                        "checkout-credentials",
+                        f"job '{job_name}' checkout persists credentials",
+                    )
+                )
     return findings
 
 
@@ -518,7 +518,7 @@ def list_cases() -> list[str]:
 def run_case(case: WorkflowCase) -> AuditResult:
     findings = audit_workflow(case.build_workflow())
     codes = tuple(finding.code for finding in findings)
-    if case.should_pass:
+    if case.should_pass:  # noqa: SIM108 — else-branch comment documents exact-match rationale
         ok = len(codes) == 0
     else:
         # Exact match: expected codes present AND no unexpected extras, so an

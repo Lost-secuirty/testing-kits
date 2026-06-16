@@ -28,9 +28,9 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass, field
-from typing import Any, Callable
-
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # FakeClock

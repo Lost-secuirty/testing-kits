@@ -16,10 +16,9 @@ import random
 import socket
 import string
 import threading
-import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Generators
@@ -183,7 +182,7 @@ class Shrinker:
 
         best = value
         # Bisect towards 0
-        lo, hi = 0, abs(value)
+        _lo, _hi = 0, abs(value)
         sign = 1 if value > 0 else -1
 
         # Repeatedly halve distance to 0
@@ -368,7 +367,7 @@ class Shrinker:
         best = dict(value)
 
         # Try removing keys
-        keys = list(best.keys())
+        list(best.keys())
         changed = True
         while changed:
             changed = False
@@ -407,7 +406,7 @@ class CounterExample:
     original: Any
     shrunk: Any
     seed: int
-    exception: Optional[Exception] = None
+    exception: Exception | None = None
 
 
 @dataclass
@@ -417,7 +416,7 @@ class PropertyReport:
     passed: int = 0
     failed: int = 0
     skipped: int = 0
-    counterexamples: List[Tuple[str, CounterExample]] = field(default_factory=list)
+    counterexamples: list[tuple[str, CounterExample]] = field(default_factory=list)
 
     @property
     def all_passed(self) -> bool:
@@ -450,7 +449,7 @@ class Property:
         self,
         generator: GenFunc,
         predicate: Callable[[Any], bool],
-        precondition: Optional[Callable[[Any], bool]] = None,
+        precondition: Callable[[Any], bool] | None = None,
         name: str = "unnamed",
     ) -> None:
         self.generator = generator
@@ -461,8 +460,8 @@ class Property:
     def check(
         self,
         num_examples: int = 100,
-        seed: Optional[int] = None,
-    ) -> Optional[CounterExample]:
+        seed: int | None = None,
+    ) -> CounterExample | None:
         """
         Run the property against num_examples random inputs.
 
@@ -475,15 +474,15 @@ class Property:
 class PropertyRunner:
     """Runs a property against N random inputs, returns first failure + shrunk counterexample."""
 
-    def __init__(self, shrinker: Optional[Shrinker] = None) -> None:
+    def __init__(self, shrinker: Shrinker | None = None) -> None:
         self.shrinker = shrinker or Shrinker()
 
     def run_property(
         self,
         prop: Property,
         num_examples: int = 100,
-        seed: Optional[int] = None,
-    ) -> Optional[CounterExample]:
+        seed: int | None = None,
+    ) -> CounterExample | None:
         """
         Run property, return CounterExample on first failure or None.
         """
@@ -554,9 +553,9 @@ class PropertySuite:
 
     def __init__(self, name: str = "unnamed_suite") -> None:
         self.name = name
-        self._properties: List[Tuple[str, Property]] = []
+        self._properties: list[tuple[str, Property]] = []
 
-    def add(self, prop: Property, name: Optional[str] = None) -> "PropertySuite":
+    def add(self, prop: Property, name: str | None = None) -> PropertySuite:
         """Add a property to this suite."""
         display_name = name or prop.name
         self._properties.append((display_name, prop))
@@ -566,9 +565,9 @@ class PropertySuite:
         self,
         generator: GenFunc,
         predicate: Callable,
-        precondition: Optional[Callable] = None,
+        precondition: Callable | None = None,
         name: str = "unnamed",
-    ) -> "PropertySuite":
+    ) -> PropertySuite:
         """Convenience method to create and add a property."""
         prop = Property(generator, predicate, precondition=precondition, name=name)
         return self.add(prop, name)
@@ -576,7 +575,7 @@ class PropertySuite:
     def run_all(
         self,
         num_examples: int = 100,
-        seed: Optional[int] = None,
+        seed: int | None = None,
     ) -> PropertyReport:
         """Run all properties and return a PropertyReport."""
         report = PropertyReport()
@@ -609,7 +608,7 @@ class MockPropertyHandler(http.server.BaseHTTPRequestHandler):
     """
 
     # Class-level storage shared across handler instances
-    _results: List[Dict] = []
+    _results: list[dict] = []
     _lock: threading.Lock = threading.Lock()
 
     def log_message(self, fmt, *args):  # noqa: N802 – suppress default logging
@@ -623,7 +622,7 @@ class MockPropertyHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _read_json_body(self) -> Optional[Any]:
+    def _read_json_body(self) -> Any | None:
         length = int(self.headers.get("Content-Length", 0))
         if length == 0:
             return None
@@ -659,7 +658,7 @@ class MockPropertyHandler(http.server.BaseHTTPRequestHandler):
         else:
             self._send_json(404, {"error": "not found"})
 
-    def _handle_run_property(self, body: Dict) -> Dict:
+    def _handle_run_property(self, body: dict) -> dict:
         """
         Run a built-in named property.
 
@@ -705,7 +704,7 @@ def _safe_repr(value: Any) -> Any:
 # Built-in named properties for the HTTP server
 _rng_for_builtins = random.Random(42)
 
-_BUILT_IN_PROPERTIES: Dict[str, Property] = {
+_BUILT_IN_PROPERTIES: dict[str, Property] = {
     "reverse_twice": Property(
         generator=gen_list(gen_int()),
         predicate=lambda lst: list(reversed(list(reversed(lst)))) == lst,
@@ -753,10 +752,10 @@ class MockPropertyServer:
         self.host = host
         self._requested_port = port
         self.port: int = 0
-        self._server: Optional[http.server.HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: http.server.HTTPServer | None = None
+        self._thread: threading.Thread | None = None
 
-    def start(self) -> "MockPropertyServer":
+    def start(self) -> MockPropertyServer:
         # Reset class-level results
         MockPropertyHandler._results = []
 
@@ -775,7 +774,7 @@ class MockPropertyServer:
             self._thread.join(timeout=5)
             self._thread = None
 
-    def __enter__(self) -> "MockPropertyServer":
+    def __enter__(self) -> MockPropertyServer:
         return self.start()
 
     def __exit__(self, *args) -> None:
@@ -803,9 +802,9 @@ def find_free_port(default: int = DEFAULT_PORT) -> int:
 
 
 def run_suite_and_report(
-    properties: Dict[str, Property],
+    properties: dict[str, Property],
     num_examples: int = 100,
-    seed: Optional[int] = None,
+    seed: int | None = None,
 ) -> PropertyReport:
     """Convenience: build a suite from a dict and run it."""
     suite = PropertySuite("ad_hoc")
@@ -845,11 +844,11 @@ def is_simpler(a: Any, b: Any) -> bool:
 def forall(
     generator: GenFunc,
     predicate: Callable,
-    precondition: Optional[Callable] = None,
+    precondition: Callable | None = None,
     num_examples: int = 100,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     name: str = "unnamed",
-) -> Optional[CounterExample]:
+) -> CounterExample | None:
     """
     Shorthand: create a Property and immediately check it.
 

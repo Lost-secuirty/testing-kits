@@ -1,6 +1,5 @@
 """test_clinical_calc_test_harness.py — unittest suite for clinical_calc_test_harness (38)."""
 
-import math
 import unittest
 
 from harnesses.pharmacy.clinical_calc_test_harness import (

@@ -6,7 +6,6 @@ import time
 import unittest
 
 from harnesses.core.hermeticity_test_harness import (
-    SELF_TEST_FUNCTIONS,
     AuditConfig,
     AuditResult,
     _MockEnv,
@@ -15,7 +14,6 @@ from harnesses.core.hermeticity_test_harness import (
     audit_suite,
     depends_on_env,
     depends_on_home,
-    depends_on_random,
     depends_on_time,
     hermetic_passes,
     list_scenarios,

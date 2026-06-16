@@ -4,36 +4,30 @@ Test suite for contract_test_harness.py
 interface compliance, invariant checking, and the mock HTTP server.
 """
 
-import inspect
 import json
 import time
 import unittest
-import urllib.request
-import urllib.error
-from urllib.request import urlopen, Request
+from urllib.request import Request, urlopen
 
 from harnesses._teeth import verify
 from harnesses.core.contract_test_harness import (
-    ViolationType,
-    ContractViolation,
-    Contract,
-    Condition,
-    ContractChecker,
-    InterfaceSpec,
-    InterfaceChecker,
-    InvariantChecker,
-    MockContractServer,
-    ScenarioResult,
-    MethodSpec,
-    InterfaceCheckResult,
-    InvariantResult,
-    contract,
     TEETH,
+    Condition,
+    Contract,
+    ContractChecker,
+    ContractViolation,
     FieldSpec,
+    InterfaceChecker,
+    InterfaceCheckResult,
+    InterfaceSpec,
+    InvariantChecker,
+    InvariantResult,
+    MockContractServer,
+    ViolationType,
     check_compatibility,
+    contract,
     prove,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper functions used across tests
@@ -408,7 +402,9 @@ class TestInterfaceChecker(unittest.TestCase):
         return spec
 
     class GoodStack:
-        def push(self, item): self._items = getattr(self, "_items", []); self._items.append(item)
+        def push(self, item):
+            self._items = getattr(self, "_items", [])
+            self._items.append(item)
         def pop(self): return self._items.pop()
         def peek(self): return self._items[-1]
         def is_empty(self): return len(getattr(self, "_items", [])) == 0
@@ -420,7 +416,7 @@ class TestInterfaceChecker(unittest.TestCase):
     def test_compliant_object_passes(self):
         spec = self._make_spec()
         checker = InterfaceChecker(spec)
-        results = checker.check(self.GoodStack())
+        checker.check(self.GoodStack())
         self.assertTrue(checker.all_compliant())
 
     def test_non_compliant_object_fails(self):

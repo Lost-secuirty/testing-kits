@@ -26,10 +26,9 @@ import datetime as dt
 import itertools
 import sqlite3
 import sys
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, Callable
-
 
 # ---------------------------------------------------------------------------
 # Domain

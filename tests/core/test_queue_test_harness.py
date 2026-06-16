@@ -1,5 +1,6 @@
 """Test suite for queue_test_harness."""
 
+import dataclasses
 import unittest
 
 from harnesses.core.queue_test_harness import (
@@ -28,7 +29,7 @@ def _broker(delivery=Delivery.AT_LEAST_ONCE, **cfg):
 class TestMessageAndConfig(unittest.TestCase):
     def test_message_is_frozen(self):
         m = Message("a", "k", "body")
-        with self.assertRaises(Exception):
+        with self.assertRaises(dataclasses.FrozenInstanceError):
             m.id = "b"  # type: ignore[misc]
 
     def test_config_defaults(self):
@@ -83,7 +84,8 @@ class TestOracleBroker(unittest.TestCase):
         b = _broker(max_in_flight=2)
         for i in range(3):
             b.publish(Message(f"m{i}", f"k{i}"))
-        b.poll(); b.poll()
+        b.poll()
+        b.poll()
         self.assertIsNone(b.poll())
         self.assertLessEqual(b.max_in_flight_observed, 2)
 

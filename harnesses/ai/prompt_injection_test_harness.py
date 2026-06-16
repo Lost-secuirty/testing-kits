@@ -32,17 +32,15 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import re
 import sys
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 # Windows consoles default to cp1252; scenario output uses non-ASCII (>=, ->,
 # em dash). Force UTF-8 at import so both --self-test and direct test calls work.
-try:
+with contextlib.suppress(Exception):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
 
 
 # ---------------------------------------------------------------------------

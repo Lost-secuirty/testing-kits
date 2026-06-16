@@ -26,21 +26,22 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
 
 # Make the shared teeth contract importable whether run as a module or a script.
 from pathlib import Path as _Path
+
 if str(_Path(__file__).resolve().parents[2]) not in sys.path:
     sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+import contextlib
+
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # Windows consoles default to cp1252; force UTF-8 so --self-test prints cleanly
 # whether run directly or imported by the paired unittest.
-try:
+with contextlib.suppress(Exception):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +78,7 @@ class Turn:
     idx: int
     user_msg: str
     calls: tuple[ToolCall, ...] = ()
-    result: Optional[ToolResult] = None
+    result: ToolResult | None = None
     claim_resolved: bool = False
     asserted_state: str = ""  # the system state the agent's actions actually produced
 
@@ -340,7 +341,7 @@ def _loop_rate(t: Transcript, tools: list[ToolSig]) -> float:
     """Fraction of calls that are part of a no-progress loop: an identical
     (name, args) signature repeated where every occurrence failed (a legitimate
     retry that later succeeds is NOT a loop)."""
-    sigs: dict[tuple, list[Optional[ToolResult]]] = {}
+    sigs: dict[tuple, list[ToolResult | None]] = {}
     n_calls = 0
     for turn in t.turns:
         for c in turn.calls:

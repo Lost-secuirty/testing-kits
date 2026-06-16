@@ -8,14 +8,12 @@ from __future__ import annotations
 import json
 import re
 import threading
-import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse, parse_qs
-
+from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -28,9 +26,9 @@ class LogEntry:
     level: str
     message: str
     correlation_id: str = ""
-    fields: Dict[str, Any] = field(default_factory=dict)
+    fields: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "timestamp": self.timestamp,
             "level": self.level,
@@ -40,7 +38,7 @@ class LogEntry:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "LogEntry":
+    def from_dict(cls, data: dict[str, Any]) -> LogEntry:
         return cls(
             timestamp=data.get("timestamp", ""),
             level=data.get("level", ""),
@@ -69,9 +67,9 @@ class LogFormatValidator:
 
     # ---- public API --------------------------------------------------------
 
-    def validate_json_string(self, raw: str) -> Tuple[bool, List[str]]:
+    def validate_json_string(self, raw: str) -> tuple[bool, list[str]]:
         """Return (valid, errors) for a raw JSON string."""
-        errors: List[str] = []
+        errors: list[str] = []
         try:
             data = json.loads(raw)
         except json.JSONDecodeError as exc:
@@ -80,18 +78,18 @@ class LogFormatValidator:
         errors.extend(field_errors)
         return (len(errors) == 0), errors
 
-    def validate_dict(self, data: Dict[str, Any]) -> Tuple[bool, List[str]]:
+    def validate_dict(self, data: dict[str, Any]) -> tuple[bool, list[str]]:
         """Return (valid, errors) for a pre-parsed dict."""
         ok, errors = self._validate_dict(data)
         return ok, errors
 
-    def validate_entry(self, entry: LogEntry) -> Tuple[bool, List[str]]:
+    def validate_entry(self, entry: LogEntry) -> tuple[bool, list[str]]:
         return self.validate_dict(entry.to_dict())
 
     # ---- helpers -----------------------------------------------------------
 
-    def _validate_dict(self, data: Dict[str, Any]) -> Tuple[bool, List[str]]:
-        errors: List[str] = []
+    def _validate_dict(self, data: dict[str, Any]) -> tuple[bool, list[str]]:
+        errors: list[str] = []
         missing = REQUIRED_LOG_FIELDS - data.keys()
         if missing:
             errors.append(f"Missing required fields: {sorted(missing)}")
@@ -102,7 +100,7 @@ class LogFormatValidator:
         return (len(errors) == 0), errors
 
     @staticmethod
-    def _validate_timestamp(ts: Any) -> Tuple[bool, str]:
+    def _validate_timestamp(ts: Any) -> tuple[bool, str]:
         if not isinstance(ts, str):
             return False, f"timestamp must be a string, got {type(ts).__name__}"
         if not _ISO8601_RE.match(ts):
@@ -114,7 +112,7 @@ class LogFormatValidator:
 # LogLevelChecker
 # ---------------------------------------------------------------------------
 
-LOG_LEVEL_ORDER: Dict[str, int] = {
+LOG_LEVEL_ORDER: dict[str, int] = {
     "DEBUG": 10,
     "INFO": 20,
     "WARNING": 30,
@@ -142,8 +140,8 @@ class LogLevelChecker:
         return self.level_value(level) >= self.level_value(minimum)
 
     def filter_entries(
-        self, entries: List[LogEntry], minimum_level: str
-    ) -> List[LogEntry]:
+        self, entries: list[LogEntry], minimum_level: str
+    ) -> list[LogEntry]:
         """Return only entries at or above minimum_level."""
         min_val = self.level_value(minimum_level)
         return [e for e in entries if LOG_LEVEL_ORDER.get(e.level.upper(), 0) >= min_val]
@@ -159,7 +157,7 @@ class LogLevelChecker:
 # SensitiveDataScanner
 # ---------------------------------------------------------------------------
 
-_SENSITIVE_PATTERNS: Dict[str, re.Pattern] = {
+_SENSITIVE_PATTERNS: dict[str, re.Pattern] = {
     "password": re.compile(
         r"password\s*[=:]\s*\S+", re.IGNORECASE
     ),
@@ -177,16 +175,16 @@ _SENSITIVE_PATTERNS: Dict[str, re.Pattern] = {
 class SensitiveDataScanner:
     """Scans log messages and field values for sensitive data patterns."""
 
-    def scan_message(self, message: str) -> Dict[str, List[str]]:
+    def scan_message(self, message: str) -> dict[str, list[str]]:
         """Return dict mapping pattern_name -> list of matched strings."""
-        findings: Dict[str, List[str]] = {}
+        findings: dict[str, list[str]] = {}
         for name, pattern in _SENSITIVE_PATTERNS.items():
             matches = pattern.findall(message)
             if matches:
                 findings[name] = matches
         return findings
 
-    def scan_entry(self, entry: LogEntry) -> Dict[str, List[str]]:
+    def scan_entry(self, entry: LogEntry) -> dict[str, list[str]]:
         """Scan message and all string field values."""
         combined = entry.message
         for v in entry.fields.values():
@@ -208,26 +206,26 @@ class SensitiveDataScanner:
 class CorrelationTracker:
     """Verifies correlation_id propagates through a sequence of log entries."""
 
-    def all_have_correlation_id(self, entries: List[LogEntry]) -> bool:
+    def all_have_correlation_id(self, entries: list[LogEntry]) -> bool:
         return all(bool(e.correlation_id) for e in entries)
 
-    def single_correlation_id(self, entries: List[LogEntry]) -> bool:
+    def single_correlation_id(self, entries: list[LogEntry]) -> bool:
         """All entries share exactly one correlation_id."""
         ids = {e.correlation_id for e in entries if e.correlation_id}
         return len(ids) == 1
 
     def group_by_correlation(
-        self, entries: List[LogEntry]
-    ) -> Dict[str, List[LogEntry]]:
-        groups: Dict[str, List[LogEntry]] = {}
+        self, entries: list[LogEntry]
+    ) -> dict[str, list[LogEntry]]:
+        groups: dict[str, list[LogEntry]] = {}
         for e in entries:
             cid = e.correlation_id or "__none__"
             groups.setdefault(cid, []).append(e)
         return groups
 
     def missing_correlation_entries(
-        self, entries: List[LogEntry]
-    ) -> List[LogEntry]:
+        self, entries: list[LogEntry]
+    ) -> list[LogEntry]:
         return [e for e in entries if not e.correlation_id]
 
     def correlation_id_is_valid_uuid(self, correlation_id: str) -> bool:
@@ -242,7 +240,7 @@ class CorrelationTracker:
 # TimestampValidator
 # ---------------------------------------------------------------------------
 
-def _parse_iso8601(ts: str) -> Optional[datetime]:
+def _parse_iso8601(ts: str) -> datetime | None:
     """Parse ISO 8601 timestamp; return None on failure."""
     ts = ts.strip()
     # Normalise Z -> +00:00
@@ -278,10 +276,10 @@ class TimestampValidator:
     def is_valid_iso8601(self, ts: str) -> bool:
         return _ISO8601_RE.match(ts) is not None
 
-    def parse(self, ts: str) -> Optional[datetime]:
+    def parse(self, ts: str) -> datetime | None:
         return _parse_iso8601(ts)
 
-    def is_monotonic(self, entries: List[LogEntry]) -> bool:
+    def is_monotonic(self, entries: list[LogEntry]) -> bool:
         """Return True if timestamps are non-decreasing."""
         parsed = []
         for e in entries:
@@ -292,18 +290,21 @@ class TimestampValidator:
         return all(parsed[i] <= parsed[i + 1] for i in range(len(parsed) - 1))
 
     def find_out_of_order(
-        self, entries: List[LogEntry]
-    ) -> List[Tuple[int, int]]:
+        self, entries: list[LogEntry]
+    ) -> list[tuple[int, int]]:
         """Return list of (i, j) index pairs where entry[j] < entry[i]."""
-        out: List[Tuple[int, int]] = []
+        out: list[tuple[int, int]] = []
         parsed = [_parse_iso8601(e.timestamp) for e in entries]
         for i in range(len(parsed) - 1):
-            if parsed[i] is not None and parsed[i + 1] is not None:
-                if parsed[i + 1] < parsed[i]:  # type: ignore[operator]
-                    out.append((i, i + 1))
+            if (
+                parsed[i] is not None
+                and parsed[i + 1] is not None
+                and parsed[i + 1] < parsed[i]  # type: ignore[operator]
+            ):
+                out.append((i, i + 1))
         return out
 
-    def all_timestamps_valid(self, entries: List[LogEntry]) -> bool:
+    def all_timestamps_valid(self, entries: list[LogEntry]) -> bool:
         return all(self.is_valid_iso8601(e.timestamp) for e in entries)
 
 
@@ -319,7 +320,7 @@ class PerformanceLogChecker:
     def has_timing(self, entry: LogEntry) -> bool:
         return self.TIMING_FIELD in entry.fields
 
-    def timing_is_valid(self, entry: LogEntry) -> Tuple[bool, str]:
+    def timing_is_valid(self, entry: LogEntry) -> tuple[bool, str]:
         """Return (valid, error_message)."""
         if self.TIMING_FIELD not in entry.fields:
             return False, f"Missing field '{self.TIMING_FIELD}'"
@@ -331,8 +332,8 @@ class PerformanceLogChecker:
         return True, ""
 
     def validate_entries(
-        self, entries: List[LogEntry]
-    ) -> List[Tuple[LogEntry, str]]:
+        self, entries: list[LogEntry]
+    ) -> list[tuple[LogEntry, str]]:
         """Return list of (entry, error) for invalid timing entries."""
         invalid = []
         for e in entries:
@@ -342,7 +343,7 @@ class PerformanceLogChecker:
                     invalid.append((e, err))
         return invalid
 
-    def average_duration(self, entries: List[LogEntry]) -> Optional[float]:
+    def average_duration(self, entries: list[LogEntry]) -> float | None:
         """Return average duration_ms over entries that have it; None if none."""
         vals = [
             e.fields[self.TIMING_FIELD]
@@ -353,7 +354,7 @@ class PerformanceLogChecker:
             return None
         return sum(vals) / len(vals)
 
-    def max_duration(self, entries: List[LogEntry]) -> Optional[float]:
+    def max_duration(self, entries: list[LogEntry]) -> float | None:
         vals = [
             e.fields[self.TIMING_FIELD]
             for e in entries
@@ -375,9 +376,9 @@ class ErrorContextChecker:
     def is_error_entry(self, entry: LogEntry) -> bool:
         return entry.level.upper() in ("ERROR", "CRITICAL")
 
-    def validate_error_entry(self, entry: LogEntry) -> Tuple[bool, List[str]]:
+    def validate_error_entry(self, entry: LogEntry) -> tuple[bool, list[str]]:
         """Return (valid, errors). Only meaningful for ERROR/CRITICAL entries."""
-        errors: List[str] = []
+        errors: list[str] = []
         if not self.is_error_entry(entry):
             return True, []
         missing = ERROR_REQUIRED_FIELDS - entry.fields.keys()
@@ -394,8 +395,8 @@ class ErrorContextChecker:
         return (len(errors) == 0), errors
 
     def validate_all_errors(
-        self, entries: List[LogEntry]
-    ) -> List[Tuple[LogEntry, List[str]]]:
+        self, entries: list[LogEntry]
+    ) -> list[tuple[LogEntry, list[str]]]:
         """Return (entry, errors) for each invalid error entry."""
         invalid = []
         for e in entries:
@@ -414,13 +415,13 @@ class ErrorContextChecker:
 class LoggingReport:
     """Aggregates validation results from all checkers."""
     total_entries: int = 0
-    format_errors: List[str] = field(default_factory=list)
-    level_issues: List[str] = field(default_factory=list)
-    sensitive_data_findings: List[Dict[str, Any]] = field(default_factory=list)
-    correlation_issues: List[str] = field(default_factory=list)
-    timestamp_issues: List[str] = field(default_factory=list)
-    performance_issues: List[str] = field(default_factory=list)
-    error_context_issues: List[str] = field(default_factory=list)
+    format_errors: list[str] = field(default_factory=list)
+    level_issues: list[str] = field(default_factory=list)
+    sensitive_data_findings: list[dict[str, Any]] = field(default_factory=list)
+    correlation_issues: list[str] = field(default_factory=list)
+    timestamp_issues: list[str] = field(default_factory=list)
+    performance_issues: list[str] = field(default_factory=list)
+    error_context_issues: list[str] = field(default_factory=list)
     generated_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -449,7 +450,7 @@ class LoggingReport:
             + len(self.error_context_issues)
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "total_entries": self.total_entries,
             "passed": self.passed,
@@ -472,7 +473,7 @@ class LoggingReport:
         )
 
 
-def run_full_report(entries: List[LogEntry]) -> LoggingReport:
+def run_full_report(entries: list[LogEntry]) -> LoggingReport:
     """Run all checks against a list of entries and return a LoggingReport."""
     report = LoggingReport(total_entries=len(entries))
 
@@ -533,7 +534,7 @@ DEFAULT_PORT = 19030
 class _LoggingHTTPHandler(BaseHTTPRequestHandler):
     """HTTP request handler for the mock logging server."""
 
-    server: "MockLoggingHandler"  # type: ignore[assignment]
+    server: MockLoggingHandler  # type: ignore[assignment]
 
     def log_message(self, fmt: str, *args: Any) -> None:  # silence default logging
         pass
@@ -579,7 +580,7 @@ class _LoggingHTTPHandler(BaseHTTPRequestHandler):
             self.server._entries.append(entry)
         self._send_json(201, {"status": "accepted", "id": len(self.server._entries) - 1})
 
-    def _handle_get_logs(self, qs: Dict[str, List[str]]) -> None:
+    def _handle_get_logs(self, qs: dict[str, list[str]]) -> None:
         with self.server._lock:
             entries = list(self.server._entries)
         level_filter = qs.get("level", [None])[0]
@@ -626,12 +627,12 @@ class MockLoggingHandler:
     def __init__(self, port: int = 0) -> None:
         """Use port=0 for an OS-assigned dynamic port."""
         self._lock = threading.Lock()
-        self._entries: List[LogEntry] = []
+        self._entries: list[LogEntry] = []
         self._server = HTTPServer(("127.0.0.1", port), _LoggingHTTPHandler)
         # Give the handler access to this instance
         self._server._lock = self._lock  # type: ignore[attr-defined]
         self._server._entries = self._entries  # type: ignore[attr-defined]
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
 
     @property
     def port(self) -> int:
@@ -654,7 +655,7 @@ class MockLoggingHandler:
             self._thread.join(timeout=5)
             self._thread = None
 
-    def get_entries(self) -> List[LogEntry]:
+    def get_entries(self) -> list[LogEntry]:
         with self._lock:
             return list(self._entries)
 
@@ -667,7 +668,7 @@ class MockLoggingHandler:
             return len(self._entries)
 
     # context-manager support
-    def __enter__(self) -> "MockLoggingHandler":
+    def __enter__(self) -> MockLoggingHandler:
         self.start()
         return self
 

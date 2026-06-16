@@ -9,20 +9,21 @@ import io
 import os
 import re
 import sys
-import threading
-import zlib
-import zipfile
-from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Callable, Dict, List, Optional, Tuple
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+import threading
+import zipfile
+import zlib
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path as _Path
+from typing import Optional
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -32,7 +33,7 @@ from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 class UploadPart:
     """Represents one part of a multipart/form-data upload."""
     name: str = ""
-    filename: Optional[str] = None
+    filename: str | None = None
     content_type: str = "text/plain"
     data: bytes = b""
 
@@ -40,8 +41,8 @@ class UploadPart:
 @dataclass
 class UploadResult:
     """Result of processing a single upload."""
-    parts: List[UploadPart] = field(default_factory=list)
-    errors: List[str] = field(default_factory=list)
+    parts: list[UploadPart] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
     rejected: bool = False
     rejection_reason: str = ""
 
@@ -53,8 +54,8 @@ class UploadReport:
     accepted: int = 0
     rejected: int = 0
     total_bytes: int = 0
-    errors: List[str] = field(default_factory=list)
-    results: List[UploadResult] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    results: list[UploadResult] = field(default_factory=list)
 
     def add_result(self, result: UploadResult, byte_count: int = 0) -> None:
         self.total_uploads += 1
@@ -100,13 +101,13 @@ class MultipartParser:
         boundary = match.group(1).strip('"')
         return cls(boundary)
 
-    def parse(self, body: bytes) -> Tuple[List[UploadPart], List[str]]:
+    def parse(self, body: bytes) -> tuple[list[UploadPart], list[str]]:
         """
         Parse multipart body. Returns (parts, errors).
         Tolerates truncated bodies and missing final boundary.
         """
-        parts: List[UploadPart] = []
-        errors: List[str] = []
+        parts: list[UploadPart] = []
+        errors: list[str] = []
 
         if not body:
             return parts, errors
@@ -157,8 +158,8 @@ class MultipartParser:
 
         return parts, errors
 
-    def _parse_headers(self, header_block: bytes) -> Dict[str, str]:
-        headers: Dict[str, str] = {}
+    def _parse_headers(self, header_block: bytes) -> dict[str, str]:
+        headers: dict[str, str] = {}
         lines = header_block.replace(b"\r\n", b"\n").split(b"\n")
         for line in lines:
             if b":" in line:
@@ -166,8 +167,8 @@ class MultipartParser:
                 headers[key.strip().lower().decode("latin-1")] = val.strip().decode("latin-1")
         return headers
 
-    def _build_part(self, headers: Dict[str, str], data: bytes, idx: int,
-                    errors: List[str]) -> UploadPart:
+    def _build_part(self, headers: dict[str, str], data: bytes, idx: int,
+                    errors: list[str]) -> UploadPart:
         part = UploadPart()
         part.data = data
 
@@ -269,7 +270,7 @@ class DecompressionBombChecker:
 
         return output
 
-    def check_zip(self, data: bytes, depth: int = 0) -> Dict[str, bytes]:
+    def check_zip(self, data: bytes, depth: int = 0) -> dict[str, bytes]:
         """
         Extract zip contents with bomb protection.
         Returns {filename: contents} dict.
@@ -282,7 +283,7 @@ class DecompressionBombChecker:
 
         input_size = len(data)
         total_output = 0
-        result: Dict[str, bytes] = {}
+        result: dict[str, bytes] = {}
 
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as zf:
@@ -368,10 +369,10 @@ class ContentTypeSniffer:
     Enforces an allow-list.
     """
 
-    def __init__(self, allowed_types: Optional[set] = None):
+    def __init__(self, allowed_types: set | None = None):
         self.allowed_types = allowed_types if allowed_types is not None else set(DEFAULT_ALLOWED_TYPES)
 
-    def sniff(self, data: bytes) -> Optional[str]:
+    def sniff(self, data: bytes) -> str | None:
         """Detect content type from magic bytes. Returns MIME type or None."""
         if not data:
             return None
@@ -380,7 +381,7 @@ class ContentTypeSniffer:
                 return mime
         return None
 
-    def validate(self, data: bytes, declared_type: str) -> Tuple[bool, str]:
+    def validate(self, data: bytes, declared_type: str) -> tuple[bool, str]:
         """
         Validate data against declared content type.
 
@@ -421,13 +422,13 @@ class SizeLimitChecker:
     def __init__(self, limit: int):
         self.limit = limit
 
-    def check_bytes(self, data: bytes) -> Tuple[int, bool]:
+    def check_bytes(self, data: bytes) -> tuple[int, bool]:
         """Check if bytes data exceeds the limit."""
         if len(data) > self.limit:
             return self.limit, True
         return len(data), False
 
-    def read_stream(self, stream, chunk_size: int = 8192) -> Tuple[int, bool]:
+    def read_stream(self, stream, chunk_size: int = 8192) -> tuple[int, bool]:
         """
         Read from a file-like stream up to the limit.
         Returns (total_bytes_read, limit_hit).
@@ -470,7 +471,7 @@ class FilenameSanitizer:
     - Windows reserved names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
     """
 
-    def sanitize(self, filename: str) -> Tuple[bool, str, str]:
+    def sanitize(self, filename: str) -> tuple[bool, str, str]:
         """
         Validate and sanitize a filename.
 
@@ -535,7 +536,7 @@ class PartialStreamTester:
     against the declared Content-Length header.
     """
 
-    def check(self, body: bytes, declared_content_length: Optional[int]) -> Tuple[bool, str]:
+    def check(self, body: bytes, declared_content_length: int | None) -> tuple[bool, str]:
         """
         Check if body is truncated.
 
@@ -558,7 +559,7 @@ class PartialStreamTester:
         return False, "OK"
 
     def check_stream(self, stream, declared_content_length: int,
-                     chunk_size: int = 8192) -> Tuple[bool, str]:
+                     chunk_size: int = 8192) -> tuple[bool, str]:
         """
         Read from stream and check against declared length.
         Returns (truncated: bool, message: str).
@@ -604,10 +605,7 @@ class MockUploadHandler(BaseHTTPRequestHandler):
             cl = None
 
         # Read body
-        if cl is not None:
-            body = self.rfile.read(cl)
-        else:
-            body = self.rfile.read(65536)
+        body = self.rfile.read(cl) if cl is not None else self.rfile.read(65536)
 
         # Check truncation
         pst = PartialStreamTester()
@@ -665,9 +663,9 @@ class MockUploadServer:
     def __init__(self, port: int = 0):
         # port=0 lets OS pick an available port
         self.server = HTTPServer(("127.0.0.1", port), MockUploadHandler)
-        self.server.upload_results: List[UploadResult] = []
+        self.server.upload_results: list[UploadResult] = []
         self.port = self.server.server_address[1]
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -688,7 +686,7 @@ class MockUploadServer:
         self.server.upload_results.clear()
 
     @property
-    def results(self) -> List[UploadResult]:
+    def results(self) -> list[UploadResult]:
         return self.server.upload_results
 
 
@@ -696,7 +694,7 @@ class MockUploadServer:
 # Multipart builder helpers (for tests and internal use)
 # ---------------------------------------------------------------------------
 
-def build_multipart_body(parts: List[dict], boundary: str = "TestBoundary123") -> bytes:
+def build_multipart_body(parts: list[dict], boundary: str = "TestBoundary123") -> bytes:
     """
     Build a multipart/form-data body from a list of part dicts.
 
@@ -742,7 +740,7 @@ class UploadValidator:
     def __init__(
         self,
         max_file_size: int = 10 * 1024 * 1024,
-        allowed_types: Optional[set] = None,
+        allowed_types: set | None = None,
         max_output_bytes: int = DecompressionBombChecker.DEFAULT_MAX_OUTPUT,
         max_ratio: float = DecompressionBombChecker.DEFAULT_MAX_RATIO,
     ):
@@ -831,7 +829,7 @@ class UploadFixture:
     """A frozen upload fixture: filename, declared type, raw bytes (magic-bearing),
     and the size of the payload. The corpus pairs each with an expected verdict."""
     name: str
-    filename: Optional[str]
+    filename: str | None
     declared_type: str
     data: bytes
     note: str = ""
@@ -980,7 +978,7 @@ mutant_no_size_cap = _validator_for(_NoSizeCapValidator)
 
 # --- Frozen corpus: upload fixture -> expected verdict ----------------------
 
-UPLOAD_CORPUS: Tuple[UploadFixture, ...] = (
+UPLOAD_CORPUS: tuple[UploadFixture, ...] = (
     # --- content-type masquerade: declared image, bytes are something else ---
     # (catches _TrustDeclaredTypeValidator, which never sniffs the bytes).
     UploadFixture("png_declared_but_jpeg_bytes", "avatar.png", "image/png",
@@ -1023,7 +1021,7 @@ UPLOAD_CORPUS: Tuple[UploadFixture, ...] = (
 
 # Literal expected verdicts, computed by hand from the upload contract — NEVER
 # read back from the oracle object, which is what keeps prove() non-circular.
-EXPECTED_VERDICTS: Dict[str, str] = {
+EXPECTED_VERDICTS: dict[str, str] = {
     "png_declared_but_jpeg_bytes": REJECT,
     "png_declared_but_zip_bytes": REJECT,
     "pdf_declared_but_png_bytes": REJECT,
@@ -1076,7 +1074,7 @@ TEETH = Teeth(
 )
 
 
-def list_scenarios() -> List[str]:
+def list_scenarios() -> list[str]:
     """Names of the frozen corpus fixtures (the teeth scenarios)."""
     return [f.name for f in UPLOAD_CORPUS]
 
@@ -1116,7 +1114,7 @@ def _run_self_test(as_json: bool = False) -> int:
 # CLI entry point — default action is the self-test (repo convention).
 # ---------------------------------------------------------------------------
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="File Upload / Decompression-Bomb Test Harness")
     parser.add_argument("--self-test", action="store_true", help="run built-in checks")

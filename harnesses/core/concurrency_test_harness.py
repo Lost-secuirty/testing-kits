@@ -10,26 +10,27 @@ run a PURE, DETERMINISTIC single-thread simulation of a concrete bad interleavin
 on every run with zero real thread timing, clock, network, or filesystem I/O.
 """
 
-import threading
-import queue
-import time
-import json
-import random
-import logging
 import http.server
-import urllib.request
-import urllib.error
-from collections import defaultdict
-from dataclasses import dataclass
-from typing import List, Dict, Any, Optional, Callable, Tuple
+import json
+import logging
+import queue
+import random
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+import threading
+import time
+import urllib.error
+import urllib.request
+from collections import defaultdict
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path as _Path
+from typing import Any
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
-
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -105,7 +106,7 @@ class RaceDetector:
         for _ in range(self.increments_per_thread):
             counter.increment()
 
-    def run_with_locked(self) -> Dict[str, Any]:
+    def run_with_locked(self) -> dict[str, Any]:
         """Run with the thread-safe counter. Final count must equal expected."""
         counter = SharedCounter(0)
         barrier = threading.Barrier(self.n_threads)
@@ -125,7 +126,7 @@ class RaceDetector:
             "race_detected": final != self.expected,
         }
 
-    def run_with_unlocked(self) -> Dict[str, Any]:
+    def run_with_unlocked(self) -> dict[str, Any]:
         """
         Run with the unsafe counter. Race conditions may (and often do) cause
         the final count to differ from expected.
@@ -164,7 +165,7 @@ class DeadlockDetector:
         self.lock_a = threading.Lock()
         self.lock_b = threading.Lock()
 
-    def _thread_a(self, results: Dict, ready: threading.Event, go: threading.Event) -> None:
+    def _thread_a(self, results: dict, ready: threading.Event, go: threading.Event) -> None:
         with self.lock_a:
             ready.set()
             go.wait()
@@ -173,7 +174,7 @@ class DeadlockDetector:
             if acquired:
                 self.lock_b.release()
 
-    def _thread_b(self, results: Dict, ready: threading.Event, go: threading.Event) -> None:
+    def _thread_b(self, results: dict, ready: threading.Event, go: threading.Event) -> None:
         with self.lock_b:
             ready.set()
             go.wait()
@@ -182,13 +183,13 @@ class DeadlockDetector:
             if acquired:
                 self.lock_a.release()
 
-    def detect(self) -> Dict[str, Any]:
+    def detect(self) -> dict[str, Any]:
         """
         Returns a result dict indicating whether a deadlock was detected.
         A deadlock is detected when at least one thread cannot acquire its second
         lock within the timeout window.
         """
-        results: Dict[str, Any] = {}
+        results: dict[str, Any] = {}
         ready_a = threading.Event()
         ready_b = threading.Event()
         go = threading.Event()
@@ -221,19 +222,18 @@ class DeadlockDetector:
             "timeout_used": self.timeout,
         }
 
-    def detect_safe(self) -> Dict[str, Any]:
+    def detect_safe(self) -> dict[str, Any]:
         """
         Demonstrates safe lock ordering: both threads acquire A then B.
         No deadlock should occur.
         """
-        results: Dict[str, Any] = {}
+        results: dict[str, Any] = {}
         barrier = threading.Barrier(2)
 
         def safe_worker(name: str) -> None:
             barrier.wait()
-            with self.lock_a:
-                with self.lock_b:
-                    results[name] = True
+            with self.lock_a, self.lock_b:
+                results[name] = True
 
         threads = [
             threading.Thread(target=safe_worker, args=(f"t{i}",))
@@ -270,7 +270,7 @@ class AtomicityChecker:
         for _ in range(self.ops_per_thread):
             counter.increment()
 
-    def check_atomic(self) -> Dict[str, Any]:
+    def check_atomic(self) -> dict[str, Any]:
         """Verify that atomic (locked) increment produces correct result."""
         counter = SharedCounter(0)
         barrier = threading.Barrier(self.n_threads)
@@ -290,7 +290,7 @@ class AtomicityChecker:
             "is_correct": final == self.expected,
         }
 
-    def check_non_atomic(self) -> Dict[str, Any]:
+    def check_non_atomic(self) -> dict[str, Any]:
         """
         Demonstrate non-atomic increment. Uses a high thread/op count so that
         race conditions are observable in practice.
@@ -336,7 +336,7 @@ class ConcurrentListTest:
     def __init__(self, n_threads: int = 10, items_per_thread: int = 50) -> None:
         self.n_threads = n_threads
         self.items_per_thread = items_per_thread
-        self._list: List[int] = []
+        self._list: list[int] = []
         self._lock = threading.Lock()
 
     def _append_worker(self, start: int, barrier: threading.Barrier) -> None:
@@ -345,7 +345,7 @@ class ConcurrentListTest:
             with self._lock:
                 self._list.append(start + i)
 
-    def run(self) -> Dict[str, Any]:
+    def run(self) -> dict[str, Any]:
         self._list.clear()
         barrier = threading.Barrier(self.n_threads)
         threads = [
@@ -373,7 +373,7 @@ class ConcurrentDictTest:
     def __init__(self, n_threads: int = 10, items_per_thread: int = 50) -> None:
         self.n_threads = n_threads
         self.items_per_thread = items_per_thread
-        self._dict: Dict[str, int] = {}
+        self._dict: dict[str, int] = {}
         self._lock = threading.Lock()
 
     def _writer_worker(self, thread_id: int, barrier: threading.Barrier) -> None:
@@ -383,7 +383,7 @@ class ConcurrentDictTest:
             with self._lock:
                 self._dict[key] = thread_id * 1000 + i
 
-    def run(self) -> Dict[str, Any]:
+    def run(self) -> dict[str, Any]:
         self._dict.clear()
         barrier = threading.Barrier(self.n_threads)
         threads = [
@@ -401,9 +401,9 @@ class ConcurrentDictTest:
             "is_correct": len(self._dict) == expected_keys,
         }
 
-    def run_counter_accumulation(self) -> Dict[str, Any]:
+    def run_counter_accumulation(self) -> dict[str, Any]:
         """Accumulate counters per key from multiple threads."""
-        counters: Dict[str, int] = defaultdict(int)
+        counters: dict[str, int] = defaultdict(int)
         lock = threading.Lock()
         n_threads = self.n_threads
         increments = self.items_per_thread
@@ -469,7 +469,7 @@ class ProducerConsumerTest:
 
     def _consumer(
         self,
-        consumed: List,
+        consumed: list,
         lock: threading.Lock,
         q: queue.Queue,
         stop_event: threading.Event,
@@ -483,9 +483,9 @@ class ProducerConsumerTest:
             except queue.Empty:
                 continue
 
-    def run(self) -> Dict[str, Any]:
+    def run(self) -> dict[str, Any]:
         q: queue.Queue = queue.Queue()
-        consumed: List = []
+        consumed: list = []
         lock = threading.Lock()
         stop_event = threading.Event()
         barrier = threading.Barrier(self.n_producers)
@@ -540,11 +540,11 @@ class BarrierTest:
     def __init__(self, n_threads: int = 8) -> None:
         self.n_threads = n_threads
 
-    def run(self) -> Dict[str, Any]:
-        phases_completed: List[int] = []
+    def run(self) -> dict[str, Any]:
+        phases_completed: list[int] = []
         lock = threading.Lock()
         barrier = threading.Barrier(self.n_threads)
-        errors: List[str] = []
+        errors: list[str] = []
 
         def worker(tid: int) -> None:
             try:
@@ -584,9 +584,9 @@ class BarrierTest:
             "errors": errors,
         }
 
-    def run_with_action(self) -> Dict[str, Any]:
+    def run_with_action(self) -> dict[str, Any]:
         """Test barrier with an action callback executed once per barrier crossing."""
-        actions_run: List[int] = []
+        actions_run: list[int] = []
         lock = threading.Lock()
 
         def barrier_action() -> None:
@@ -594,7 +594,7 @@ class BarrierTest:
                 actions_run.append(1)
 
         barrier = threading.Barrier(self.n_threads, action=barrier_action)
-        completions: List[bool] = []
+        completions: list[bool] = []
 
         def worker() -> None:
             barrier.wait()
@@ -643,7 +643,7 @@ class CountdownLatch:
             if self._count == 0:
                 self._event.set()
 
-    def wait(self, timeout: Optional[float] = None) -> bool:
+    def wait(self, timeout: float | None = None) -> bool:
         """Block until the latch count reaches zero or timeout expires."""
         return self._event.wait(timeout=timeout)
 
@@ -662,9 +662,9 @@ class CountdownLatchTest:
     def __init__(self, n_workers: int = 10) -> None:
         self.n_workers = n_workers
 
-    def run(self) -> Dict[str, Any]:
+    def run(self) -> dict[str, Any]:
         latch = CountdownLatch(self.n_workers)
-        results: List[str] = []
+        results: list[str] = []
         lock = threading.Lock()
         gate_open = threading.Event()
 
@@ -740,11 +740,11 @@ class ReadWriteLockTest:
         self.n_writers = n_writers
         self.ops = ops
 
-    def run(self) -> Dict[str, Any]:
+    def run(self) -> dict[str, Any]:
         rw_lock = ReadWriteLock()
-        shared_value: Dict[str, int] = {"v": 0}
-        read_values: List[int] = []
-        errors: List[str] = []
+        shared_value: dict[str, int] = {"v": 0}
+        read_values: list[int] = []
+        errors: list[str] = []
         results_lock = threading.Lock()
         barrier = threading.Barrier(self.n_readers + self.n_writers)
 
@@ -761,7 +761,7 @@ class ReadWriteLockTest:
 
         def writer(tid: int) -> None:
             barrier.wait()
-            for i in range(self.ops):
+            for _i in range(self.ops):
                 rw_lock.acquire_write()
                 try:
                     shared_value["v"] += 1
@@ -799,7 +799,7 @@ class SimpleThreadPool:
     def __init__(self, n_workers: int = 4) -> None:
         self.n_workers = n_workers
         self._queue: queue.Queue = queue.Queue()
-        self._workers: List[threading.Thread] = []
+        self._workers: list[threading.Thread] = []
         self._stop = threading.Event()
         self._start()
 
@@ -839,10 +839,10 @@ class ThreadPoolTest:
         self.n_workers = n_workers
         self.n_tasks = n_tasks
 
-    def run(self) -> Dict[str, Any]:
+    def run(self) -> dict[str, Any]:
         pool = SimpleThreadPool(self.n_workers)
         counter = SharedCounter(0)
-        task_ids: List[int] = []
+        task_ids: list[int] = []
         lock = threading.Lock()
 
         def task(tid: int) -> None:
@@ -878,9 +878,9 @@ class SemaphoreTest:
         self.max_concurrent = max_concurrent
         self.n_threads = n_threads
 
-    def run(self) -> Dict[str, Any]:
+    def run(self) -> dict[str, Any]:
         sem = threading.Semaphore(self.max_concurrent)
-        concurrent_counts: List[int] = []
+        concurrent_counts: list[int] = []
         lock = threading.Lock()
         active = [0]
         max_seen = [0]
@@ -919,9 +919,9 @@ class EventSignalingTest:
     Tests threading.Event for signaling between threads.
     """
 
-    def run_basic(self) -> Dict[str, Any]:
+    def run_basic(self) -> dict[str, Any]:
         event = threading.Event()
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
 
         def waiter() -> None:
             fired = event.wait(timeout=5.0)
@@ -938,11 +938,11 @@ class EventSignalingTest:
             "waiter_received": result.get("fired", False),
         }
 
-    def run_broadcast(self) -> Dict[str, Any]:
+    def run_broadcast(self) -> dict[str, Any]:
         """One event wakes multiple waiters simultaneously."""
         event = threading.Event()
         n_waiters = 5
-        received: List[bool] = []
+        received: list[bool] = []
         lock = threading.Lock()
 
         def waiter() -> None:
@@ -963,10 +963,10 @@ class EventSignalingTest:
             "all_received": len(received) == n_waiters and all(received),
         }
 
-    def run_timeout(self) -> Dict[str, Any]:
+    def run_timeout(self) -> dict[str, Any]:
         """Waiter times out when event is never set."""
         event = threading.Event()
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
 
         def waiter() -> None:
             fired = event.wait(timeout=0.1)
@@ -1066,8 +1066,8 @@ class MockServer:
     def __init__(self, host: str = "127.0.0.1", port: int = 0) -> None:
         self.host = host
         self.port = port
-        self._server: Optional[http.server.HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: http.server.HTTPServer | None = None
+        self._thread: threading.Thread | None = None
 
     def start(self) -> int:
         """Start the server and return the bound port."""
@@ -1109,7 +1109,7 @@ class ConcurrentHTTPTest:
         self.base_url = base_url
         self.n_threads = n_threads
 
-    def _fetch(self, path: str, results: List, lock: threading.Lock) -> None:
+    def _fetch(self, path: str, results: list, lock: threading.Lock) -> None:
         try:
             url = f"{self.base_url}{path}"
             with urllib.request.urlopen(url, timeout=5) as resp:
@@ -1120,13 +1120,13 @@ class ConcurrentHTTPTest:
             with lock:
                 results.append({"error": str(e)})
 
-    def run_counter_test(self) -> Dict[str, Any]:
+    def run_counter_test(self) -> dict[str, Any]:
         """Send N requests to /counter and check total count."""
         # Reset first
         with urllib.request.urlopen(f"{self.base_url}/reset", timeout=5):
             pass
 
-        results: List = []
+        results: list = []
         lock = threading.Lock()
         barrier = threading.Barrier(self.n_threads)
 
@@ -1148,9 +1148,9 @@ class ConcurrentHTTPTest:
             "all_succeeded": len(successes) == self.n_threads,
         }
 
-    def run_concurrent_test(self) -> Dict[str, Any]:
+    def run_concurrent_test(self) -> dict[str, Any]:
         """Measure peak concurrency via /concurrent endpoint."""
-        results: List = []
+        results: list = []
         lock = threading.Lock()
 
         threads = [
@@ -1181,11 +1181,11 @@ class ConditionVariableTest:
     def __init__(self, n_items: int = 20) -> None:
         self.n_items = n_items
 
-    def run(self) -> Dict[str, Any]:
-        buffer: List[int] = []
+    def run(self) -> dict[str, Any]:
+        buffer: list[int] = []
         MAX_BUFFER = 5
-        produced: List[int] = []
-        consumed: List[int] = []
+        produced: list[int] = []
+        consumed: list[int] = []
         lock = threading.Lock()
         condition = threading.Condition(lock)
 
@@ -1238,7 +1238,7 @@ class ConcurrencyTestHarness:
     def __init__(self, server_port: int = 0) -> None:
         self.server_port = server_port
         self._server = MockServer(port=server_port)
-        self._results: Dict[str, Any] = {}
+        self._results: dict[str, Any] = {}
 
     def start_server(self) -> int:
         port = self._server.start()
@@ -1252,9 +1252,9 @@ class ConcurrencyTestHarness:
     def base_url(self) -> str:
         return self._server.base_url
 
-    def run_all(self) -> Dict[str, Any]:
+    def run_all(self) -> dict[str, Any]:
         """Run all concurrency tests and return a consolidated report."""
-        results: Dict[str, Any] = {}
+        results: dict[str, Any] = {}
 
         # Race detection
         rd = RaceDetector(n_threads=5, increments_per_thread=100)
@@ -1323,7 +1323,7 @@ class ConcurrencyTestHarness:
         self._results = results
         return results
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         """Return a human-readable summary of all test results."""
         if not self._results:
             return {"error": "no results — run run_all() first"}
@@ -1427,8 +1427,8 @@ def _step(programs, pcs, regs, aborted, holds, cell, i: int) -> str:
     return "advanced"
 
 
-def simulate(programs: Tuple[Tuple[Tuple[Any, ...], ...], ...],
-             schedule: Tuple[int, ...],
+def simulate(programs: tuple[tuple[tuple[Any, ...], ...], ...],
+             schedule: tuple[int, ...],
              initial: int) -> int:
     """Run `programs` (one step machine per transaction) under the forced
     `schedule` over a single shared integer cell starting at `initial`.
@@ -1445,7 +1445,7 @@ def simulate(programs: Tuple[Tuple[Tuple[Any, ...], ...], ...],
     cell = {"value": initial, "owner": _NO_TX}
     n = len(programs)
     pcs = [0] * n              # program counter per tx
-    regs: List[int] = [0] * n  # private register per tx
+    regs: list[int] = [0] * n  # private register per tx
     aborted = [False] * n
     holds = [False] * n        # whether tx currently holds the lock
 
@@ -1457,7 +1457,7 @@ def simulate(programs: Tuple[Tuple[Tuple[Any, ...], ...], ...],
 
     # Phase 1: consume the explicit schedule. A blocked tx is deferred to the
     # back of the pending queue so its step still happens, just later.
-    pending: List[int] = list(schedule)
+    pending: list[int] = list(schedule)
     iters = 0
     requeued_streak = 0
     while pending and iters < max_iters:
@@ -1493,7 +1493,7 @@ def simulate(programs: Tuple[Tuple[Tuple[Any, ...], ...], ...],
 
 # --- Program builders: the IMPL decides how a transaction is structured. -----
 
-def oracle_program(delta: int) -> Tuple[Tuple[Any, ...], ...]:
+def oracle_program(delta: int) -> tuple[tuple[Any, ...], ...]:
     """CORRECT: read-modify-write fully inside a held lock (mutual exclusion).
 
     No schedule can interleave another tx between this tx's read and write, so
@@ -1508,7 +1508,7 @@ def oracle_program(delta: int) -> Tuple[Tuple[Any, ...], ...]:
     )
 
 
-def oracle_guarded_program(amount: int) -> Tuple[Tuple[Any, ...], ...]:
+def oracle_guarded_program(amount: int) -> tuple[tuple[Any, ...], ...]:
     """CORRECT check-then-act: the balance guard AND the debit run inside one
     held lock, so two withdrawals cannot both pass the guard and overdraw."""
     return (
@@ -1521,7 +1521,7 @@ def oracle_guarded_program(amount: int) -> Tuple[Tuple[Any, ...], ...]:
     )
 
 
-def missing_lock_program(delta: int) -> Tuple[Tuple[Any, ...], ...]:
+def missing_lock_program(delta: int) -> tuple[tuple[Any, ...], ...]:
     """BUG: read-modify-write with NO lock at all (the classic lost update).
 
     Because there is no critical section, the forced schedule can interleave a
@@ -1535,7 +1535,7 @@ def missing_lock_program(delta: int) -> Tuple[Tuple[Any, ...], ...]:
     )
 
 
-def lock_dropped_midway_program(delta: int) -> Tuple[Tuple[Any, ...], ...]:
+def lock_dropped_midway_program(delta: int) -> tuple[tuple[Any, ...], ...]:
     """BUG: acquires a lock but RELEASES it between the read and the write.
 
     A real defect (e.g. ``with lock: x = read()`` then writing outside the
@@ -1551,7 +1551,7 @@ def lock_dropped_midway_program(delta: int) -> Tuple[Tuple[Any, ...], ...]:
     )
 
 
-def nonatomic_check_then_act_program(amount: int) -> Tuple[Tuple[Any, ...], ...]:
+def nonatomic_check_then_act_program(amount: int) -> tuple[tuple[Any, ...], ...]:
     """BUG: non-atomic check-then-act — the guard is OUTSIDE the lock.
 
     Each tx reads the balance and checks ``balance >= amount`` with no lock held,
@@ -1578,8 +1578,8 @@ class Scenario:
     name: str
     kind: str            # "increment" | "withdraw"
     initial: int
-    args: Tuple[int, ...]      # delta per tx (increment) or amount per tx (withdraw)
-    schedule: Tuple[int, ...]  # forced, adversarial interleaving (tx indices)
+    args: tuple[int, ...]      # delta per tx (increment) or amount per tx (withdraw)
+    schedule: tuple[int, ...]  # forced, adversarial interleaving (tx indices)
     expected: int              # LITERAL correct final state under correct control
     note: str = ""
 
@@ -1589,7 +1589,7 @@ class Scenario:
 # tx1. Under the correct oracle, tx0 holds the lock so tx1 cannot start until tx0
 # is done, and both increments land. Steps per missing-lock program: read=0,
 # compute=1, write=2. The schedule advances by tx index, one step at a time.
-SCENARIOS: Tuple[Scenario, ...] = (
+SCENARIOS: tuple[Scenario, ...] = (
     # Two +1 increments from 0. Correct final = 2. The adversarial schedule
     # interleaves so a missing/dropped lock loses one increment (final = 1).
     Scenario(
@@ -1638,10 +1638,10 @@ SCENARIOS: Tuple[Scenario, ...] = (
 # Single-threaded scenario-kind selector (set by _final_state before building),
 # so one impl object can serve both increment and withdraw scenarios via the
 # simple ``builder(arg)`` signature. Safe because prove() is single-threaded.
-_CURRENT_KIND: List[str] = ["increment"]
+_CURRENT_KIND: list[str] = ["increment"]
 
 
-def _final_state(impl: Callable[[int], Tuple[Tuple[Any, ...], ...]],
+def _final_state(impl: Callable[[int], tuple[tuple[Any, ...], ...]],
                  scenario: Scenario) -> int:
     """Build one step-program per tx for `scenario` and simulate the interleaving."""
     _CURRENT_KIND[0] = scenario.kind
@@ -1649,7 +1649,7 @@ def _final_state(impl: Callable[[int], Tuple[Tuple[Any, ...], ...]],
     return simulate(programs, scenario.schedule, scenario.initial)
 
 
-def prove(impl: Callable[[int], Tuple[Tuple[Any, ...], ...]]) -> bool:
+def prove(impl: Callable[[int], tuple[tuple[Any, ...], ...]]) -> bool:
     """True iff `impl` produces a WRONG final state on any frozen scenario under
     its forced adversarial schedule (i.e. the concurrency bug is CAUGHT).
 
@@ -1673,9 +1673,9 @@ def prove(impl: Callable[[int], Tuple[Tuple[Any, ...], ...]]) -> bool:
     return False
 
 
-def _make_impl(inc_builder: Callable[[int], Tuple[Tuple[Any, ...], ...]],
-               wd_builder: Callable[[int], Tuple[Tuple[Any, ...], ...]]
-               ) -> Callable[[int], Tuple[Tuple[Any, ...], ...]]:
+def _make_impl(inc_builder: Callable[[int], tuple[tuple[Any, ...], ...]],
+               wd_builder: Callable[[int], tuple[tuple[Any, ...], ...]]
+               ) -> Callable[[int], tuple[tuple[Any, ...], ...]]:
     """Combine an increment-program builder and a withdraw-program builder into a
     single impl whose behaviour matches the current scenario's kind.
 
@@ -1683,7 +1683,7 @@ def _make_impl(inc_builder: Callable[[int], Tuple[Tuple[Any, ...], ...]],
     the simple ``builder(arg)`` signature while serving both increment and
     withdraw scenarios. This is safe because prove() runs single-threaded.
     """
-    def impl(arg: int) -> Tuple[Tuple[Any, ...], ...]:
+    def impl(arg: int) -> tuple[tuple[Any, ...], ...]:
         if _CURRENT_KIND[0] == "withdraw":
             return wd_builder(arg)
         return inc_builder(arg)
@@ -1722,7 +1722,7 @@ TEETH = Teeth(
 )
 
 
-def list_scenarios() -> List[str]:
+def list_scenarios() -> list[str]:
     """Names of the frozen interleaving scenarios (the teeth scenarios)."""
     return [s.name for s in SCENARIOS]
 
@@ -1768,7 +1768,7 @@ def _run_self_test(as_json: bool = False) -> int:
 # CLI — default action is the self-test (repo convention).
 # ---------------------------------------------------------------------------
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     import argparse
     p = argparse.ArgumentParser(description="Concurrency / synchronization controls")
     p.add_argument("--self-test", action="store_true", help="run built-in checks")

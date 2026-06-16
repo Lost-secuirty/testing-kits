@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 
 from harnesses.pharmacy.srs_test_harness import (
     EASE_FLOOR,
-    EASE_INIT,
     MockMasteryStore,
     SRSSimulator,
     _weight_from_stats,

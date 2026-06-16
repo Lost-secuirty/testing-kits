@@ -23,13 +23,12 @@ Usage:
 
 import argparse
 import json
-import re
 import sqlite3
 import sys
 import threading
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
 # ============================================================
 # EXPIRY STORE
@@ -70,10 +69,7 @@ class ExpiryStore:
 
     def expiring(self, within_days=30, today=None):
         """Return (drug_name, exp_date) where exp_date <= today+within_days."""
-        if today is None:
-            base = datetime.now()
-        else:
-            base = datetime.strptime(today, "%Y-%m-%d")
+        base = datetime.now() if today is None else datetime.strptime(today, "%Y-%m-%d")
         cutoff = (base + timedelta(days=within_days)).strftime("%Y-%m-%d")
         rows = self.conn.execute(
             "SELECT drug_name, exp_date FROM Inventory "

@@ -19,21 +19,17 @@ from __future__ import annotations
 
 import json
 import socket
-import threading
 import time
-import unicodedata
 import unittest
 import urllib.error
 import urllib.request
-from http.server import HTTPServer
 from typing import Any
 
 from harnesses.core.i18n_test_harness import (
+    BIDI_OVERRIDE_CHARS,
+    BOM_UTF8,
     BOM_UTF16_BE,
     BOM_UTF16_LE,
-    BOM_UTF8,
-    BIDI_OVERRIDE_CHARS,
-    DEFAULT_PORT,
     BidiDetector,
     BOMDetector,
     CasefoldTester,
@@ -43,7 +39,6 @@ from harnesses.core.i18n_test_harness import (
     GraphemeResult,
     I18nAnalyzer,
     I18nReport,
-    MockI18nHandler,
     NormalizationResult,
     NormalizationTester,
     SurrogateTester,
@@ -52,7 +47,6 @@ from harnesses.core.i18n_test_harness import (
     start_server,
     stop_server,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -419,7 +413,7 @@ class TestBOMDetection(unittest.TestCase):
         self.assertIsNone(bom_type)
 
     def test_decode_with_utf8_bom(self):
-        data = BOM_UTF8 + "hello".encode("utf-8")
+        data = BOM_UTF8 + b"hello"
         text, bom_type = BOMDetector.decode_with_bom(data)
         self.assertEqual(text, "hello")
         self.assertEqual(bom_type, "utf-8-sig")
@@ -437,7 +431,7 @@ class TestBOMDetection(unittest.TestCase):
         self.assertEqual(bom_type, "utf-16-be")
 
     def test_decode_no_bom(self):
-        data = "hello".encode("utf-8")
+        data = b"hello"
         text, bom_type = BOMDetector.decode_with_bom(data)
         self.assertEqual(text, "hello")
         self.assertIsNone(bom_type)
@@ -1059,7 +1053,7 @@ class TestMockServer(ServerTestCase):
 
     def test_truncate_results_are_valid_strings(self):
         data = _fetch(f"{self.base}/truncate")
-        for key, val in data["truncated"].items():
+        for _key, val in data["truncated"].items():
             self.assertIsInstance(val, str)
 
     def test_east_asian_width_endpoint(self):

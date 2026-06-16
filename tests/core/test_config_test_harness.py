@@ -4,27 +4,23 @@ Tests for Configuration Validation Test Harness (Harness 16 of 36)
 """
 
 import json
-import os
-import time
 import unittest
-from urllib.request import urlopen, Request
-from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 from harnesses._teeth import verify
 from harnesses.core.config_test_harness import (
-    FieldSchema,
+    TEETH,
+    ConfigReport,
     ConfigSchema,
     ConfigValidator,
-    EnvOverrideChecker,
     CrossFieldValidator,
-    SensitiveValueDetector,
-    ConfigReport,
+    EnvOverrideChecker,
+    FieldSchema,
     MockConfigServer,
-    TEETH,
-    prove,
+    SensitiveValueDetector,
     load_config,
+    prove,
 )
-
 
 # ---------------------------------------------------------------------------
 # FieldSchema tests

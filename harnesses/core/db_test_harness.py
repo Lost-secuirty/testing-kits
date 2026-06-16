@@ -13,20 +13,22 @@ Components:
     DbTestRunner           — orchestrates all test scenarios
 """
 
-import sqlite3
-import threading
-import time
-import queue
-import logging
 import argparse
+import logging
+import queue
+import sqlite3
 import sys
-from contextlib import contextmanager
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Make the shared teeth contract importable whether run as a module or a script.
 import sys as _sys
+import threading
+import time
+from collections.abc import Callable
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path as _Path
+from typing import Any
+
 if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
@@ -61,7 +63,7 @@ class ConnectionPool:
         self,
         max_connections: int = 5,
         timeout: float = 2.0,
-        shared_conn: Optional[sqlite3.Connection] = None,
+        shared_conn: sqlite3.Connection | None = None,
     ) -> None:
         self.max_connections = max_connections
         self.timeout = timeout
@@ -69,7 +71,7 @@ class ConnectionPool:
         self._lock = threading.Lock()
         self._pool: queue.Queue = queue.Queue()
         self._shared_conn = shared_conn
-        self._all_connections: List[sqlite3.Connection] = []
+        self._all_connections: list[sqlite3.Connection] = []
         self._checked_out = 0
         self._total_checkouts = 0
         self._total_returns = 0
@@ -125,7 +127,7 @@ class ConnectionPool:
         with self._lock:
             return self._checked_out
 
-    def stats(self) -> Dict[str, int]:
+    def stats(self) -> dict[str, int]:
         with self._lock:
             return {
                 "max_connections": self.max_connections,
@@ -182,7 +184,7 @@ class MockDbHandler:
         """,
     ]
 
-    def __init__(self, conn: Optional[sqlite3.Connection] = None) -> None:
+    def __init__(self, conn: sqlite3.Connection | None = None) -> None:
         if conn is not None:
             self._conn = conn
             self._owns_conn = False
@@ -211,8 +213,8 @@ class MockDbHandler:
     # ------------------------------------------------------------------
 
     def execute(
-        self, sql: str, params: Tuple = ()
-    ) -> Tuple[sqlite3.Cursor, float]:
+        self, sql: str, params: tuple = ()
+    ) -> tuple[sqlite3.Cursor, float]:
         """Execute *sql* and return ``(cursor, elapsed_seconds)``."""
         start = time.perf_counter()
         cur = self._conn.execute(sql, params)
@@ -229,7 +231,7 @@ class MockDbHandler:
     # CRUD helpers
     # ------------------------------------------------------------------
 
-    def insert_user(self, name: str, email: str, age: Optional[int] = None) -> int:
+    def insert_user(self, name: str, email: str, age: int | None = None) -> int:
         cur, _ = self.execute(
             "INSERT INTO users (name, email, age) VALUES (?, ?, ?)",
             (name, email, age),
@@ -237,7 +239,7 @@ class MockDbHandler:
         self.commit()
         return cur.lastrowid
 
-    def get_user(self, user_id: int) -> Optional[sqlite3.Row]:
+    def get_user(self, user_id: int) -> sqlite3.Row | None:
         cur, _ = self.execute("SELECT * FROM users WHERE id = ?", (user_id,))
         return cur.fetchone()
 
@@ -265,7 +267,7 @@ class MockDbHandler:
         self.commit()
         return cur.lastrowid
 
-    def get_orders_for_user(self, user_id: int) -> List[sqlite3.Row]:
+    def get_orders_for_user(self, user_id: int) -> list[sqlite3.Row]:
         cur, _ = self.execute(
             "SELECT * FROM orders WHERE user_id = ?", (user_id,)
         )
@@ -292,7 +294,7 @@ class MockDbHandler:
     # Introspection
     # ------------------------------------------------------------------
 
-    def table_names(self) -> List[str]:
+    def table_names(self) -> list[str]:
         cur, _ = self.execute(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
         )
@@ -311,7 +313,7 @@ class MockDbHandler:
 # MigrationChecker
 # ---------------------------------------------------------------------------
 
-MIGRATIONS: List[Dict[str, Any]] = [
+MIGRATIONS: list[dict[str, Any]] = [
     {
         "version": 1,
         "description": "Create users table",
@@ -385,7 +387,7 @@ class MigrationChecker:
         )
         self._conn.commit()
 
-    def applied_versions(self) -> List[int]:
+    def applied_versions(self) -> list[int]:
         try:
             cur = self._conn.execute(
                 "SELECT version FROM schema_migrations ORDER BY version"
@@ -394,7 +396,7 @@ class MigrationChecker:
         except sqlite3.OperationalError:
             return []
 
-    def apply_all(self, migrations: List[Dict[str, Any]] = None) -> List[int]:
+    def apply_all(self, migrations: list[dict[str, Any]] = None) -> list[int]:
         """
         Apply all pending migrations in version order.
         Returns list of newly applied version numbers.
@@ -419,7 +421,7 @@ class MigrationChecker:
             newly_applied.append(v)
         return newly_applied
 
-    def verify_idempotent(self, migrations: List[Dict[str, Any]] = None) -> bool:
+    def verify_idempotent(self, migrations: list[dict[str, Any]] = None) -> bool:
         """Run apply_all twice; second run must return no newly applied migrations."""
         if migrations is None:
             migrations = MIGRATIONS
@@ -466,7 +468,7 @@ class TransactionTester:
         self._conn.commit()
         return cur.lastrowid
 
-    def get_balance(self, owner: str) -> Optional[float]:
+    def get_balance(self, owner: str) -> float | None:
         cur = self._conn.execute(
             "SELECT balance FROM accounts WHERE owner = ?", (owner,)
         )
@@ -496,7 +498,7 @@ class TransactionTester:
             self._conn.rollback()
             return False
 
-    def test_rollback_on_error(self) -> Dict[str, Any]:
+    def test_rollback_on_error(self) -> dict[str, Any]:
         """Return a dict describing rollback test results."""
         self.seed("alice_txn", 1000.0)
         self.seed("bob_txn", 500.0)
@@ -510,7 +512,7 @@ class TransactionTester:
         }
         return result
 
-    def test_successful_transfer(self) -> Dict[str, Any]:
+    def test_successful_transfer(self) -> dict[str, Any]:
         self.seed("carol_txn", 800.0)
         self.seed("dave_txn", 300.0)
         success = self.transfer("carol_txn", "dave_txn", 150.0)
@@ -534,7 +536,7 @@ class ConnectionPoolMonitor:
     def __init__(self, pool: ConnectionPool) -> None:
         self._pool = pool
         self._lock = threading.Lock()
-        self._events: List[Dict[str, Any]] = []
+        self._events: list[dict[str, Any]] = []
         self._peak_checked_out = 0
         self._exhaustion_count = 0
 
@@ -574,7 +576,7 @@ class ConnectionPoolMonitor:
         with self._lock:
             return self._exhaustion_count
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         stats = self._pool.stats()
         with self._lock:
             return {
@@ -612,7 +614,7 @@ class ConcurrentWriteTester:
         )
         self._conn.commit()
         self._write_lock = threading.Lock()
-        self._errors: List[str] = []
+        self._errors: list[str] = []
 
     def _worker(self, thread_id: int) -> None:
         for seq in range(self.rows_per_thread):
@@ -626,7 +628,7 @@ class ConcurrentWriteTester:
             except Exception as exc:
                 self._errors.append(str(exc))
 
-    def run(self) -> Dict[str, Any]:
+    def run(self) -> dict[str, Any]:
         threads = [
             threading.Thread(target=self._worker, args=(i,), daemon=True)
             for i in range(self.n_threads)
@@ -665,16 +667,16 @@ class QueryPerformanceTracker:
 
     def __init__(self, handler: MockDbHandler) -> None:
         self._handler = handler
-        self._timings: List[Dict[str, Any]] = []
+        self._timings: list[dict[str, Any]] = []
         self._lock = threading.Lock()
 
-    def execute(self, sql: str, params: Tuple = ()) -> sqlite3.Cursor:
+    def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
         cur, elapsed = self._handler.execute(sql, params)
         with self._lock:
             self._timings.append({"sql": sql, "elapsed": elapsed, "params": params})
         return cur
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         with self._lock:
             if not self._timings:
                 return {"count": 0, "total": 0.0, "mean": 0.0, "max": 0.0, "min": 0.0}
@@ -687,7 +689,7 @@ class QueryPerformanceTracker:
                 "min": min(times),
             }
 
-    def slowest(self, n: int = 3) -> List[Dict[str, Any]]:
+    def slowest(self, n: int = 3) -> list[dict[str, Any]]:
         with self._lock:
             return sorted(self._timings, key=lambda t: t["elapsed"], reverse=True)[:n]
 
@@ -699,9 +701,9 @@ class QueryPerformanceTracker:
 class DbTestResult:
     def __init__(self, name: str) -> None:
         self.name = name
-        self.passed: List[str] = []
-        self.failed: List[str] = []
-        self.errors: List[str] = []
+        self.passed: list[str] = []
+        self.failed: list[str] = []
+        self.errors: list[str] = []
 
     def record(self, label: str, condition: bool, detail: str = "") -> None:
         if condition:
@@ -732,7 +734,7 @@ class DbTestRunner:
     """
 
     def __init__(self) -> None:
-        self._results: List[DbTestResult] = []
+        self._results: list[DbTestResult] = []
 
     # ------------------------------------------------------------------
     # Individual test groups
@@ -1055,15 +1057,15 @@ class DbCase:
     """
     name: str
     op: str
-    payload: Dict[str, Any]
-    expected: Dict[str, Any]
+    payload: dict[str, Any]
+    expected: dict[str, Any]
     note: str = ""
 
 
 # Cases chosen so the correct oracle reproduces every expectation AND at least
 # one planted mutant gets each one wrong. All expectations are constants derived
 # by hand from the data-access contract, never read back from the oracle.
-DB_CORPUS: Tuple[DbCase, ...] = (
+DB_CORPUS: tuple[DbCase, ...] = (
     # --- INSERT a benign user: stored verbatim, exactly one row, no surprises.
     DbCase(
         "insert_plain_user",
@@ -1137,13 +1139,13 @@ def _user_count(conn: sqlite3.Connection) -> int:
     return cur.fetchone()[0]
 
 
-def _stored_name(conn: sqlite3.Connection) -> Optional[str]:
+def _stored_name(conn: sqlite3.Connection) -> str | None:
     cur = conn.execute("SELECT name FROM users ORDER BY id LIMIT 1")
     row = cur.fetchone()
     return row[0] if row else None
 
 
-def oracle_run(op: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+def oracle_run(op: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Correct data-access layer. Returns the observable final DB state.
 
     This is the behaviour MockDbHandler / TransactionTester implement, distilled
@@ -1228,7 +1230,7 @@ def oracle_run(op: str, payload: Dict[str, Any]) -> Dict[str, Any]:
 
 # --- Planted buggy twins (each models a genuine real-world DB defect) --------
 
-def injection_run(op: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+def injection_run(op: str, payload: dict[str, Any]) -> dict[str, Any]:
     """BUG: builds the INSERT by STRING-INTERPOLATING the value into the SQL
     text instead of binding it — the textbook SQL-injection hole.
 
@@ -1266,7 +1268,7 @@ def injection_run(op: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     return oracle_run(op, payload)
 
 
-def no_rollback_run(op: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+def no_rollback_run(op: str, payload: dict[str, Any]) -> dict[str, Any]:
     """BUG: a write path that does NOT roll back when a later statement fails.
 
     The debit is applied, the credit leg raises, but the except-clause swallows
@@ -1299,7 +1301,7 @@ def no_rollback_run(op: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     return oracle_run(op, payload)
 
 
-def no_commit_run(op: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+def no_commit_run(op: str, payload: dict[str, Any]) -> dict[str, Any]:
     """BUG: a write path that forgets to COMMIT before the connection closes.
 
     The insert lands only in the writer's private uncommitted transaction; a
@@ -1335,7 +1337,7 @@ def no_commit_run(op: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     return oracle_run(op, payload)
 
 
-def prove(impl: Callable[[str, Dict[str, Any]], Dict[str, Any]]) -> bool:
+def prove(impl: Callable[[str, dict[str, Any]], dict[str, Any]]) -> bool:
     """True iff data-access ``impl`` MISHANDLES any frozen corpus case (i.e. the
     planted bug is caught): the observed final DB state diverges from the case's
     literal expectation, or the impl raises.
@@ -1379,7 +1381,7 @@ TEETH = Teeth(
 )
 
 
-def list_scenarios() -> List[str]:
+def list_scenarios() -> list[str]:
     """Names of the frozen corpus cases (the teeth scenarios)."""
     return [c.name for c in DB_CORPUS]
 
@@ -1425,7 +1427,7 @@ def _run_self_test(as_json: bool = False, *, legacy: bool = True) -> int:
     return report.emit(as_json=as_json)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Database Test Harness")
     parser.add_argument(
         "--self-test",

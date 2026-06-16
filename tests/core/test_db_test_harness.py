@@ -13,19 +13,18 @@ Harness 3 of 36 — Database Test Harness
   - Edge cases (empty tables, double-return, large batches, etc.)
 """
 
+import contextlib
 import sqlite3
-import threading
-import time
 import unittest
 
 from harnesses._teeth import verify
 from harnesses.core.db_test_harness import (
     MIGRATIONS,
     TEETH,
+    ConcurrentWriteTester,
     ConnectionPool,
     ConnectionPoolExhausted,
     ConnectionPoolMonitor,
-    ConcurrentWriteTester,
     DbTestRunner,
     MigrationChecker,
     MockDbHandler,
@@ -34,7 +33,6 @@ from harnesses.core.db_test_harness import (
     oracle_run,
     prove,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper
@@ -178,12 +176,11 @@ class TestTransactions(unittest.TestCase):
     def test_transaction_context_manager_rolls_back_on_exception(self):
         db = fresh_db()
         try:
-            with self.assertRaises(ValueError):
-                with db.transaction():
-                    db._conn.execute(
-                        "INSERT INTO users (name, email) VALUES ('RbTxn', 'rbtxn@test.com')"
-                    )
-                    raise ValueError("forced error")
+            with self.assertRaises(ValueError), db.transaction():
+                db._conn.execute(
+                    "INSERT INTO users (name, email) VALUES ('RbTxn', 'rbtxn@test.com')"
+                )
+                raise ValueError("forced error")
             count = db.row_count("users")
             self.assertEqual(count, 0)
         finally:
@@ -346,14 +343,10 @@ class TestConnectionPool(unittest.TestCase):
         monitor = ConnectionPoolMonitor(pool)
         try:
             c = monitor.checkout_with_monitoring()
-            try:
+            with contextlib.suppress(ConnectionPoolExhausted):
                 monitor.checkout_with_monitoring()
-            except ConnectionPoolExhausted:
-                pass
-            try:
+            with contextlib.suppress(ConnectionPoolExhausted):
                 monitor.checkout_with_monitoring()
-            except ConnectionPoolExhausted:
-                pass
             self.assertEqual(monitor.exhaustion_count, 2)
             monitor.checkin_with_monitoring(c)
         finally:

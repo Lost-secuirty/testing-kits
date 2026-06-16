@@ -6,29 +6,31 @@ Tests for Numeric / Money Precision Test Harness (harness 23 of 36).
 import json
 import math
 import unittest
-import urllib.request
 import urllib.error
-from decimal import Decimal, ROUND_HALF_EVEN, ROUND_HALF_UP, ROUND_FLOOR, ROUND_CEILING, InvalidOperation
+import urllib.request
+from decimal import (
+    ROUND_HALF_EVEN,
+    ROUND_HALF_UP,
+    Decimal,
+)
 
 from harnesses._teeth import verify
 from harnesses.core.numeric_test_harness import (
-    Money,
+    ALLOC_CORPUS,
+    TEETH,
+    ComparisonTester,
     CurrencyMismatchError,
-    FloatPitfallTester,
-    RoundingModeTester,
     CurrencyTester,
+    FloatPitfallTester,
+    Money,
+    NumericTestServer,
     OverflowTester,
     PrecisionTester,
-    ComparisonTester,
-    MockNumericHandler,
-    NumericTestServer,
+    RoundingModeTester,
     create_server,
-    TEETH,
-    prove,
     oracle_allocate,
-    ALLOC_CORPUS,
+    prove,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared server fixture
@@ -227,7 +229,7 @@ class TestMoneyDivision(unittest.TestCase):
         self.assertEqual(result.currency, "CHF")
 
     def test_divide_by_zero_raises(self):
-        with self.assertRaises(Exception):
+        with self.assertRaises(ZeroDivisionError):
             Money("10.00").divide(0)
 
 

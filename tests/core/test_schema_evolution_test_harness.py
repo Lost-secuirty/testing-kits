@@ -1,13 +1,11 @@
 """Test suite for schema_evolution_test_harness."""
 
-import sqlite3
 import unittest
 
 from harnesses._teeth import verify
 from harnesses.core.schema_evolution_test_harness import (
     MIGRATION_CORPUS,
     SCENARIOS,
-    SCHEMAS,
     TEETH,
     Field,
     Reader,

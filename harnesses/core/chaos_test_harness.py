@@ -13,10 +13,9 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from collections import deque
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Circuit Breaker
@@ -57,7 +56,7 @@ class CircuitBreaker:
         self._state = CircuitState.CLOSED
         self._failure_count = 0
         self._success_count = 0
-        self._opened_at: Optional[float] = None
+        self._opened_at: float | None = None
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -123,7 +122,7 @@ class CircuitBreaker:
             with self._lock:
                 self._failure_count = 0
             return result
-        except Exception as exc:
+        except Exception:
             with self._lock:
                 self._failure_count += 1
                 if self._failure_count >= self.failure_threshold:
@@ -185,7 +184,7 @@ class FaultInjector:
         self._fault: FaultType = FaultType.NONE
         self._latency_ms: float = 0.0
         self._error_message: str = "Injected fault error"
-        self._corrupt_fn: Optional[Callable[[Any], Any]] = None
+        self._corrupt_fn: Callable[[Any], Any] | None = None
         self._timeout_seconds: float = 60.0
         self._enabled: bool = False
 
@@ -212,7 +211,7 @@ class FaultInjector:
         return self
 
     def inject_corruption(
-        self, corrupt_fn: Optional[Callable[[Any], Any]] = None
+        self, corrupt_fn: Callable[[Any], Any] | None = None
     ) -> "FaultInjector":
         self._fault = FaultType.CORRUPT
         self._corrupt_fn = corrupt_fn or (lambda v: str(v)[::-1])
@@ -303,7 +302,7 @@ def retry_with_backoff(
     Only retries when *retryable(exc)* returns True.
     Raises the last exception if all attempts are exhausted.
     """
-    last_exc: Optional[Exception] = None
+    last_exc: Exception | None = None
     for attempt in range(max_attempts):
         try:
             return fn(*args, **kwargs)
@@ -331,7 +330,7 @@ class ResilienceMetrics:
         self.failure_count: int = 0
         self.open_count: int = 0         # times CircuitOpenError was raised
         self.total_latency_ms: float = 0.0
-        self._latency_samples: List[float] = []
+        self._latency_samples: list[float] = []
         self._lock = threading.Lock()
 
     def record_success(self, latency_ms: float = 0.0) -> None:
@@ -375,7 +374,7 @@ class ResilienceMetrics:
             return 0.0
         return sum(samples) / len(samples)
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         return {
             "success": self.success_count,
             "failure": self.failure_count,
@@ -496,7 +495,7 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
-def start_mock_server(port: int = 0) -> Tuple[http.server.HTTPServer, int, str]:
+def start_mock_server(port: int = 0) -> tuple[http.server.HTTPServer, int, str]:
     """
     Start the mock chaos HTTP server on *port* (0 = OS-assigned free port).
 
@@ -528,9 +527,9 @@ class ResilienceTestRunner:
 
     def __init__(
         self,
-        circuit_breaker: Optional[CircuitBreaker] = None,
-        fault_injector: Optional[FaultInjector] = None,
-        metrics: Optional[ResilienceMetrics] = None,
+        circuit_breaker: CircuitBreaker | None = None,
+        fault_injector: FaultInjector | None = None,
+        metrics: ResilienceMetrics | None = None,
     ) -> None:
         self.circuit_breaker = circuit_breaker or CircuitBreaker()
         self.fault_injector = fault_injector or FaultInjector()
@@ -581,7 +580,7 @@ class ResilienceTestRunner:
         use_fault_injector: bool = True,
         ignore_errors: bool = True,
         **kwargs,
-    ) -> List[Any]:
+    ) -> list[Any]:
         """
         Run *fn* *n* times and return the list of (result_or_exception) values.
         """
@@ -608,7 +607,7 @@ class ResilienceTestRunner:
 # HTTP helper (used in tests)
 # ---------------------------------------------------------------------------
 
-def http_get(url: str, timeout: float = 5.0) -> Tuple[int, str]:
+def http_get(url: str, timeout: float = 5.0) -> tuple[int, str]:
     """Return (status_code, body_text) for a GET request."""
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:
@@ -617,7 +616,7 @@ def http_get(url: str, timeout: float = 5.0) -> Tuple[int, str]:
         return exc.code, exc.read().decode()
 
 
-def http_get_json(url: str, timeout: float = 5.0) -> Tuple[int, Any]:
+def http_get_json(url: str, timeout: float = 5.0) -> tuple[int, Any]:
     code, body = http_get(url, timeout=timeout)
     try:
         return code, json.loads(body)
@@ -633,7 +632,7 @@ class FallbackRegistry:
     """Maps service names to fallback callables or values."""
 
     def __init__(self) -> None:
-        self._registry: Dict[str, Any] = {}
+        self._registry: dict[str, Any] = {}
 
     def register(self, name: str, fallback: Any) -> None:
         self._registry[name] = fallback

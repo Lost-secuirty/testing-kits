@@ -18,8 +18,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
-from typing import Any, Dict, List, Optional, Tuple
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -59,7 +58,7 @@ class EncodingResult:
     decoded_text: str
     round_trip_ok: bool
     is_mojibake: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -85,11 +84,11 @@ class GraphemeResult:
 
 @dataclass
 class I18nReport:
-    encoding_results: List[EncodingResult] = field(default_factory=list)
-    normalization_results: List[NormalizationResult] = field(default_factory=list)
-    grapheme_results: List[GraphemeResult] = field(default_factory=list)
-    bidi_unsafe_texts: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    encoding_results: list[EncodingResult] = field(default_factory=list)
+    normalization_results: list[NormalizationResult] = field(default_factory=list)
+    grapheme_results: list[GraphemeResult] = field(default_factory=list)
+    bidi_unsafe_texts: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def encoding_ok_count(self) -> int:
@@ -185,7 +184,7 @@ class BOMDetector:
     """Detects and strips Byte Order Marks from byte strings."""
 
     @staticmethod
-    def detect(data: bytes) -> Optional[str]:
+    def detect(data: bytes) -> str | None:
         """
         Return BOM type string or None.
         Returns: 'utf-8-sig', 'utf-16-le', 'utf-16-be', or None.
@@ -199,7 +198,7 @@ class BOMDetector:
         return None
 
     @staticmethod
-    def strip(data: bytes) -> Tuple[bytes, Optional[str]]:
+    def strip(data: bytes) -> tuple[bytes, str | None]:
         """
         Strip BOM from data if present.
         Returns (stripped_bytes, bom_type_or_None).
@@ -212,7 +211,7 @@ class BOMDetector:
         return data, None
 
     @staticmethod
-    def decode_with_bom(data: bytes) -> Tuple[str, Optional[str]]:
+    def decode_with_bom(data: bytes) -> tuple[str, str | None]:
         """
         Decode bytes, auto-detecting and stripping BOM.
         Returns (decoded_text, bom_type_or_None).
@@ -374,7 +373,7 @@ class NormalizationTester:
             byte_length_normalized=len(normalized.encode("utf-8")),
         )
 
-    def demonstrate_dedup_bug(self, text_nfc: str, text_nfd: str) -> Dict[str, Any]:
+    def demonstrate_dedup_bug(self, text_nfc: str, text_nfd: str) -> dict[str, Any]:
         """
         Demonstrate the un-normalized dedup bug:
         Two strings that are semantically equal but byte-unequal will NOT be
@@ -426,7 +425,7 @@ class CasefoldTester:
         """Case-insensitive comparison using proper Unicode casefolding."""
         return a.casefold() == b.casefold()
 
-    def demonstrate_german_sharp_s(self) -> Dict[str, Any]:
+    def demonstrate_german_sharp_s(self) -> dict[str, Any]:
         """
         German ß (sharp s) casefolds to 'ss', not to 'ß'.
         str.lower() returns 'ß', but str.casefold() returns 'ss'.
@@ -447,7 +446,7 @@ class CasefoldTester:
             "strass_casefold_match": "Straße".casefold() == "Strasse".casefold(),
         }
 
-    def demonstrate_turkish_dotless_i(self) -> Dict[str, Any]:
+    def demonstrate_turkish_dotless_i(self) -> dict[str, Any]:
         """
         Turkish dotless-ı trap:
         In Turkish locale, uppercase I lowercases to dotless ı (U+0131),
@@ -530,7 +529,7 @@ class DisplayWidthCalculator:
         return "".join(result)
 
     @classmethod
-    def analyze(cls, text: str) -> Dict[str, Any]:
+    def analyze(cls, text: str) -> dict[str, Any]:
         """Return width analysis of a string."""
         char_widths = [(ch, cls.char_width(ch)) for ch in text]
         total_width = sum(w for _, w in char_widths)
@@ -557,7 +556,7 @@ class BidiDetector:
         return any(ch in BIDI_OVERRIDE_CHARS for ch in text)
 
     @staticmethod
-    def find_bidi_overrides(text: str) -> List[Tuple[int, str, str]]:
+    def find_bidi_overrides(text: str) -> list[tuple[int, str, str]]:
         """
         Return list of (index, char, unicode_name) for each bidi override found.
         """
@@ -584,7 +583,7 @@ class BidiDetector:
         return False
 
     @staticmethod
-    def scan_for_trojan_source(text: str) -> Dict[str, Any]:
+    def scan_for_trojan_source(text: str) -> dict[str, Any]:
         """
         Scan text for Trojan Source attack indicators (CVE-2021-42574).
         Returns a report dict.
@@ -618,7 +617,7 @@ class I18nAnalyzer:
         self.display_width = DisplayWidthCalculator()
         self.bidi_detector = BidiDetector()
 
-    def full_report(self, texts: List[str]) -> I18nReport:
+    def full_report(self, texts: list[str]) -> I18nReport:
         """Run all i18n checks on the given list of texts."""
         report = I18nReport()
 
@@ -837,7 +836,6 @@ def stop_server(server: HTTPServer) -> None:
 
 def _self_test() -> int:
     """Run a quick smoke-test and return exit code (0 = pass)."""
-    import sys
 
     failures = []
 
@@ -855,7 +853,7 @@ def _self_test() -> int:
         failures.append("Mojibake not detected")
 
     # 3. BOM detection
-    data = BOM_UTF8 + "hello".encode("utf-8")
+    data = BOM_UTF8 + b"hello"
     bom = BOMDetector.detect(data)
     if bom != "utf-8-sig":
         failures.append(f"BOM detection failed: {bom!r}")
@@ -922,8 +920,8 @@ def _self_test() -> int:
 
 
 if __name__ == "__main__":
-    import sys
     import argparse
+    import sys
 
     parser = argparse.ArgumentParser(description="i18n / Unicode / Encoding Test Harness")
     parser.add_argument("--self-test", action="store_true", help="Run self-tests and exit")
