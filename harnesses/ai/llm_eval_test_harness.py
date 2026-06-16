@@ -2,8 +2,28 @@
 LLM / AI-Feature Eval Test Harness (Harness 25 of 36)
 Pure stdlib, zero external dependencies.
 Mock HTTP server on dynamic port (default 19110).
+
+TEETH (the campaign "catches a real bug" surface) live below the grader logic.
+They model the deterministic MATH of the harness's own ``SemanticOverlapGrader``:
+a Jaccard-overlap verdict ``grade(output, expected) -> pass/fail`` at a fixed
+threshold. The oracle is the CORRECT pure verdict; each planted Mutant is a
+genuine grading defect a real dev could ship (dividing the intersection by the
+expected-token count instead of the true union; using ``>`` instead of ``>=`` at
+the threshold; dropping case-normalization so ``"Cat" != "cat"``). ``prove``
+judges a grader against a FROZEN literal corpus of ``(output, expected,
+expected_pass)`` triples — never against the oracle object, the MockLLM, or any
+model output — so the check is non-circular and makes zero LLM/network/clock/RNG
+calls. The MockLLM and the HTTP server are NEVER exercised by the teeth.
+
+Self-test:
+  python harnesses/ai/llm_eval_test_harness.py --self-test
+  python harnesses/ai/llm_eval_test_harness.py --json
+  python harnesses/ai/llm_eval_test_harness.py --list-scenarios
 """
 
+from __future__ import annotations
+
+import argparse
 import hashlib
 import hmac
 import http.server
@@ -11,12 +31,22 @@ import json
 import re
 import socket
 import string
+import sys
+
+# Make the shared teeth contract importable whether run as a module or a script.
+import sys as _sys
 import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path as _Path
 from typing import Any
+
+if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Utilities
@@ -125,7 +155,6 @@ class MockLLM:
         if self.temperature > 0:
             # Add controlled perturbation proportional to temperature
             h = self._hmac_hash(prompt + f"_t{self._call_count}")
-            int(h[8:16], 16) % max(1, len(base))
             perturbation = f" [t={self.temperature:.2f},v={h[:4]}]"
             base = base + perturbation
 
@@ -441,7 +470,7 @@ class EvalSuite:
         self.llm = llm
         self.test_cases: list[TestCase] = []
 
-    def add_case(self, case: TestCase) -> "EvalSuite":
+    def add_case(self, case: TestCase) -> EvalSuite:
         self.test_cases.append(case)
         return self
 
@@ -452,7 +481,7 @@ class EvalSuite:
         grader,
         expected: str = "",
         tags: list[str] | None = None,
-    ) -> "EvalSuite":
+    ) -> EvalSuite:
         self.test_cases.append(
             TestCase(name=name, prompt=prompt, grader=grader, expected=expected, tags=tags or [])
         )
@@ -694,3 +723,242 @@ def find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+# ===========================================================================
+# TEETH: the harness's own grader MATH, judged against a frozen literal corpus.
+#
+# kind = oracle_swap. The oracle is this harness's SemanticOverlapGrader Jaccard
+# verdict as a PURE function over frozen string literals:
+#
+#     grade(output, expected) -> pass/fail  at threshold 0.5
+#
+# Jaccard score = |out_tokens & exp_tokens| / |out_tokens | exp_tokens|, where
+# tokens are case-folded and split on whitespace + punctuation (the harness's own
+# _tokenize); pass iff score >= threshold. Each planted Mutant is a faithful model
+# of a real grading bug. prove() compares each grader's verdict to the corpus's
+# FROZEN expected_pass literal — NEVER to the oracle object, the MockLLM, or any
+# model output — so the check is non-circular and deterministic: no LLM, network,
+# clock, filesystem, or RNG. The MockLLM and HTTP server are not touched here.
+#
+# NON-CIRCULARITY WITNESS: every expected_pass below is a hand-computed literal.
+# If you flipped the "boundary" case's expected_pass from True to False, the
+# correct oracle (which returns PASS=True at score 0.50 >= 0.50) would disagree
+# with the corpus and prove(oracle) would become True. The expectations are the
+# independent ground truth, not a recording of what the oracle happens to emit.
+# ===========================================================================
+
+_TEETH_THRESHOLD = 0.5
+
+
+@dataclass(frozen=True)
+class GradeCase:
+    """One frozen grader fixture: a literal verdict expectation, never derived."""
+    name: str
+    output: str
+    expected: str
+    expected_pass: bool
+    note: str = ""
+
+
+# Frozen corpus. Hand-computed Jaccard verdicts at threshold 0.5. Includes the
+# discriminating cases each planted mutant gets WRONG (see notes).
+GRADE_CORPUS: tuple[GradeCase, ...] = (
+    # Clear overlap -> identical token sets -> score 1.0 -> PASS. Anchor case.
+    GradeCase("clear_pass", "the cat sat on the mat", "the cat sat on the mat", True,
+              "identical tokens: Jaccard 1.0 >= 0.5 -> PASS"),
+    # Clear no-overlap -> empty intersection -> score 0.0 -> FAIL. Anchor case.
+    GradeCase("clear_fail", "alpha beta", "gamma delta", False,
+              "disjoint tokens: Jaccard 0.0 < 0.5 -> FAIL"),
+    # Borderline AT the threshold: out={a,b,c}, exp={a,b,d} -> 2/4 = 0.50.
+    # 0.50 >= 0.50 -> PASS. The 'ge_to_gt' mutant uses > and wrongly FAILs this.
+    GradeCase("boundary", "a b c", "a b d", True,
+              "Jaccard exactly 0.50 at threshold: >= passes, > would fail"),
+    # Discriminates 'jaccard_union_swap': out={a,b,x,y,z}, exp={a,b}.
+    # true union=5 -> 2/5 = 0.40 -> FAIL. But intersection/len(expected)=2/2=1.0
+    # -> the union-swap bug wrongly PASSes. Oracle FAILs, mutant PASSes.
+    GradeCase("union_swap_disc", "a b x y z", "a b", False,
+              "true Jaccard 0.40 (FAIL); dividing by |expected| gives 1.0 (wrong PASS)"),
+    # Discriminates 'no_lowercase': case-folded these are identical -> 1.0 -> PASS.
+    # Without case-folding {Cat,Dog} vs {cat,dog} are disjoint -> 0.0 -> wrong FAIL.
+    GradeCase("case_norm_disc", "Cat Dog", "cat dog", True,
+              "case-folded identical (PASS); skipping lowercase makes it disjoint (wrong FAIL)"),
+)
+
+
+# --- ORACLE: the correct verdict, reusing the harness's own grader ----------
+
+def oracle_grade(output: str, expected: str) -> bool:
+    """Correct pass/fail: the harness's SemanticOverlapGrader at the fixed
+    threshold. Pure over its string arguments — no MockLLM, no I/O."""
+    return SemanticOverlapGrader(threshold=_TEETH_THRESHOLD).grade(output, expected).passed
+
+
+# --- Planted buggy graders (each a real grading defect) ---------------------
+
+class _UnionSwapGrader(SemanticOverlapGrader):
+    """BUG: divides the intersection by the EXPECTED token count, not the true
+    union. A common Jaccard/recall mix-up: the denominator silently becomes
+    |expected| instead of |output ∪ expected|, so verbose outputs that merely
+    cover the expected tokens score far too high and wrongly pass."""
+
+    def grade(self, output: str, expected: str) -> GradeResult:
+        out_tokens = _tokenize(output)
+        exp_tokens = _tokenize(expected)
+        if not out_tokens and not exp_tokens:
+            score = 1.0
+        elif not out_tokens or not exp_tokens:
+            score = 0.0
+        else:
+            intersection = out_tokens & exp_tokens
+            score = len(intersection) / len(exp_tokens)  # BUG: |expected|, not union
+        passed = score >= self.threshold
+        return GradeResult(passed=passed, score=score, details=f"union-swap score={score:.3f}")
+
+
+class _GeToGtGrader(SemanticOverlapGrader):
+    """BUG: uses strict ``>`` at the threshold instead of ``>=``. An output that
+    scores EXACTLY at the configured threshold should pass (the threshold is the
+    documented minimum), but the strict comparison rejects the boundary case —
+    a classic off-by-one on an inclusive bound."""
+
+    def grade(self, output: str, expected: str) -> GradeResult:
+        result = super().grade(output, expected)
+        passed = result.score > self.threshold  # BUG: > instead of >=
+        return GradeResult(passed=passed, score=result.score, details=f"gt score={result.score:.3f}")
+
+
+class _NoLowercaseGrader(SemanticOverlapGrader):
+    """BUG: tokenizes WITHOUT case-folding, so 'Cat' and 'cat' are treated as
+    different tokens. A real regression if someone reimplements tokenization and
+    forgets the .lower(): semantically identical outputs that differ only in
+    capitalization now score 0 overlap and wrongly fail."""
+
+    def grade(self, output: str, expected: str) -> GradeResult:
+        # BUG: no case-folding — re-tokenize on the raw (cased) strings.
+        out_tokens = {t for t in re.split(
+            r"[\s" + re.escape(string.punctuation) + r"]+", output) if t}
+        exp_tokens = {t for t in re.split(
+            r"[\s" + re.escape(string.punctuation) + r"]+", expected) if t}
+        if not out_tokens and not exp_tokens:
+            score = 1.0
+        elif not out_tokens or not exp_tokens:
+            score = 0.0
+        else:
+            score = len(out_tokens & exp_tokens) / len(out_tokens | exp_tokens)
+        passed = score >= self.threshold
+        return GradeResult(passed=passed, score=score, details=f"no-lower score={score:.3f}")
+
+
+def _grader_verdict(grader_cls: type) -> Callable[[str, str], bool]:
+    """Build an ``(output, expected) -> bool`` verdict closure over a grader
+    class fixed at the teeth threshold. Mints the planted-mutant verdicts."""
+
+    def verdict(output: str, expected: str) -> bool:
+        return grader_cls(threshold=_TEETH_THRESHOLD).grade(output, expected).passed
+
+    return verdict
+
+
+mutant_jaccard_union_swap = _grader_verdict(_UnionSwapGrader)
+mutant_ge_to_gt = _grader_verdict(_GeToGtGrader)
+mutant_no_lowercase = _grader_verdict(_NoLowercaseGrader)
+
+
+def prove(grade_fn: Callable[[str, str], bool]) -> bool:
+    """True iff ``grade_fn`` MISGRADES any frozen corpus case (i.e. is caught).
+
+    Non-circular + deterministic: each verdict is compared against the literal
+    GradeCase.expected_pass constant, never against the oracle object, the
+    MockLLM, or an embedding. No LLM, network, clock, filesystem, or RNG. A
+    grader that raises on a corpus case counts as caught.
+    """
+    for case in GRADE_CORPUS:
+        try:
+            verdict = bool(grade_fn(case.output, case.expected))
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if verdict != case.expected_pass:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_grade,
+    mutants=(
+        Mutant("jaccard_union_swap", mutant_jaccard_union_swap,
+               "divides the intersection by |expected| instead of the true union, "
+               "so verbose outputs covering the expected tokens wrongly pass"),
+        Mutant("ge_to_gt", mutant_ge_to_gt,
+               "uses > instead of >= at the threshold, wrongly failing an output "
+               "that scores exactly at the inclusive boundary"),
+        Mutant("no_lowercase", mutant_no_lowercase,
+               "drops case-normalization so 'Cat' != 'cat'; capitalization-only "
+               "differences wrongly score zero overlap and fail"),
+    ),
+    corpus_size=len(GRADE_CORPUS),
+    kind="oracle_swap",
+    notes="SemanticOverlapGrader Jaccard verdict: true-union denominator, "
+          "inclusive (>=) threshold, case-folded tokenization",
+)
+
+
+def list_scenarios() -> list[str]:
+    """Names of the frozen grader-verdict corpus cases (the teeth scenarios)."""
+    return [c.name for c in GRADE_CORPUS]
+
+
+# ---------------------------------------------------------------------------
+# Report-based self-test — fails loud, reports findings, asserts the teeth.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(as_json: bool = False) -> int:
+    report = Report("ai/llm_eval")
+
+    # The correct oracle verdict must match every frozen expected_pass literal.
+    for case in GRADE_CORPUS:
+        report.add(f"grade:{case.name}", case.expected_pass,
+                   oracle_grade(case.output, case.expected), detail=case.note)
+
+    # Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point — default action is the self-test (repo convention).
+# ---------------------------------------------------------------------------
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="LLM / AI-feature eval grader harness")
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true",
+                        help="list the frozen grader-verdict scenario names")
+    parser.add_argument("--serve", action="store_true",
+                        help="run the mock LLM eval HTTP server (blocks)")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT,
+                        help="port for --serve (default %(default)s)")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
+    if args.serve:
+        # The mock server is only ever bound here under main — never at import,
+        # never inside prove/teeth. Determinism of the teeth does not depend on it.
+        server = MockLLMServer(port=args.port).start()
+        print(f"Mock LLM eval server listening on {server.base_url}")
+        try:
+            server._thread.join()  # type: ignore[union-attr]
+        except KeyboardInterrupt:
+            server.stop()
+        return 0
+    return _run_self_test(as_json=args.json)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

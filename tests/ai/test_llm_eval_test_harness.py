@@ -7,8 +7,10 @@ import unittest
 
 from harnesses.ai.llm_eval_test_harness import (
     DANGEROUS_PROMPTS,
+    GRADE_CORPUS,
     INJECTION_PROMPTS,
     REFUSAL_MESSAGE,
+    TEETH,
     CaseResult,
     ConsistencyChecker,
     EvalSuite,
@@ -24,6 +26,8 @@ from harnesses.ai.llm_eval_test_harness import (
     TestCase,
     _tokenize,
     find_free_port,
+    oracle_grade,
+    prove,
 )
 
 
@@ -937,6 +941,53 @@ class TestIntegration(unittest.TestCase):
                   expected="")
         report = suite.run_all()
         self.assertEqual(report.passed, 1)
+
+
+# ===========================================================================
+# TEETH — the campaign "catches a real bug" surface (grader-verdict math).
+# ===========================================================================
+class TestTeeth(unittest.TestCase):
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(len(GRADE_CORPUS), 1)
+        self.assertEqual(TEETH.corpus_size, len(GRADE_CORPUS))
+
+    def test_prove_oracle_is_false(self):
+        # The correct grader is NOT flagged against the frozen corpus.
+        self.assertIs(prove(oracle_grade), False)
+
+    def test_prove_each_mutant_is_true(self):
+        # Every planted grading defect IS caught.
+        self.assertGreaterEqual(len(TEETH.mutants), 1)
+        for mutant in TEETH.mutants:
+            self.assertIs(prove(mutant.impl), True, f"mutant not caught: {mutant.name}")
+
+    def test_oracle_matches_every_frozen_expectation(self):
+        # prove() is non-circular because the expectations are literals: assert
+        # the oracle reproduces each one directly.
+        for case in GRADE_CORPUS:
+            self.assertEqual(
+                oracle_grade(case.output, case.expected),
+                case.expected_pass,
+                f"oracle disagrees with frozen literal on {case.name}",
+            )
+
+    def test_non_circular_flipped_literal_flags_oracle(self):
+        # The non-circularity witness: flipping one frozen expected_pass makes the
+        # correct oracle disagree with the corpus, i.e. prove(oracle) -> True.
+        def prove_with_flipped_boundary(grade_fn):
+            for case in GRADE_CORPUS:
+                expected = case.expected_pass
+                if case.name == "boundary":
+                    expected = not expected
+                if bool(grade_fn(case.output, case.expected)) != expected:
+                    return True
+            return False
+
+        self.assertIs(prove_with_flipped_boundary(oracle_grade), True)
+
+    def test_teeth_kind_is_oracle_swap(self):
+        self.assertEqual(TEETH.kind, "oracle_swap")
 
 
 if __name__ == "__main__":
