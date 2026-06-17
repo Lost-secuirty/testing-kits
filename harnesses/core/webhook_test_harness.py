@@ -636,7 +636,7 @@ class MockWebhookHandler:
 # Frozen evaluation context for the teeth corpus. A generic, non-provider test
 # key (NOT a real whsec_/sk_-prefixed secret) — see the SECRET GUARD: every
 # signature below is an HMAC over this short key, not a leaked credential.
-_TEETH_SECRET = "webhook-test-key"
+_TEETH_SECRET = "webhook-test-key"  # allowlist secret: non-provider HMAC test key, not a credential
 _TEETH_NOW = 1000.0
 _TEETH_TOLERANCE = 300.0
 
