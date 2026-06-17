@@ -1,0 +1,15 @@
+# testing-kits
+
+Compact public navigation map. This file is descriptive only; operating rules live in `AGENTS.md`, `CLAUDE.md`, and `SECURITY.md`.
+
+## Start here
+
+- [README.md](./README.md): public landing page and proof baseline.
+- [docs/DOCS_MAP.md](./docs/DOCS_MAP.md): documentation reading paths.
+- [docs/HARNESS_READING_GUIDE.md](./docs/HARNESS_READING_GUIDE.md): harness reading and dossier shape.
+- [HARNESS_INVENTORY.md](./HARNESS_INVENTORY.md): harness catalog.
+- [HARNESS_ROADMAP.md](./HARNESS_ROADMAP.md): shipped batches and next safe work.
+
+## Proof language
+
+Use `77 harnesses` for inventory size. Use TEETH `required` / `pending` / `legacy` status for proof strength. Re-run gates before using loaded counts as fresh claims.

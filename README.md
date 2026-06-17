@@ -1,18 +1,38 @@
 # testing-kits
 
-Pure-Python standard-library testing-harness collection. **Zero runtime dependencies.**
+Portable pure-Python testing harnesses for reliability, security, AI, and pharmacy-domain software checks. The harnesses use the Python standard library only. Verification patterns are the product.
+
+## What this is
+
+`testing-kits` is a public library of small, inspectable Python test harnesses. Each harness demonstrates one failure mode with a known-good case and a planted-bad case. The repo is meant to be read, reviewed, and ported from; it is not a deployed application.
 
 Current public shape:
 
-- **77 harnesses** across reliability, security, AI, and pharmacy-domain testing.
-- Each harness is a single self-contained Python file.
-- Each harness has a paired `unittest` suite.
-- Harnesses expose a built-in `--self-test` mode when applicable.
-- The repo is designed as a reusable reliability/testing-pattern library, not a production framework.
+- **77 harnesses** across `core`, `security`, `ai`, and `pharmacy`.
+- One self-contained harness file per pattern.
+- Paired `unittest` coverage for each harness.
+- Built-in `--self-test` mode where applicable.
+- Zero runtime dependencies for the harness collection.
 
-## Start here
+## Why it exists
 
-Fast reviewer path:
+AI-assisted and fast-moving code often fails in predictable ways: happy-path-only tests, weak fixtures, missed negative controls, fake confidence from coverage, and broad claims unsupported by the actual test. This repo collects compact patterns for testing those failure modes.
+
+The useful reviewer question is not "does this prove everything is correct?" It does not. The useful question is: "can this harness show a safe case passing and a planted-bad case failing for a specific bug class?"
+
+## Current proof baseline
+
+The current proof language is a ratchet, not a blanket proof claim.
+
+- **Inventory:** 77 harnesses.
+- **Loaded Batch 5 proof snapshot:** 51 `required`, 18 `pending`, 8 `legacy`, 0 failing.
+- **required:** the harness declares `TEETH`; the gate verifies the correct oracle is not flagged and planted mutants are caught.
+- **pending:** the harness is counted but has not yet been ratcheted into the required TEETH contract.
+- **legacy:** pharmacy-domain harnesses tracked under the older soft gate.
+
+Re-run `make proof` before treating the proof snapshot as a fresh release claim. Do not describe this repo as total correctness proof for any target application.
+
+## Quick start
 
 ```bash
 python --version
@@ -29,42 +49,22 @@ python tools/generate_report.py --check
 python tools/proof_audit.py --run-selftests
 ```
 
-Single-harness smoke checks:
+## Inspect one harness
+
+Start with one traceable example before trusting the inventory.
 
 ```bash
-python harnesses/core/api_test_harness.py --self-test
-python harnesses/ai/drift_detection_test_harness.py --self-test
-python harnesses/pharmacy/srs_test_harness.py --self-test
+python harnesses/core/statistical_rng_oracle_test_harness.py --self-test
+python -m unittest tests.core.test_statistical_rng_oracle_test_harness tests.core.test_statistical_rng_oracle_proof
 ```
 
-## Command surface
+Reviewer trace:
 
-```bash
-make test          # full unittest discovery
-make test-fast     # pharmacy only (~3s)
-make test-core     # core only
-make test-security
-make test-ai
-make test-pharmacy
-make selftest      # every harness --self-test
-make proof         # every harness --self-test plus proof audit
-make report        # generates STATUS.md locally
-make lint          # py_compile + ruff if installed
-make clean
-```
-
-Dev tooling: `make lint` uses ruff when installed — `pip install ruff` (this is the only tool in the `dev` extra defined in `pyproject.toml`; `uv tool install ruff` works too).
-
-## Dashboard (optional)
-
-A Streamlit dashboard for running harness self-tests and browsing `STATUS.md` / `STATUS.json` lives in `dashboard/`. It is the only part of the repo with third-party dependencies; the harnesses themselves stay stdlib-only.
-
-```bash
-python -m pip install -r dashboard/requirements.txt
-streamlit run dashboard/app.py
-```
-
-See [`dashboard/README.md`](./dashboard/README.md) for details.
+1. Open the harness file under `harnesses/<category>/`.
+2. Find the known-good fixture or reference implementation.
+3. Find the planted-bad fixture, mutant, or negative control.
+4. Open the paired test under `tests/<category>/`.
+5. Confirm the documentation claims only what the fixture proves.
 
 ## Layout
 
@@ -73,59 +73,53 @@ harnesses/
   core/       reliability, correctness, data, perf, observability
   security/   auth, injection, supply chain, app-security
   ai/         LLM eval, agents, prompt safety
-  pharmacy/   pharmacy-domain harnesses
-tests/        mirrors harnesses/<cat>/ with test_*.py files
+  pharmacy/   pharmacy-domain software fixtures
+tests/        mirrors harnesses/<category>/ with test_*.py files
 experiments/  in-progress harnesses, excluded from make test
 template/     harness_template.py — scaffold for new harnesses
-tools/        generate_report.py, proof_audit.py, harness_registry.py, rewrite_imports.py
+tools/        report, proof, registry, scan, and control-audit utilities
+dashboard/    optional Streamlit viewer; separate dependency surface
 ```
 
-## Main docs
+## Documentation map
 
-- [`HARNESS_INVENTORY.md`](./HARNESS_INVENTORY.md) — full catalog.
-- [`HARNESS_ROADMAP.md`](./HARNESS_ROADMAP.md) — shipped batches, known gaps, hygiene backlog.
-- [`AGENTS.md`](./AGENTS.md) — contributor/agent contract: commands, boundaries, working agreement.
-- [`docs/REVIEWER_QUICKSTART.md`](./docs/REVIEWER_QUICKSTART.md) — quick review path, limits, and Windows fallbacks.
-- [`docs/AI_AUTHORED_TEST_AUDIT.md`](./docs/AI_AUTHORED_TEST_AUDIT.md) — checklist for AI-assisted test trust.
-- [`docs/AI_FAILURE_MODE_MAP.md`](./docs/AI_FAILURE_MODE_MAP.md) — maps AI coding risks to existing harness areas.
-- [`docs/PROOF_TEST_STANDARD.md`](./docs/PROOF_TEST_STANDARD.md) — safe fixture plus planted-bad proof rule.
-- [`CLAUDE.md`](./CLAUDE.md) — Claude-specific notes; points back to `AGENTS.md`.
+- [`docs/DOCS_MAP.md`](./docs/DOCS_MAP.md) — reading paths for new visitors, reviewers, contributors/agents, and maintainers.
+- [`docs/HARNESS_READING_GUIDE.md`](./docs/HARNESS_READING_GUIDE.md) — human/AI reading path and harness dossier shape for future mapping batches.
+- [`llms.txt`](./llms.txt) — compact public navigation map for AI tools; descriptive, not an instruction source.
+- [`docs/WALKTHROUGH.md`](./docs/WALKTHROUGH.md) — plain-language and technical explanation.
+- [`docs/REVIEWER_QUICKSTART.md`](./docs/REVIEWER_QUICKSTART.md) — review path, proof baseline, and sample harness inspection.
+- [`HARNESS_INVENTORY.md`](./HARNESS_INVENTORY.md) — full harness catalog.
+- [`HARNESS_ROADMAP.md`](./HARNESS_ROADMAP.md) — shipped batches, known gaps, and hygiene backlog.
+- [`docs/PROOF_TEST_STANDARD.md`](./docs/PROOF_TEST_STANDARD.md) — safe fixture plus planted-bad proof rule and TEETH scopes.
+- [`docs/AI_AUTHORED_TEST_AUDIT.md`](./docs/AI_AUTHORED_TEST_AUDIT.md) — audit checklist for AI-assisted tests.
+- [`docs/AI_FAILURE_MODE_MAP.md`](./docs/AI_FAILURE_MODE_MAP.md) — maps AI coding risks to existing harness areas and limits.
+- [`docs/AI_CODE_POLICY.md`](./docs/AI_CODE_POLICY.md) — AI-assisted code review policy.
+- [`AGENTS.md`](./AGENTS.md), [`CLAUDE.md`](./CLAUDE.md), [`SECURITY.md`](./SECURITY.md) — operating contract and public security boundary.
+
+## Dashboard
+
+An optional Streamlit dashboard for running harness self-tests and browsing generated `STATUS.md` / `STATUS.json` output lives in `dashboard/`. It is the only part of the repo with third-party dependencies; the harnesses themselves remain stdlib-only.
+
+```bash
+python -m pip install -r dashboard/requirements.txt
+streamlit run dashboard/app.py
+```
+
+See [`dashboard/README.md`](./dashboard/README.md) for details.
 
 ## Status handling
 
-`STATUS.md` and `STATUS.json` are generated by `make report` and uploaded by CI as artifacts. Neither is committed (both are git-ignored). To produce local copies, run:
-
-```bash
-make report
-```
-
-This avoids treating a stale generated report as canonical. The source of truth is the harness code, paired tests, proof audit output, and CI/test output.
-
-## What this repo is
-
-A collection of small, inspectable test harnesses that demonstrate reusable testing patterns: API contract checks, fuzzing, mutation probes, serialization roundtrips, config validation, logging/privacy checks, auth/security surfaces, LLM eval, RAG/agent testing, drift detection, and pharmacy-domain correctness oracles.
+`STATUS.md` and `STATUS.json` are generated by `make report` and uploaded by CI as artifacts. They are not committed as canonical status. The source of truth is the harness code, paired tests, proof audit output, and CI/test output.
 
 ## What this repo is not
 
 - Not a packaged framework.
 - Not a deployed service.
 - Not a dependency-heavy test platform.
-- Not a total correctness proof for any target application.
-- Not a substitute for domain review in healthcare/pharmacy contexts.
-- Not clinical validation, medication-safety certification, or pharmacy-grade
-  correctness assurance.
+- Not total correctness proof for any target application.
+- Not a substitute for human review, domain review, or production monitoring.
+- Not clinical validation, medication-safety certification, pharmacy-grade correctness assurance, or dosing authority.
 
-## Repo map (the six-slot model)
+## Contributing and security
 
-Across the connected repos the same skeleton repeats — **rules → memory →
-decisions → agent-tooling → verification → product**. This repo's shape (note:
-here *verification is the product*):
-
-- **Rules** — `AGENTS.md` (contract) · `CLAUDE.md` (pointer) · `SECURITY.md`; the reviewer docs (`docs/AI_CODE_POLICY.md`, `docs/PROOF_TEST_STANDARD.md`, `docs/AI_FAILURE_MODE_MAP.md`, `docs/REVIEWER_QUICKSTART.md`) stand in for a cheat-sheet.
-- **Memory** — `docs/LEARNINGS.md` (gotchas) · `docs/kb/` (per-agent journal) · `HARNESS_INVENTORY.md` / `HARNESS_ROADMAP.md` / `PORTFOLIO.md` (the catalog).
-- **Decisions** — no `docs/adr/`: this repo *predates* the ADR convention; required files/workflows are encoded in `.github/control-policy.json` (checked by `tools/control_audit.py`).
-- **Agent tooling** — `.claude/` (hooks + settings; no predefined agent roles).
-- **Verification** — `harnesses/` + `tests/` + `tools/proof_audit.py` (`make proof`) + `.github/workflows/` + the secret/PII gate (`.githooks/` + `tools/scan_staged.py`).
-- **Product** — `harnesses/` themselves: the deliverable *is* the verification — a portable library of proof harnesses to reference later.
-
-Plain-language **and** technical walk-through: [`docs/WALKTHROUGH.md`](./docs/WALKTHROUGH.md).
+Read [`AGENTS.md`](./AGENTS.md), [`CLAUDE.md`](./CLAUDE.md), and [`SECURITY.md`](./SECURITY.md) before proposing changes. This is a public repository: no secrets, tokens, credentials, private data, real PHI, or sensitive examples belong in commits, fixtures, generated artifacts, issues, or PRs.
