@@ -67,7 +67,14 @@ _SECRET_RES = [
     (
         "GENERIC_SECRET_ASSIGNMENT",
         re.compile(
-            r"(?i)\b(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)\b"
+            # The keyword may be prefixed (client_secret, x-access-token,
+            # refresh_token): a leading \b missed those because '_' is a word
+            # char, so \bsecret\b never matched inside "client_secret". Use a
+            # non-alnum lookbehind and list the common compound forms first.
+            r"(?i)(?<![a-z0-9])"
+            r"(?:client[_-]?secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|"
+            r"private[_-]?key|secret[_-]?key|api[_-]?key|access[_-]?key|"
+            r"secret|token|passwd|password)"
             r"\s*[:=]\s*['\"]?[A-Za-z0-9_\-/+=]{16,}"
         ),
     ),
@@ -180,7 +187,10 @@ def _run_self_test() -> int:
     slack = "xoxb-" + "1234567890-abcdefXYZ"
     gkey = "AIza" + ("b" * 35)
     generic = "api_key" + " = " + "'" + ("A" * 20) + "'"
-    must_block = [aws, ghp, pem, slack, gkey, generic]
+    # Compound-keyword cases the old \b-anchored regex MISSED (retro fix):
+    client_secret = "client_secret" + " = " + "'" + ("A" * 24) + "'"
+    access_token = "access_token" + " = " + ("B" * 32)
+    must_block = [aws, ghp, pem, slack, gkey, generic, client_secret, access_token]
 
     ssn = "123" + "-45-" + "6789"
     card = " ".join(["4242"] * 4)  # passes Luhn
@@ -195,6 +205,7 @@ def _run_self_test() -> int:
         "standup at 3pm to discuss the build",       # plain prose
         "this line mentions an api_key in passing",  # keyword, no value
         "uses ${{ secrets.GITHUB_TOKEN }} in CI",    # CI ref, not a literal token
+        "refresh_token_url" + " = " + "'https://idp.example.com/oauth'",  # URL value, not a secret
     ]
 
     fails = 0
