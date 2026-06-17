@@ -7,14 +7,14 @@ case for a specific bug class?"
 
 ## What the repo proves
 
-- The current proof baseline can discover 73 real harnesses.
-- Each discovered harness has a paired `unittest` file.
-- Each discovered harness currently passes its `--self-test` under the proof
-  audit command.
-- Each discovered harness has proof evidence from a proof file, embedded
-  controls, or self-test output.
-- The harnesses are small, local, and inspectable enough for reviewers to trace
-  the safe fixture and the planted bad fixture.
+- The current inventory contains **77 harnesses**.
+- Each harness is intended to remain small, local, and inspectable enough for a reviewer to trace the safe fixture and the planted-bad fixture.
+- The current TEETH proof baseline distinguishes harnesses by status instead of treating all 77 as equivalent:
+  - **required** — a non-legacy harness with `TEETH`; the swap-check verifies that the correct oracle is not flagged and every planted mutant is caught.
+  - **pending** — a non-legacy harness that is counted in the inventory but has not yet been ratcheted into the required TEETH contract.
+  - **legacy** — pharmacy-domain harnesses still tracked under the older soft gate.
+- As of the loaded Batch 5 state, the proof-ratchet snapshot is **51 required / 18 pending / 8 legacy / 0 failing**. Re-run `make proof` before treating that as a fresh release claim.
+- The proof baseline is fixture-defined. It shows known-good cases pass and planted-bad cases fail under the repo's current tooling; it is not total correctness proof.
 
 ## What the repo does not prove
 
@@ -47,7 +47,7 @@ python tools/proof_audit.py --run-selftests
 python tools/scan_staged.py --self-test
 ```
 
-For a docs-only review, the minimum local check is:
+For a docs-only review, the minimum local check is a file-scope review: confirm only documentation files changed and no generated `STATUS.md` / `STATUS.json` artifacts were committed. If command execution is available, run:
 
 ```bash
 python tools/proof_audit.py --run-selftests
@@ -70,7 +70,10 @@ Use one harness as a traceable sample before trusting the inventory.
 5. Open the paired test under `tests/<category>/`.
 6. Confirm the paired test covers both API behavior and CLI/self-test behavior
    where the harness exposes a CLI.
-7. Run the harness self-test directly.
+7. If the harness is `required`, inspect its `TEETH` declaration and confirm the
+   proof predicate judges the implementation against fixed fixtures rather than
+   re-deriving expected behavior from the oracle at runtime.
+8. Run the harness self-test directly.
 
 Example:
 
