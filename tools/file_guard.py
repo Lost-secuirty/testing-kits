@@ -29,7 +29,6 @@ crash — honouring the same anti-vacuous-green thesis the guard enforces).
 from __future__ import annotations
 
 import argparse
-import glob
 import hashlib
 import json
 import sys
@@ -57,31 +56,53 @@ PROTECTED_FILES = [
 PROTECTED_GLOBS: list[str] = []
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def _sha256(path: Path) -> str | None:
+    """sha256 of a file's bytes, or None if it cannot be read (never a bare crash)."""
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
 
 
 def _expected(root: Path) -> set[str]:
     found = set(PROTECTED_FILES)
     for pattern in PROTECTED_GLOBS:
-        for match in glob.glob(pattern, root_dir=str(root), recursive=True):
-            found.add(Path(match).as_posix())
+        for match in root.glob(pattern):
+            found.add(match.relative_to(root).as_posix())
     return found
 
 
+def _load_baseline(manifest: Path) -> dict | None:
+    """Return the baseline 'files' map, or None if the manifest is missing/corrupt/invalid.
+
+    Covers the schema-invalid cases too: a parseable manifest that is not an object, or
+    whose ``files`` is null / not a mapping. Those are exactly the tampered/inert states
+    the guard exists for, so the caller turns a None into a NAMED exit 2 — never a crash.
+    """
+    if not manifest.is_file():
+        return None
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+    files = data.get("files") if isinstance(data, dict) else None
+    return files if isinstance(files, dict) else None
+
+
 def update(root: Path, manifest: Path) -> int:
-    """Rewrite the baseline. Refuse (exit 1) if any explicit protected file is missing."""
+    """Rewrite the baseline. Refuse (exit 1) if any protected file is missing or unreadable."""
     files: dict[str, str] = {}
-    missing: list[str] = []
+    problems: list[str] = []
     for rel in sorted(_expected(root)):
-        path = root / rel
-        if not path.is_file():
-            missing.append(rel)
+        digest = _sha256(root / rel)
+        if digest is None:
+            problems.append(rel)
             continue
-        files[rel] = _sha256(path)
-    if missing:
-        print("file-guard: refusing to snapshot - protected files are missing:", file=sys.stderr)
-        for rel in missing:
+        files[rel] = digest
+    if problems:
+        print("file-guard: refusing to snapshot - protected files are missing or unreadable:",
+              file=sys.stderr)
+        for rel in problems:
             print(f"  - {rel}", file=sys.stderr)
         return 1
     manifest.write_text(json.dumps({"version": 1, "files": files}, indent=2) + "\n",
@@ -92,16 +113,10 @@ def update(root: Path, manifest: Path) -> int:
 
 def check(root: Path, manifest: Path) -> int:
     """Compare the working tree to the baseline. 0 clean / 1 drift / 2 no-or-corrupt baseline."""
-    if not manifest.is_file():
-        print(f"file-guard: no baseline at {manifest}. Run: make guard-update", file=sys.stderr)
-        return 2
-    try:
-        baseline = json.loads(manifest.read_text(encoding="utf-8")).get("files", {})
-    except (ValueError, OSError) as err:
-        # A corrupt baseline is exactly the tampered/inert case the guard exists for —
-        # fail with a NAMED error (exit 2), not an uncaught crash.
-        print(f"file-guard: baseline {manifest} is unreadable or corrupt ({err}). "
-              "Re-create it with: make guard-update", file=sys.stderr)
+    baseline = _load_baseline(manifest)
+    if baseline is None:
+        print(f"file-guard: baseline {manifest} is missing, unreadable, or has no valid 'files' "
+              "map. Re-create it with: make guard-update", file=sys.stderr)
         return 2
     drift: list[str] = []
     for rel in sorted(set(baseline) | _expected(root)):
@@ -110,7 +125,9 @@ def check(root: Path, manifest: Path) -> int:
             drift.append(f"REMOVED      {rel}  (protected file is gone)")
             continue
         now = _sha256(path)
-        if rel not in baseline:
+        if now is None:
+            drift.append(f"UNREADABLE   {rel}  (protected file cannot be read)")
+        elif rel not in baseline:
             drift.append(f"UNBASELINED  {rel}  (present but absent from the baseline)")
         elif now != baseline[rel]:
             drift.append(f"MODIFIED     {rel}  ({baseline[rel][:12]}... -> {now[:12]}...)")
