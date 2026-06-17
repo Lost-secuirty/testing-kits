@@ -805,8 +805,9 @@ SSRF_CORPUS: tuple[SsrfCase, ...] = (
              "public host that merely contains the metadata IP as a label — must NOT block"),
     SsrfCase("public_localhost_lookalike", "https://mylocalhost.example/health", False,
              "public host containing the 'localhost' substring — must NOT block"),
-    SsrfCase("public_ten_prefix_host", "https://10things.example/page", False,
-             "public host whose name starts with '10' — a '10.' prefix filter false-flags it"),
+    SsrfCase("public_ten_prefix_host", "https://10.public.example/page", False,
+             "public host whose hostname literally starts with '10.' (a DNS label, "
+             "not an RFC-1918 IP) — a naive '10.' prefix filter false-flags it"),
     # --- cloud metadata (link-local 169.254.0.0/16): MUST flag ----------------
     SsrfCase("metadata_ip_url", "http://169.254.169.254/latest/meta-data/", True,
              "AWS/GCP/Azure IMDS endpoint — must block (misses_metadata drops this)"),

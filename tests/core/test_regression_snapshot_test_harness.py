@@ -588,26 +588,26 @@ class TestTeeth(unittest.TestCase):
         self.assertTrue(result["teeth_verified"])
 
     def test_noncircular_flipping_a_literal_passes_the_oracle(self):
-        # Non-circularity evidence: prove() compares against FROZEN literals, not
-        # a runtime oracle call. Flip one expected_match and the (still correct)
-        # oracle must now be "caught" — proving the literal, not the oracle, is
-        # the source of truth.
+        # Non-circularity evidence: the SHIPPED prove() compares against FROZEN
+        # literals, not a runtime oracle call. Flip one expected_match in the
+        # module corpus and the (still correct) oracle must now be "caught" —
+        # proving the literal, not the oracle, is the source of truth.
         import dataclasses
+
+        import harnesses.core.regression_snapshot_test_harness as h
 
         flipped = list(COMPARE_CORPUS)
         flipped[0] = dataclasses.replace(
             flipped[0], expected_match=not flipped[0].expected_match
         )
-
-        def prove_against(corpus):
-            for case in corpus:
-                if bool(oracle_match(case.actual, case.stored)) != case.expected_match:
-                    return True
-            return False
-
-        # Unflipped: oracle is clean. Flipped: oracle is now wrongly "caught".
-        self.assertIs(prove_against(COMPARE_CORPUS), False)
-        self.assertIs(prove_against(tuple(flipped)), True)
+        original = h.COMPARE_CORPUS
+        try:
+            h.COMPARE_CORPUS = tuple(flipped)
+            self.assertTrue(h.prove(h.oracle_match))
+        finally:
+            h.COMPARE_CORPUS = original
+        # Sanity: restored corpus makes the oracle clean again.
+        self.assertFalse(h.prove(h.oracle_match))
 
     def test_no_recurse_caught_by_at_least_two_cases(self):
         # Robustness: the no_recurse mutant must be caught by >=2 corpus cases.

@@ -1039,33 +1039,26 @@ class TestTeeth(unittest.TestCase):
                 self.assertEqual(reason, case.expected_reason)
 
     def test_prove_is_noncircular(self):
-        # Flipping ONE frozen literal must make prove(oracle) report caught.
-        # This proves prove() compares to baked literals, not to the oracle.
+        # Flipping ONE frozen literal must make the SHIPPED prove(oracle) report
+        # caught. This proves prove() compares to baked literals, not the oracle.
         import dataclasses
 
-        original = SIG_CORPUS[0]
+        import harnesses.core.webhook_test_harness as h
+
         corrupted = dataclasses.replace(
-            original, expected_ok=not original.expected_ok,
+            SIG_CORPUS[0], expected_ok=not SIG_CORPUS[0].expected_ok,
         )
         patched = (corrupted,) + tuple(SIG_CORPUS[1:])
-
-        def prove_against(impl, corpus):
-            for case in corpus:
-                try:
-                    ok, reason = impl(
-                        case.payload, case.sig, case.event_id, case.event_timestamp,
-                    )
-                except Exception:
-                    return True
-                if bool(ok) != case.expected_ok or reason != case.expected_reason:
-                    return True
-            return False
-
-        # Sanity: against the real corpus the oracle is clean...
-        self.assertFalse(prove_against(oracle_validate, SIG_CORPUS))
-        # ...but flip one literal and the same oracle is now "caught", which is
-        # only possible if prove compares to the frozen literal (non-circular).
-        self.assertTrue(prove_against(oracle_validate, patched))
+        original = h.SIG_CORPUS
+        try:
+            # Sanity: against the real corpus the oracle is clean...
+            self.assertFalse(h.prove(h.oracle_validate))
+            # ...but flip one literal and the same oracle is now "caught", which
+            # is only possible if prove compares to the frozen literal.
+            h.SIG_CORPUS = patched
+            self.assertTrue(h.prove(h.oracle_validate))
+        finally:
+            h.SIG_CORPUS = original
 
     def test_prove_catches_raising_impl(self):
         def boom(*_args, **_kwargs):
