@@ -51,6 +51,7 @@ PROTECTED_FILES = [
     "tools/proof_audit.py",
     "tools/scan_staged.py",
     "tools/teeth_check.py",
+    "tools/vacuity_gate.py",
 ]
 # Globs expand to whatever currently matches, so adding/removing a member is itself a
 # drift event until the baseline is bumped. (None today — the gate set is explicit.)
