@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-core test-security test-ai test-pharmacy selftest teeth proof mutmut report lint clean help
+.PHONY: test test-fast test-core test-security test-ai test-pharmacy selftest teeth proof canary mutmut report lint clean help
 
 PY ?= python3
 
@@ -13,6 +13,7 @@ help:
 	@echo "  selftest       Run --self-test for every harness"
 	@echo "  teeth          Run the TEETH swap-check gate (cross-platform, mandatory)"
 	@echo "  proof          Run proof audit (teeth + self-tests)"
+	@echo "  canary         Prove every anti-bug gate still bites (gate-canary)"
 	@echo "  mutmut         Advisory mutation lane (Linux/WSL only; never blocks)"
 	@echo "  report         Regenerate STATUS.md"
 	@echo "  lint           py_compile + ruff if installed"
@@ -34,6 +35,9 @@ teeth:
 
 proof:
 	$(PY) tools/proof_audit.py --run-selftests
+
+canary:
+	$(PY) tools/gate_canary.py
 
 mutmut:
 	$(PY) tools/mutmut_lane.py
