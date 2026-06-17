@@ -7,7 +7,8 @@ Current public shape:
 - **77 harnesses** across reliability, security, AI, and pharmacy-domain testing.
 - Each harness is a single self-contained Python file.
 - Each harness has a paired `unittest` suite.
-- Harnesses expose a built-in `--self-test` mode when applicable.
+- Proof strength is being ratcheted through the TEETH campaign: required harnesses must prove that the correct oracle passes and planted mutants are caught; pending harnesses are tracked explicitly instead of being counted as fully proven.
+- Harnesses expose a built-in `--self-test` mode when applicable. For TEETH-upgraded harnesses, `--self-test` is expected to exercise a real `Report` path rather than exit as a no-op.
 - The repo is designed as a reusable reliability/testing-pattern library, not a production framework.
 
 ## Start here
@@ -17,7 +18,9 @@ Fast reviewer path:
 ```bash
 python --version
 make test
-make selftest
+make teeth
+make vacuity
+make canary
 make proof
 ```
 
@@ -25,7 +28,9 @@ Windows fallback when `make` is unavailable:
 
 ```bash
 python -m unittest discover -s tests -t . -p "test_*.py"
-python tools/generate_report.py --check
+python tools/proof_audit.py
+python tools/vacuity_gate.py
+python tools/gate_canary.py
 python tools/proof_audit.py --run-selftests
 ```
 
@@ -46,14 +51,29 @@ make test-core     # core only
 make test-security
 make test-ai
 make test-pharmacy
-make selftest      # every harness --self-test
-make proof         # every harness --self-test plus proof audit
+make selftest      # every harness --self-test through report generation
+make teeth         # TEETH swap-check gate
+make vacuity       # vacuous-green meta-gate; neuter mapped oracle targets and expect red
+make canary        # prove gate machinery still bites when softened
+make guard         # verify protected gate files match .fileguard.json
+make proof         # TEETH gate plus harness self-tests
 make report        # generates STATUS.md locally
 make lint          # py_compile + ruff if installed
 make clean
 ```
 
-Dev tooling: `make lint` uses ruff when installed — `pip install ruff` (this is the only tool in the `dev` extra defined in `pyproject.toml`; `uv tool install ruff` works too).
+Dev tooling: `make lint` uses ruff when installed — `pip install ruff` (this is the only tool in the `dev` extra defined in `pyproject.toml`; `uv tool install ruff` works too). The harness library itself remains stdlib-only.
+
+## Proof model
+
+The old "77/77 proven" wording is no longer precise enough. Current proof language is:
+
+- `required` — the harness declares TEETH and the gate verifies the correct oracle is not flagged while planted mutants are caught.
+- `pending` — the harness exists and remains counted, but has not yet been ratcheted to the required TEETH contract.
+- `legacy` — older soft-gated pharmacy harnesses that are tracked separately.
+- `vacuity` — a meta-gate that neuters mapped oracle targets and expects the self-test to fail, preventing tests that stay green while inert.
+
+Use `make teeth`, `make vacuity`, and `make proof` for the current proof surface. Do not describe the repo as total correctness proof for any target application.
 
 ## Dashboard (optional)
 
@@ -77,7 +97,7 @@ harnesses/
 tests/        mirrors harnesses/<cat>/ with test_*.py files
 experiments/  in-progress harnesses, excluded from make test
 template/     harness_template.py — scaffold for new harnesses
-tools/        generate_report.py, proof_audit.py, harness_registry.py, rewrite_imports.py
+tools/        generate_report.py, proof_audit.py, vacuity_gate.py, gate_canary.py, file_guard.py, harness_registry.py
 ```
 
 ## Main docs
@@ -99,11 +119,11 @@ tools/        generate_report.py, proof_audit.py, harness_registry.py, rewrite_i
 make report
 ```
 
-This avoids treating a stale generated report as canonical. The source of truth is the harness code, paired tests, proof audit output, and CI/test output.
+This avoids treating a stale generated report as canonical. The source of truth is the harness code, paired tests, proof audit output, vacuity/canary gate output, and CI/test output.
 
 ## What this repo is
 
-A collection of small, inspectable test harnesses that demonstrate reusable testing patterns: API contract checks, fuzzing, mutation probes, serialization roundtrips, config validation, logging/privacy checks, auth/security surfaces, LLM eval, RAG/agent testing, drift detection, and pharmacy-domain correctness oracles.
+A collection of small, inspectable test harnesses that demonstrate reusable testing patterns: API contract checks, fuzzing, mutation probes, serialization roundtrips, config validation, logging/privacy checks, auth/security surfaces, LLM eval, RAG/agent testing, drift detection, gate-canary/vacuity patterns, and pharmacy-domain correctness oracles.
 
 ## What this repo is not
 
@@ -125,7 +145,7 @@ here *verification is the product*):
 - **Memory** — `docs/LEARNINGS.md` (gotchas) · `docs/kb/` (per-agent journal) · `HARNESS_INVENTORY.md` / `HARNESS_ROADMAP.md` / `PORTFOLIO.md` (the catalog).
 - **Decisions** — no `docs/adr/`: this repo *predates* the ADR convention; required files/workflows are encoded in `.github/control-policy.json` (checked by `tools/control_audit.py`).
 - **Agent tooling** — `.claude/` (hooks + settings; no predefined agent roles).
-- **Verification** — `harnesses/` + `tests/` + `tools/proof_audit.py` (`make proof`) + `.github/workflows/` + the secret/PII gate (`.githooks/` + `tools/scan_staged.py`).
-- **Product** — `harnesses/` themselves: the deliverable *is* the verification — a portable library of proof harnesses to reference later.
+- **Verification** — `harnesses/` + `tests/` + `tools/proof_audit.py` (`make proof`) + `tools/vacuity_gate.py` (`make vacuity`) + `tools/gate_canary.py` (`make canary`) + `.github/workflows/` + the secret/PII gate (`.githooks/` + `tools/scan_staged.py`).
+- **Product** — `harnesses` and the gate patterns themselves: the deliverable *is* the verification — a portable library of proof harnesses to reference later.
 
 Plain-language **and** technical walk-through: [`docs/WALKTHROUGH.md`](./docs/WALKTHROUGH.md).
