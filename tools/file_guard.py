@@ -22,8 +22,9 @@ the rules, not the rules themselves.
 Pure standard library. Honors --root (default: the repo root) so a caller can drive
 it against a throwaway temp tree.
 
-Exit: 0 clean, 1 drift, 2 missing/corrupt baseline (a NAMED failure, never a bare
-crash — honouring the same anti-vacuous-green thesis the guard enforces).
+Exit: 0 clean, 1 drift (or a refused snapshot), 2 missing/corrupt baseline. Every
+failure path is a NAMED message, never a bare crash — the same anti-vacuous-green
+thesis the guard enforces applies to the guard itself.
 """
 
 from __future__ import annotations
@@ -72,12 +73,13 @@ def _expected(root: Path) -> set[str]:
     return found
 
 
-def _load_baseline(manifest: Path) -> dict | None:
+def _load_baseline(manifest: Path) -> dict[str, str] | None:
     """Return the baseline 'files' map, or None if the manifest is missing/corrupt/invalid.
 
-    Covers the schema-invalid cases too: a parseable manifest that is not an object, or
-    whose ``files`` is null / not a mapping. Those are exactly the tampered/inert states
-    the guard exists for, so the caller turns a None into a NAMED exit 2 — never a crash.
+    Covers every malformed shape so the caller can turn a None into a NAMED exit 2 rather
+    than crash: a missing/unreadable file, unparseable JSON, a top level that is not an
+    object, a ``files`` that is null / not a mapping, or a mapping whose values are not all
+    strings (a hash compared with ``!=`` and sliced for the diff message must be a str).
     """
     if not manifest.is_file():
         return None
@@ -86,11 +88,14 @@ def _load_baseline(manifest: Path) -> dict | None:
     except (ValueError, OSError):
         return None
     files = data.get("files") if isinstance(data, dict) else None
-    return files if isinstance(files, dict) else None
+    if not isinstance(files, dict) or not all(isinstance(v, str) for v in files.values()):
+        return None
+    return files
 
 
 def update(root: Path, manifest: Path) -> int:
-    """Rewrite the baseline. Refuse (exit 1) if any protected file is missing or unreadable."""
+    """Rewrite the baseline. Refuse (exit 1) if any protected file is missing/unreadable or
+    the manifest cannot be written — both NAMED, never a bare crash."""
     files: dict[str, str] = {}
     problems: list[str] = []
     for rel in sorted(_expected(root)):
@@ -105,8 +110,12 @@ def update(root: Path, manifest: Path) -> int:
         for rel in problems:
             print(f"  - {rel}", file=sys.stderr)
         return 1
-    manifest.write_text(json.dumps({"version": 1, "files": files}, indent=2) + "\n",
-                        encoding="utf-8")
+    try:
+        manifest.write_text(json.dumps({"version": 1, "files": files}, indent=2) + "\n",
+                            encoding="utf-8")
+    except OSError as err:
+        print(f"file-guard: cannot write baseline {manifest} ({err}).", file=sys.stderr)
+        return 1
     print(f"file-guard: baseline written ({len(files)} protected files).")
     return 0
 
