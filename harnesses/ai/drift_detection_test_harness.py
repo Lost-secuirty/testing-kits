@@ -624,6 +624,9 @@ def prove(impl: Callable[[tuple, tuple], bool]) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_drift_detector"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_drift_detector,

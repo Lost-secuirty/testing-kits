@@ -777,6 +777,9 @@ def prove(factory: Callable[[], PaymentProcessor]) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["PaymentProcessor"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_processor,

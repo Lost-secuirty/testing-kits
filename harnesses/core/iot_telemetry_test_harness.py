@@ -485,6 +485,9 @@ def prove(impl: Callable[[list[Message], tuple[float, ...]], AggResult]) -> bool
     return got != AGG_EXPECTED
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_aggregate"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_aggregate,

@@ -557,6 +557,9 @@ def _prove(impl: Any) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["audit_workflow"]
+
 TEETH = Teeth(
     prove=_prove,
     oracle=audit_workflow,

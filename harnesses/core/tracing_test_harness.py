@@ -317,6 +317,9 @@ def _prove(inject: Callable[[Span], dict[str, str]]) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["Propagator.inject"]
+
 TEETH = Teeth(
     prove=_prove,
     oracle=Propagator.inject,

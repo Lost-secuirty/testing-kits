@@ -384,6 +384,9 @@ def _prove(impl: type) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["InMemoryBroker"]
+
 TEETH = Teeth(
     prove=_prove,
     oracle=InMemoryBroker,

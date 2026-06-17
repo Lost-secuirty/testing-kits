@@ -845,6 +845,9 @@ def prove(impl: Callable[[FsmSpec], CheckerVerdict]) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["check_fsm"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=check_fsm,
