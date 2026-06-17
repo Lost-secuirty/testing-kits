@@ -1,22 +1,36 @@
 """
 Webhook Delivery / Verification Test Harness
 Pure stdlib, zero external dependencies.
+
+Self-test (asserts the teeth — a frozen signature/replay corpus catches a
+validator that skips the replay-window check or is off-by-one on the boundary):
+  python harnesses/core/webhook_test_harness.py --self-test
+  python harnesses/core/webhook_test_harness.py --json
+  python harnesses/core/webhook_test_harness.py --list-scenarios
 """
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import hmac
 import http.server
 import json
+import sys
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path as _Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+# Make the shared teeth contract importable whether run as a module or a script.
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Clock abstraction
@@ -578,3 +592,263 @@ class MockWebhookHandler:
             status = self._status_sequence.pop(0) if self._status_sequence else self._default_status
 
         return status, self._response_body
+
+
+# ---------------------------------------------------------------------------
+# TEETH: a FROZEN corpus of inbound webhooks (payload, signature, event_id,
+# event_timestamp) judged against a fixed FakeClock ``now`` and replay window.
+#
+# A webhook validator only has teeth if it CATCHES a server that (a) forwards a
+# forged/tampered payload, (b) accepts a stale (replayed) timestamp because it
+# skipped the replay-window check, or (c) is off-by-one on the tolerance
+# boundary. The contract a correct validator must hold, at now=1000.0 with a
+# tolerance of 300.0s and the GENERIC test key ``webhook-test-key``:
+#
+#   * the HMAC-SHA256 over the payload must match the supplied signature, else
+#     reject as ``invalid_signature``;
+#   * abs(now - event_timestamp) must be <= tolerance, else reject as
+#     ``timestamp_out_of_tolerance`` (a timestamp at EXACTLY the boundary is
+#     still inside the window — the ``> tolerance`` vs ``>= tolerance`` seam);
+#   * otherwise accept as ``ok``.
+#
+# An impl is a callable ``validate(payload, sig, event_id, event_timestamp)
+# -> (ok, reason)`` evaluated at the frozen now/tolerance/secret baked into the
+# corpus. prove() judges each impl against the corpus's FROZEN LITERAL verdicts
+# (each (ok, reason) hand-set from the contract above and confirmed once with
+# the harness's own signing routine — NEVER read back from the oracle at
+# runtime), so the check is non-circular: flipping any one frozen ``expected_*``
+# literal would make prove(oracle) return True.
+#
+# Pure + deterministic: each case spins a fresh in-process SignatureValidator on
+# an injected FakeClock pinned to ``now`` (no real clock/sleep), HMAC math only,
+# no RNG/threads/network/filesystem (the mock HTTP receiver above is used only
+# under ``main`` and the test suite, never here). The two planted mutants model
+# genuine real-world validator defects (per the campaign hint):
+#
+#   * skips_replay_check — drops the timestamp-tolerance branch entirely, so a
+#     stale/replayed timestamp far outside the window is wrongly accepted (the
+#     classic "we verified the signature but forgot the freshness window" hole);
+#   * off_by_one_tolerance — uses ``>= tolerance`` instead of ``> tolerance`` on
+#     the window, so a timestamp sitting EXACTLY on the boundary is wrongly
+#     rejected (a fencepost defect that silently drops legitimate events).
+# ---------------------------------------------------------------------------
+
+# Frozen evaluation context for the teeth corpus. A generic, non-provider test
+# key (NOT a real whsec_/sk_-prefixed secret) — see the SECRET GUARD: every
+# signature below is an HMAC over this short key, not a leaked credential.
+_TEETH_SECRET = "webhook-test-key"  # allowlist secret: non-provider HMAC test key, not a credential
+_TEETH_NOW = 1000.0
+_TEETH_TOLERANCE = 300.0
+
+
+@dataclass(frozen=True)
+class SigCase:
+    """One frozen inbound-webhook case with a literal, hand-set verdict.
+
+    The signature hexes are HMAC-SHA256(payload, _TEETH_SECRET) constants; the
+    (expected_ok, expected_reason) verdict is hand-derived from the validator
+    contract at now=1000.0, tolerance=300.0 — never read from the oracle.
+    """
+
+    name: str
+    payload: bytes
+    sig: str
+    event_id: str
+    event_timestamp: float
+    expected_ok: bool
+    expected_reason: str
+    note: str = ""
+
+
+# Cases chosen so the correct oracle reproduces every literal verdict AND each
+# planted mutant gets at least two of them wrong (no single load-bearing
+# fixture). All four timestamp branches (in-window, exact past boundary, exact
+# future boundary, far-stale both directions) plus a forged-signature case are
+# present. ``valid`` / ``future_within`` are decoys the boundary/replay bugs
+# cannot distinguish, so the teeth come from the real seams, not coincidence.
+SIG_CORPUS: tuple[SigCase, ...] = (
+    # Fresh, correctly-signed event (age 0): every impl accepts.
+    SigCase("valid", b'{"id":"evt_001","v":1}',
+            "0ed5a1e02040c5be075ec1db2c15ebe6a548a8ac8c3dc3cc891f44f03465ec3f",
+            "evt_001", 1000.0, True, "ok",
+            "fresh + correct sig: accepted by every impl (decoy for the bugs)"),
+    # Forged signature (all-zero hex over the same payload): reject as bad sig.
+    SigCase("bad_signature", b'{"id":"evt_001","v":1}',
+            "0" * 64,
+            "evt_bad", 1000.0, False, "invalid_signature",
+            "tampered/forged signature must be rejected"),
+    # Stale past timestamp (age +400 > 300): outside the window -> reject.
+    # skips_replay_check wrongly accepts this.
+    SigCase("stale_past", b'{"id":"evt_003","v":3}',
+            "73b7142f8caca25082bcc386867a0691d8b3c1edc8021e34fe599315528daa7d",
+            "evt_003", 600.0, False, "timestamp_out_of_tolerance",
+            "replayed/stale past event: skips_replay_check wrongly accepts"),
+    # Far-future timestamp (age -400, abs 400 > 300): also outside -> reject.
+    # A SECOND replay-window case so skips_replay_check is caught >=2 ways.
+    SigCase("stale_future", b'{"id":"evt_002","v":2}',
+            "eeb72d7083ff6cc0cfd3790e5250503b99882445800b855ccf060fa4c9d102a1",
+            "evt_002", 1400.0, False, "timestamp_out_of_tolerance",
+            "far-future stale event: second replay-window catch"),
+    # Past timestamp EXACTLY on the boundary (age +300 == tolerance): inside the
+    # window -> accept. off_by_one_tolerance (>=) wrongly rejects this.
+    SigCase("boundary_past", b'{"id":"evt_005","v":5}',
+            "c7d8277ccf7b3e21b5bd8583950952efe325e0d0fe909f4a0d8fae77c16c735f",
+            "evt_005", 700.0, True, "ok",
+            "exact past boundary (age==tolerance): off_by_one wrongly rejects"),
+    # Future timestamp EXACTLY on the boundary (abs age 300 == tolerance):
+    # inside -> accept. A SECOND boundary case so off_by_one is caught >=2 ways.
+    SigCase("boundary_future", b'{"id":"evt_006","v":6}',
+            "0c3d8abdddf4e8b839f19c63f0574b21600a19ea2fcb641b5d9d62630acb0041",
+            "evt_006", 1300.0, True, "ok",
+            "exact future boundary: second off_by_one catch"),
+    # Future timestamp well inside the window (abs age 200 < 300): accept. Decoy
+    # exercising abs() that none of the planted bugs can distinguish.
+    SigCase("future_within", b'{"id":"evt_004","v":4}',
+            "77ce62704703526140670af1981af42fb4b6ab1f59158bcbc2d09a812890c0a4",
+            "evt_004", 1200.0, True, "ok",
+            "future but in-window decoy: exercises abs(age)"),
+)
+
+
+# --- ORACLE: reuse the harness's own correct SignatureValidator.validate -----
+
+def oracle_validate(
+    payload: bytes, sig: str, event_id: str, event_timestamp: float,
+) -> tuple[bool, str]:
+    """Correct inbound validation, delegating to the harness's own
+    ``SignatureValidator.validate`` on a FakeClock pinned to ``_TEETH_NOW``.
+
+    A fresh validator per call keeps replay state isolated so each corpus case
+    is judged independently (the corpus does not probe replay-dedup, which the
+    existing TestSignatureValidator suite already covers).
+    """
+    validator = SignatureValidator(
+        _TEETH_SECRET,
+        tolerance_seconds=_TEETH_TOLERANCE,
+        clock=FakeClock(start=_TEETH_NOW),
+    )
+    return validator.validate(payload, sig, event_id, event_timestamp)
+
+
+# --- Planted buggy twins (each models a real validator defect) ---------------
+
+def skips_replay_check(
+    payload: bytes, sig: str, event_id: str, event_timestamp: float,
+) -> tuple[bool, str]:
+    """BUG: verifies the signature but DROPS the timestamp-tolerance branch, so a
+    stale/replayed timestamp far outside the window is wrongly accepted.
+
+    Models the "we checked the HMAC but forgot the freshness/replay window"
+    vulnerability: a captured-and-resent webhook validates forever.
+    """
+    if not verify(payload, _TEETH_SECRET, sig):
+        return False, "invalid_signature"
+    # BUG: no abs(now - event_timestamp) > tolerance check.
+    return True, "ok"
+
+
+def off_by_one_tolerance(
+    payload: bytes, sig: str, event_id: str, event_timestamp: float,
+) -> tuple[bool, str]:
+    """BUG: rejects with ``>=`` instead of ``>`` on the tolerance window, so a
+    timestamp sitting EXACTLY on the boundary is wrongly rejected.
+
+    Models a fencepost defect on the freshness window that silently drops
+    legitimate events arriving right at the edge of the allowed skew.
+    """
+    if not verify(payload, _TEETH_SECRET, sig):
+        return False, "invalid_signature"
+    age = _TEETH_NOW - event_timestamp
+    if abs(age) >= _TEETH_TOLERANCE:  # BUG: >= excludes the boundary itself
+        return False, "timestamp_out_of_tolerance"
+    return True, "ok"
+
+
+def prove(impl: Callable[[bytes, str, str, float], tuple[bool, str]]) -> bool:
+    """True iff ``impl`` returns the WRONG verdict for any frozen corpus case
+    (i.e. the validator bug is caught): the ``(ok, reason)`` pair diverges from
+    the hand-set literal, or the impl raises.
+
+    Non-circular + deterministic: every expectation is a literal baked into
+    SIG_CORPUS, never read from the oracle; HMAC arithmetic on a fixed FakeClock
+    only, no RNG/real-clock/threads/network/filesystem. An impl that raises on a
+    corpus case counts as caught.
+    """
+    for case in SIG_CORPUS:
+        try:
+            ok, reason = impl(case.payload, case.sig, case.event_id, case.event_timestamp)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if bool(ok) != case.expected_ok or reason != case.expected_reason:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_validate,
+    mutants=(
+        Mutant("skips_replay_check", skips_replay_check,
+               "drops the timestamp-tolerance branch -> a stale/replayed "
+               "timestamp far outside the window is wrongly accepted"),
+        Mutant("off_by_one_tolerance", off_by_one_tolerance,
+               "uses >= instead of > on the tolerance window -> a timestamp "
+               "exactly on the boundary is wrongly rejected"),
+    ),
+    corpus_size=len(SIG_CORPUS),
+    kind="oracle_swap",
+    notes="a correct validator accepts iff HMAC matches AND "
+          "abs(now - event_timestamp) <= tolerance (boundary inclusive)",
+)
+
+
+def list_scenarios() -> list[str]:
+    """Names of the frozen signature/replay corpus cases (the teeth scenarios)."""
+    return [c.name for c in SIG_CORPUS]
+
+
+# ---------------------------------------------------------------------------
+# Self-test — fails loud, reports findings.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(as_json: bool = False) -> int:
+    """Assert the teeth: the correct oracle reproduces every frozen verdict, and
+    the universal swap-check passes (oracle clean, every planted validator
+    mutant caught against the frozen signature/replay corpus)."""
+    report = Report("core/webhook")
+
+    # 1. The correct oracle reproduces every frozen (ok, reason) literal.
+    for case in SIG_CORPUS:
+        ok, reason = oracle_validate(
+            case.payload, case.sig, case.event_id, case.event_timestamp,
+        )
+        report.add(f"oracle_verdict:{case.name}",
+                   [case.expected_ok, case.expected_reason],
+                   [ok, reason], detail=case.note)
+
+    # 2. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
+
+
+# ---------------------------------------------------------------------------
+# CLI — default action is the self-test (repo convention).
+# ---------------------------------------------------------------------------
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Webhook signature/replay validation harness")
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
+    return _run_self_test(as_json=args.json)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

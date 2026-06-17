@@ -4,6 +4,7 @@ Pure stdlib, zero external dependencies.
 """
 
 import contextlib
+import dataclasses
 import json
 import pickle
 import time
@@ -11,7 +12,10 @@ import unittest
 import urllib.error
 import urllib.request
 
+from harnesses._teeth import verify
 from harnesses.security.appsec_test_harness import (
+    SSRF_CORPUS,
+    TEETH,
     AppSecReport,
     DeserializationChecker,
     JWTChecker,
@@ -22,8 +26,14 @@ from harnesses.security.appsec_test_harness import (
     XXEChecker,
     _b64url_decode,
     _b64url_encode,
+    _run_self_test,
+    list_ssrf_cases,
+    misses_metadata,
+    prove,
+    ssrf_oracle,
     start_mock_server,
     stop_mock_server,
+    substring_blocklist,
 )
 
 # ---------------------------------------------------------------------------
@@ -975,6 +985,103 @@ class TestEdgeCases(unittest.TestCase):
         self.assertEqual(counts["MEDIUM"], 1)
         self.assertEqual(counts["LOW"], 3)
         self.assertEqual(len(report), 7)
+
+
+# ---------------------------------------------------------------------------
+# Teeth Tests — the SSRF auditor must catch every planted mutant, the oracle
+# must stay clean, and the frozen corpus must be non-circular.
+# ---------------------------------------------------------------------------
+
+class TestTeeth(unittest.TestCase):
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(len(SSRF_CORPUS), 1)
+        self.assertEqual(TEETH.corpus_size, len(SSRF_CORPUS))
+
+    def test_kind_is_auditor(self):
+        self.assertEqual(TEETH.kind, "auditor")
+
+    def test_prove_oracle_is_clean(self):
+        # The correct oracle must NOT be flagged by its own corpus.
+        self.assertIs(prove(ssrf_oracle), False)
+        self.assertIs(prove(TEETH.oracle), False)
+
+    def test_prove_catches_misses_metadata(self):
+        self.assertIs(prove(misses_metadata), True)
+
+    def test_prove_catches_substring_blocklist(self):
+        self.assertIs(prove(substring_blocklist), True)
+
+    def test_every_declared_mutant_is_caught(self):
+        self.assertGreaterEqual(len(TEETH.mutants), 1)
+        for mutant in TEETH.mutants:
+            self.assertIs(prove(mutant.impl), True,
+                          msg=f"mutant {mutant.name!r} was not caught")
+
+    def test_verify_reports_full_teeth(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"])
+        self.assertTrue(result["oracle_clean"])
+        self.assertEqual(result["mutants_caught"], result["mutants_total"])
+        self.assertEqual(result["mutants_uncaught"], [])
+        self.assertTrue(result["teeth_verified"])
+
+    def test_oracle_matches_every_frozen_literal(self):
+        # Non-circular: the oracle reproduces each hand-derived literal exactly.
+        for case in SSRF_CORPUS:
+            self.assertEqual(
+                bool(ssrf_oracle(case.target)), case.should_flag,
+                msg=f"oracle disagrees with frozen literal on {case.name!r}",
+            )
+
+    def test_prove_is_noncircular(self):
+        # Flipping ONE frozen literal must make prove(oracle) flip False->True.
+        # If prove derived expectations from the oracle at runtime, it would stay
+        # False — so this guards against a circular oracle.
+        # Patch the module global prove() closes over (no second harness import).
+        module_ns = prove.__globals__
+        original = module_ns["SSRF_CORPUS"]
+        try:
+            idx = next(i for i, c in enumerate(original)
+                       if c.name == "metadata_ip_url")
+            corrupted = list(original)
+            corrupted[idx] = dataclasses.replace(
+                corrupted[idx], should_flag=not corrupted[idx].should_flag
+            )
+            module_ns["SSRF_CORPUS"] = tuple(corrupted)
+            self.assertIs(prove(ssrf_oracle), True)
+        finally:
+            module_ns["SSRF_CORPUS"] = original
+        # Restored corpus: the oracle is clean again.
+        self.assertIs(prove(ssrf_oracle), False)
+
+    def test_each_mutant_caught_by_at_least_two_cases(self):
+        # Robustness: avoid single-load-bearing fixtures where cheap.
+        for impl in (misses_metadata, substring_blocklist):
+            diverging = [c.name for c in SSRF_CORPUS
+                         if bool(impl(c.target)) != c.should_flag]
+            self.assertGreaterEqual(
+                len(diverging), 2,
+                msg=f"{impl.__name__} caught by <2 cases: {diverging}",
+            )
+
+    def test_metadata_ip_is_flagged_loud(self):
+        # The campaign's headline SSRF: the cloud-metadata IMDS endpoint.
+        self.assertTrue(ssrf_oracle("http://169.254.169.254/latest/meta-data/"))
+        self.assertTrue(ssrf_oracle("169.254.169.254"))
+
+    def test_public_lookalikes_not_flagged(self):
+        # Crafted public hosts that merely contain a blocklist token are safe.
+        self.assertFalse(ssrf_oracle("http://169.254.169.254.attacker.example/x"))
+        self.assertFalse(ssrf_oracle("https://mylocalhost.example/health"))
+
+    def test_list_ssrf_cases_matches_corpus(self):
+        self.assertEqual(list_ssrf_cases(), [c.name for c in SSRF_CORPUS])
+
+    def test_run_self_test_passes(self):
+        # The harness's own --self-test path must return exit code 0 (green).
+        self.assertEqual(_run_self_test(as_json=False), 0)
+        self.assertEqual(_run_self_test(as_json=True), 0)
 
 
 if __name__ == "__main__":

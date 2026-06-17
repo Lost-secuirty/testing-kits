@@ -12,7 +12,10 @@ import time
 import tracemalloc
 import unittest
 
+from harnesses._teeth import verify
 from harnesses.core.memory_test_harness import (
+    LEAK_CORPUS,
+    TEETH,
     GCPressureReport,
     LeakReport,
     MemoryAssertions,
@@ -30,6 +33,11 @@ from harnesses.core.memory_test_harness import (
     analyze_snapshots,
     find_free_port,
     http_get,
+    list_teeth_scenarios,
+    oracle_analyze,
+    peak_minus_min,
+    prove,
+    threshold_boundary,
 )
 
 # ---------------------------------------------------------------------------
@@ -504,6 +512,111 @@ class TestTraceMallocMonitor(unittest.TestCase):
         # Don't start
         size = mon.current_size()
         self.assertEqual(size, 0)
+
+
+# ---------------------------------------------------------------------------
+# Group 12: Teeth — the leak-regression analyzer oracle vs its planted mutants
+# ---------------------------------------------------------------------------
+
+class TestTeeth(unittest.TestCase):
+    """The hardened-gate teeth contract for core/memory.
+
+    The oracle is the leak-regression analyzer (slope > threshold). prove()
+    judges an impl against the FROZEN LITERAL ``expected_leaked`` booleans in
+    LEAK_CORPUS — never by calling the oracle at runtime — so the check is
+    non-circular.
+    """
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(len(LEAK_CORPUS), 1)
+        self.assertEqual(TEETH.corpus_size, len(LEAK_CORPUS))
+
+    def test_prove_oracle_is_false(self):
+        """The correct oracle must NOT be flagged by its own corpus."""
+        self.assertIs(prove(oracle_analyze), False)
+
+    def test_prove_threshold_boundary_mutant_is_true(self):
+        """The >= vs > boundary bug must be caught."""
+        self.assertIs(prove(threshold_boundary), True)
+
+    def test_prove_peak_minus_min_mutant_is_true(self):
+        """The span-vs-slope bug must be caught."""
+        self.assertIs(prove(peak_minus_min), True)
+
+    def test_every_declared_mutant_is_caught(self):
+        for mutant in TEETH.mutants:
+            self.assertIs(prove(mutant.impl), True,
+                          f"mutant {mutant.name} was not caught")
+
+    def test_at_least_one_mutant_declared(self):
+        self.assertGreaterEqual(len(TEETH.mutants), 1)
+
+    def test_universal_swapcheck_verifies(self):
+        """The shared gate's verify() must report fully-verified teeth."""
+        result = verify(TEETH)
+        self.assertIsNone(result["error"])
+        self.assertTrue(result["oracle_clean"])
+        self.assertEqual(result["mutants_caught"], result["mutants_total"])
+        self.assertEqual(result["mutants_uncaught"], [])
+        self.assertTrue(result["teeth_verified"])
+
+    def test_oracle_matches_every_frozen_literal(self):
+        """The oracle reproduces each hand-derived expected_leaked verdict."""
+        for case in LEAK_CORPUS:
+            self.assertEqual(
+                oracle_analyze(case.rss_series), case.expected_leaked,
+                f"oracle disagreed with frozen literal on {case.name}")
+
+    def test_non_circular_flipping_a_literal_breaks_the_oracle(self):
+        """Flipping ONE frozen expectation would make prove(oracle) True.
+
+        This is the campaign's non-circularity probe: prove() must compare to
+        the literal, not re-derive it from the oracle. A patched corpus with a
+        single flipped expectation must make the (unchanged) oracle look caught.
+        """
+        import dataclasses
+
+        original = oracle_analyze
+        # Flip the expectation on the first case and prove against the patched
+        # corpus by monkeypatching the module-level LEAK_CORPUS prove() reads.
+        from harnesses.core import memory_test_harness as mh
+        flipped = (
+            dataclasses.replace(
+                mh.LEAK_CORPUS[0],
+                expected_leaked=not mh.LEAK_CORPUS[0].expected_leaked,
+            ),
+            *mh.LEAK_CORPUS[1:],
+        )
+        saved = mh.LEAK_CORPUS
+        mh.LEAK_CORPUS = flipped
+        try:
+            # The oracle is unchanged; only one literal flipped -> now caught.
+            self.assertIs(prove(original), True)
+        finally:
+            mh.LEAK_CORPUS = saved
+        # And restoring the corpus restores the clean verdict.
+        self.assertIs(prove(original), False)
+
+    def test_boundary_case_discriminates_threshold_mutant(self):
+        """The exact-boundary case is what the >= mutant gets wrong."""
+        boundary = next(c for c in LEAK_CORPUS if c.name == "boundary_exact")
+        self.assertFalse(oracle_analyze(boundary.rss_series))
+        self.assertTrue(threshold_boundary(boundary.rss_series))
+
+    def test_noisy_flat_case_discriminates_span_mutant(self):
+        """The noisy-but-flat case is what the peak-minus-min mutant gets wrong."""
+        noisy = next(c for c in LEAK_CORPUS if c.name == "noisy_flat")
+        self.assertFalse(oracle_analyze(noisy.rss_series))
+        self.assertTrue(peak_minus_min(noisy.rss_series))
+
+    def test_list_teeth_scenarios_names(self):
+        names = list_teeth_scenarios()
+        self.assertEqual(names, [c.name for c in LEAK_CORPUS])
+
+    def test_prove_is_deterministic(self):
+        """prove() is pure — repeated calls agree."""
+        self.assertEqual(prove(oracle_analyze), prove(oracle_analyze))
+        self.assertEqual(prove(threshold_boundary), prove(threshold_boundary))
 
 
 if __name__ == "__main__":

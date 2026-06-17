@@ -4,18 +4,38 @@ Rate Limiting / Throttling Test Harness (Harness 28 of 36)
 Pure stdlib, zero external dependencies.
 Provides injectable FakeClock, four rate-limiting algorithms,
 per-key buckets, stats, reporting, and a mock HTTP server.
+
+TEETH: a FROZEN timeline of (advance-clock, allow(n)) operations driven through
+a TokenBucket on the injectable FakeClock, with the EXACT (allowed, remaining)
+each correct admission must yield baked in as literals. See ``TIMELINE_CORPUS``
+and ``prove`` below.
+
+Self-test:
+  python harnesses/core/ratelimit_test_harness.py --self-test
+  python harnesses/core/ratelimit_test_harness.py --json
+  python harnesses/core/ratelimit_test_harness.py --list-scenarios
 """
 
 from __future__ import annotations
 
+import argparse
 import dataclasses
 import http.server
 import json
 import math
+import sys
 import threading
 import time
 import urllib.request
 from collections import deque
+from collections.abc import Callable
+
+# Make the shared teeth contract importable whether run as a module or a script.
+from pathlib import Path as _Path
+
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # FakeClock
@@ -535,3 +555,314 @@ def http_get(url: str, timeout: float = 5.0):
         body = json.loads(exc.read())
         headers = dict(exc.headers)
         return exc.code, headers, body
+
+
+# ---------------------------------------------------------------------------
+# TEETH: a FROZEN operation timeline -> the exact admission outcomes a CORRECT
+# token-bucket limiter MUST produce.
+#
+# A rate-limit harness only has teeth if it CATCHES a limiter that admits one
+# request too many at the empty boundary (an off-by-one on the admission test)
+# or that lets the bucket overfill past its capacity after an idle period (a
+# dropped ``min(capacity, ...)`` cap, which permits a double-burst). The
+# contract every correct token bucket of (capacity C, refill R tok/sec) must
+# hold over a deterministic timeline:
+#
+#   * a request for n tokens is ADMITTED iff the bucket currently holds >= n
+#     tokens (strict: at exactly n-1 tokens it is DENIED) — admitting at n-1 is
+#     the classic off-by-one;
+#   * refill is CAPPED at C: after idling far longer than C/R seconds the bucket
+#     holds exactly C tokens, never more — an uncapped refill lets a long idle
+#     bankroll an oversized burst.
+#
+# An impl is a callable ``simulate(config, ops) -> tuple[(allowed, remaining)]``
+# returning one (allowed, remaining-after) pair per ``("allow", n)`` op (clock
+# advances produce no output). prove() judges each impl against the corpus's
+# FROZEN LITERAL outcomes (hand-computed from the contract above, NEVER read
+# back from the oracle at runtime), so the check is non-circular. prove(impl) is
+# True iff any outcome diverges from the frozen literal — i.e. the limiter bug
+# is caught.
+#
+# Pure + deterministic: the timeline drives an injectable FakeClock (no real
+# clock/sleep), integer/float arithmetic only, no RNG, no threads, no network,
+# no filesystem. The mock HTTP server is excluded — it lives under main() only.
+# The two planted mutants model genuine real-world token-bucket defects:
+#
+#   * refill_off_by_one — admits when tokens >= n-1 (i.e. ``tokens + 1 >= n``)
+#     instead of tokens >= n, so it lets ONE extra request through at the empty
+#     boundary: the over-admission bug;
+#   * uncapped_refill — drops the ``min(capacity, ...)`` clamp, so a long idle
+#     overfills the bucket and a later burst exceeds capacity: the boundary /
+#     double-burst bug.
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True)
+class BucketConfig:
+    """Frozen token-bucket configuration for a timeline case."""
+    capacity: int
+    refill_rate: float
+
+
+@dataclasses.dataclass(frozen=True)
+class TimelineCase:
+    """One frozen timeline case with literal, hand-computed admission outcomes.
+
+    ``ops`` is a tuple of operations:
+      * ``("advance", seconds)`` — move the FakeClock forward (no output);
+      * ``("allow", n)`` — request ``n`` tokens (produces one outcome).
+    ``expected`` is the tuple of ``(allowed, remaining)`` pairs a CORRECT bucket
+    yields, one per ``("allow", n)`` op, in order. Every pair is a literal
+    constant, never derived from the oracle at runtime.
+    """
+    name: str
+    config: BucketConfig
+    ops: tuple[tuple[str, float], ...]
+    expected: tuple[tuple[bool, int], ...]
+    note: str = ""
+
+
+# Cases chosen so the correct oracle matches every literal AND at least one
+# planted mutant gets each one wrong. Each ``expected`` pair is hand-computed
+# from the token-bucket contract (admit iff tokens >= n; refill capped at C).
+# Capacity is 5 and refill 1 tok/sec throughout for an easy hand-trace.
+_C5R1 = BucketConfig(capacity=5, refill_rate=1.0)
+
+TIMELINE_CORPUS: tuple[TimelineCase, ...] = (
+    # Drain to empty, then ask once more with no time elapsed. A correct bucket
+    # DENIES the 6th (0 tokens left). refill_off_by_one wrongly ADMITS it
+    # (tokens=0 >= n-1=0). uncapped_refill agrees with the oracle here (no idle
+    # to overfill), so this case isolates the off-by-one.
+    TimelineCase(
+        "drain_then_deny",
+        _C5R1,
+        (("allow", 1), ("allow", 1), ("allow", 1), ("allow", 1), ("allow", 1),
+         ("allow", 1)),
+        ((True, 4), (True, 3), (True, 2), (True, 1), (True, 0), (False, 0)),
+        "6th request at 0 tokens must be denied; off-by-one admits it",
+    ),
+    # Drain to exactly 2 tokens, then request 3 at once. Correct bucket DENIES
+    # (2 < 3). refill_off_by_one wrongly ADMITS (tokens=2 >= n-1=2), a second,
+    # independent witness of the off-by-one at a non-zero boundary.
+    TimelineCase(
+        "n3_at_2_tokens",
+        _C5R1,
+        (("allow", 1), ("allow", 1), ("allow", 1), ("allow", 3)),
+        ((True, 4), (True, 3), (True, 2), (False, 0)),
+        "request of 3 against 2 tokens must be denied; off-by-one admits it",
+    ),
+    # Drain fully, idle 100s (would mint 100 tokens uncapped), then burst 6.
+    # Correct refill caps at capacity=5, so the 6th in the post-idle burst is
+    # DENIED. uncapped_refill lets the idle overfill to 100 and admits all 6
+    # (double-burst). refill_off_by_one ALSO trips here (it admits the 6th at
+    # the empty boundary), so this case witnesses both mutants.
+    TimelineCase(
+        "idle_overfill_cap",
+        _C5R1,
+        (("allow", 5), ("advance", 100.0),
+         ("allow", 1), ("allow", 1), ("allow", 1), ("allow", 1), ("allow", 1),
+         ("allow", 1)),
+        ((True, 0),
+         (True, 4), (True, 3), (True, 2), (True, 1), (True, 0), (False, 0)),
+        "refill capped at capacity after long idle; uncapped allows a 6th burst",
+    ),
+    # Partial refill below 1 token does not admit. Drain fully, advance 0.5s
+    # (mints 0.5 tokens), request 1. Correct bucket DENIES (0.5 < 1). A second
+    # witness that uncapped_refill is NOT what breaks this (it agrees here), and
+    # that the boundary is strict.
+    TimelineCase(
+        "partial_refill_denies",
+        _C5R1,
+        (("allow", 5), ("advance", 0.5), ("allow", 1)),
+        ((True, 0), (False, 0)),
+        "0.5 refilled tokens cannot satisfy a request for 1",
+    ),
+    # Full refill after a 5s idle restores exactly capacity (not more). Drain
+    # fully, idle 5s, then take 5 — all admitted, 6th denied. Catches an
+    # uncapped refill that would admit a 6th, and confirms exact-cap behaviour.
+    TimelineCase(
+        "exact_cap_refill",
+        _C5R1,
+        (("allow", 5), ("advance", 5.0),
+         ("allow", 1), ("allow", 1), ("allow", 1), ("allow", 1), ("allow", 1),
+         ("allow", 1)),
+        ((True, 0),
+         (True, 4), (True, 3), (True, 2), (True, 1), (True, 0), (False, 0)),
+        "5s idle refills to exactly capacity=5, not more",
+    ),
+    # Long idle then two bursts. Drain fully, idle 10s (caps at 5, would mint 10
+    # uncapped), take 5 (admitted, empties), then ask 3 (denied — only 0 left).
+    # A second, independent witness of the cap: uncapped admits BOTH the 5-burst
+    # remaining (5 left) and the following 3, diverging on both allow steps.
+    TimelineCase(
+        "long_idle_then_burst",
+        _C5R1,
+        (("allow", 5), ("advance", 10.0), ("allow", 5), ("allow", 3)),
+        ((True, 0), (True, 0), (False, 0)),
+        "10s idle caps at capacity; uncapped bankrolls an oversized second burst",
+    ),
+)
+
+
+# --- ORACLE: drive the harness's own correct TokenBucket on a FakeClock ------
+
+def oracle_simulate(
+    config: BucketConfig,
+    ops: tuple[tuple[str, float], ...],
+) -> tuple[tuple[bool, int], ...]:
+    """Correct admission outcomes, delegating to the harness's own
+    ``TokenBucket`` on an injectable ``FakeClock``. Returns one
+    ``(allowed, remaining)`` pair per ``("allow", n)`` op, in order."""
+    clock = FakeClock(0.0)
+    bucket = TokenBucket(config.capacity, config.refill_rate, clock=clock)
+    out: list[tuple[bool, int]] = []
+    for kind, arg in ops:
+        if kind == "advance":
+            clock.advance(arg)
+        elif kind == "allow":
+            decision = bucket.allow(int(arg))
+            out.append((decision.allowed, decision.remaining))
+        else:  # pragma: no cover - corpus is frozen and well-formed
+            raise ValueError(f"unknown op: {kind!r}")
+    return tuple(out)
+
+
+# --- Planted buggy twins (each models a real token-bucket defect) ------------
+
+def _simulate_buggy(
+    config: BucketConfig,
+    ops: tuple[tuple[str, float], ...],
+    *,
+    off_by_one: bool = False,
+    uncapped: bool = False,
+) -> tuple[tuple[bool, int], ...]:
+    """Standalone integer/float token-bucket simulation with optional planted
+    defects. Pure and deterministic — a frozen timeline, no real clock."""
+    capacity = float(config.capacity)
+    rate = config.refill_rate
+    tokens = capacity
+    now = 0.0
+    last_refill = 0.0
+    out: list[tuple[bool, int]] = []
+    for kind, arg in ops:
+        if kind == "advance":
+            now += arg
+            continue
+        n = int(arg)
+        elapsed = now - last_refill
+        if elapsed > 0:
+            gained = elapsed * rate
+            # BUG (uncapped): dropped the min(capacity, .) clamp on refill.
+            tokens = tokens + gained if uncapped else min(capacity, tokens + gained)
+            last_refill = now
+        admit = (tokens + 1 >= n) if off_by_one else (tokens >= n)  # BUG: >= n-1
+        if admit:
+            tokens -= n
+            out.append((True, int(tokens)))
+        else:
+            out.append((False, 0))
+    return tuple(out)
+
+
+def refill_off_by_one(
+    config: BucketConfig,
+    ops: tuple[tuple[str, float], ...],
+) -> tuple[tuple[bool, int], ...]:
+    """BUG: admits when ``tokens + 1 >= n`` (i.e. tokens >= n-1) instead of
+    ``tokens >= n``, letting one extra request through at the empty boundary."""
+    return _simulate_buggy(config, ops, off_by_one=True)
+
+
+def uncapped_refill(
+    config: BucketConfig,
+    ops: tuple[tuple[str, float], ...],
+) -> tuple[tuple[bool, int], ...]:
+    """BUG: drops the ``min(capacity, ...)`` clamp on refill, so a long idle
+    overfills the bucket and a later burst exceeds capacity (double-burst)."""
+    return _simulate_buggy(config, ops, uncapped=True)
+
+
+def prove(
+    impl: Callable[[BucketConfig, tuple[tuple[str, float], ...]],
+                   tuple[tuple[bool, int], ...]],
+) -> bool:
+    """True iff ``impl`` produces a WRONG admission outcome for any frozen
+    corpus case (i.e. the limiter bug is caught): any ``(allowed, remaining)``
+    pair diverges from the hand-computed literal, the count of outcomes differs,
+    or the impl raises.
+
+    Non-circular + deterministic: every expectation is a literal baked into
+    ``TIMELINE_CORPUS`` (read via the module global so a corrupted literal is
+    honoured), never read from the oracle; no RNG/clock/threads/network/
+    filesystem. An impl that raises on a corpus case counts as caught.
+    """
+    for case in TIMELINE_CORPUS:
+        try:
+            outcomes = impl(case.config, case.ops)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if tuple(outcomes) != case.expected:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_simulate,
+    mutants=(
+        Mutant("refill_off_by_one", refill_off_by_one,
+               "admits when tokens >= n-1 instead of tokens >= n -> lets one "
+               "extra request through at the empty/boundary token count"),
+        Mutant("uncapped_refill", uncapped_refill,
+               "drops the min(capacity, .) refill clamp -> a long idle overfills "
+               "the bucket and a later burst exceeds capacity (double-burst)"),
+    ),
+    corpus_size=len(TIMELINE_CORPUS),
+    kind="oracle_swap",
+    notes="a correct token bucket admits iff it holds >= n tokens (strict at the "
+          "boundary) and caps refill at capacity; the mutants over-admit at the "
+          "boundary or overfill after an idle.",
+)
+
+
+def list_scenarios() -> list[str]:
+    """Names of the frozen timeline corpus cases (the teeth scenarios)."""
+    return [c.name for c in TIMELINE_CORPUS]
+
+
+def _run_self_test(as_json: bool = False) -> int:
+    """Assert the teeth: the oracle reproduces every frozen admission literal,
+    each planted limiter defect is caught, and the universal swap-check passes
+    (oracle clean, every mutant caught)."""
+    report = Report("core/ratelimit")
+
+    # 1. The correct oracle reproduces every frozen admission literal exactly.
+    for case in TIMELINE_CORPUS:
+        outcomes = oracle_simulate(case.config, case.ops)
+        report.add(f"oracle_timeline:{case.name}",
+                   [list(p) for p in case.expected],
+                   [list(p) for p in outcomes],
+                   detail=case.note)
+
+    # 2. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Rate-limiting / throttling test harness (token-bucket teeth)")
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true")
+    args = parser.parse_args(argv)
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
+    return _run_self_test(as_json=args.json)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
