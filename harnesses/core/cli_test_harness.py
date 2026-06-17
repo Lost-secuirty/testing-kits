@@ -754,6 +754,9 @@ def prove(impl: Callable[[tuple[str, ...]], CliOutcome]) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_dispatch"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_dispatch,

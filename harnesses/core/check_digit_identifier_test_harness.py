@@ -313,6 +313,9 @@ def _prove(impl: Callable[[str, str], bool]) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["validate"]
+
 TEETH = Teeth(
     prove=_prove,
     oracle=validate,

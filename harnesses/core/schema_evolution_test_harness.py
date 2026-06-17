@@ -553,6 +553,9 @@ def prove(impl: Callable[[SchemaT, SchemaT], bool]) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["is_breaking"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=is_breaking,

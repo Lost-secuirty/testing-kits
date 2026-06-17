@@ -358,6 +358,9 @@ def _prove(impl) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["scan_diff"]
+
 TEETH = Teeth(
     prove=_prove,
     oracle=scan_diff,
