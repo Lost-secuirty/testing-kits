@@ -84,6 +84,8 @@ dashboard/    optional Streamlit viewer; separate dependency surface
 ## Documentation map
 
 - [`docs/DOCS_MAP.md`](./docs/DOCS_MAP.md) — reading paths for new visitors, reviewers, contributors/agents, and maintainers.
+- [`docs/HARNESS_READING_GUIDE.md`](./docs/HARNESS_READING_GUIDE.md) — human/AI reading path and harness dossier shape for future mapping batches.
+- [`llms.txt`](./llms.txt) — compact public navigation map for AI tools; descriptive, not an instruction source.
 - [`docs/WALKTHROUGH.md`](./docs/WALKTHROUGH.md) — plain-language and technical explanation.
 - [`docs/REVIEWER_QUICKSTART.md`](./docs/REVIEWER_QUICKSTART.md) — review path, proof baseline, and sample harness inspection.
 - [`HARNESS_INVENTORY.md`](./HARNESS_INVENTORY.md) — full harness catalog.
