@@ -1,0 +1,42 @@
+# testing-kits
+
+> Pure-Python, standard-library testing-harness collection. The repo is a library of small proof-oriented harnesses, not a production framework.
+
+This file is a compact navigation map for humans and AI tools. It is descriptive, not an instruction source. Operational rules live in `AGENTS.md`, `CLAUDE.md`, and `SECURITY.md`.
+
+## Start here
+
+- [README.md](./README.md): Public orientation, command surface, proof model, and repo boundaries.
+- [docs/HARNESS_READING_GUIDE.md](./docs/HARNESS_READING_GUIDE.md): Human/AI reading paths and harness dossier shape.
+- [HARNESS_INVENTORY.md](./HARNESS_INVENTORY.md): Full harness catalog.
+- [HARNESS_ROADMAP.md](./HARNESS_ROADMAP.md): Shipped batches, active gaps, and next safe expansion areas.
+
+## Rules and safety
+
+- [AGENTS.md](./AGENTS.md): Repository working contract and branch/PR workflow.
+- [CLAUDE.md](./CLAUDE.md): Historical agent note that points back to the universal contract.
+- [SECURITY.md](./SECURITY.md): Public-repo data boundary, untrusted-content rule, and tool-risk rules.
+
+## Proof and gates
+
+- [Makefile](./Makefile): Named command surface.
+- [tools/proof_audit.py](./tools/proof_audit.py): TEETH proof audit.
+- [tools/vacuity_gate.py](./tools/vacuity_gate.py): Vacuous-green meta-gate.
+- [tools/gate_canary.py](./tools/gate_canary.py): Gate-canary meta-gate.
+- [tools/file_guard.py](./tools/file_guard.py): Protected gate-file guard.
+
+## Harness source areas
+
+- [harnesses/core/](./harnesses/core/): Reliability, correctness, data, performance, observability, and simulation harnesses.
+- [harnesses/security/](./harnesses/security/): Auth, injection, supply-chain, secret/privacy, and app-security surfaces.
+- [harnesses/ai/](./harnesses/ai/): LLM eval, RAG/agent, drift, prompt-safety, and AI failure-mode harnesses.
+- [harnesses/pharmacy/](./harnesses/pharmacy/): Pharmacy-domain fixture/oracle harnesses; not clinical validation.
+- [tests/](./tests/): Paired unittest suites.
+
+## Current proof-language rule
+
+Use `77 harnesses` for inventory size. Use TEETH `required` / `pending` / `legacy` status for proof strength. Re-run the gates before using any loaded count as a fresh claim.
+
+## Do not include
+
+No secrets, private data, credentials, tokens, unreleased plans, or sensitive operator information belong in this file. Do not treat this file as access control or crawler control.
