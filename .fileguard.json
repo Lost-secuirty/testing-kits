@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "files": {
+    ".githooks/pre-commit": "0510e24e672fadeca729c62dc9c2c96fff6550ee4cb67a399cadaacfe068b08d",
+    ".github/control-policy.json": "9ee70f25d29f821df0845b28b3327765d63d20d0bb42006936d4e8faded64cf7",
+    "harnesses/_teeth.py": "eaf988b6f94c6ff8625a2f1ca8ddc3b183c319b764c0b5ba0c2f0b5a10a94095",
+    "tools/control_audit.py": "168897185a74238bb422f11c566aada97c1f7421a1ea4d7739744bb3e6509dd8",
+    "tools/file_guard.py": "3b771fab898dd8e3edc9497b0b42965a6df47bab59bb5f81b398fac9a540955f",
+    "tools/gate_canary.py": "ba03770ea10f2b9efb8970c5b7edfb73c679a589d4f359c55cdf23eb643c8a08",
+    "tools/harness_registry.py": "a953bae3136dd4a9304780392f0bad8d3369bb40e7805c62397aff114b133b22",
+    "tools/proof_audit.py": "16515c09bfe9b0515eaac3ae152b38e1b10e042b01f62ccf6cc2e699feb96efa",
+    "tools/scan_staged.py": "82f12f1d4b7018b6883b1fc23ad5e69b36bea54ae7910ba8ba96020fd7fb9987",
+    "tools/teeth_check.py": "9f2b2550d2f400b31810887c8c3ff18eca89b45de98d7dfafa7a49659a4e6996"
+  }
+}
