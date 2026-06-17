@@ -102,6 +102,8 @@ tools/        generate_report.py, proof_audit.py, vacuity_gate.py, gate_canary.p
 
 ## Main docs
 
+- [`docs/HARNESS_READING_GUIDE.md`](./docs/HARNESS_READING_GUIDE.md) — human/AI reading paths and harness dossier shape.
+- [`llms.txt`](./llms.txt) — compact navigation map for AI tools and quick human orientation; descriptive, not an instruction source.
 - [`HARNESS_INVENTORY.md`](./HARNESS_INVENTORY.md) — full catalog.
 - [`HARNESS_ROADMAP.md`](./HARNESS_ROADMAP.md) — shipped batches, known gaps, hygiene backlog.
 - [`AGENTS.md`](./AGENTS.md) — contributor/agent contract: commands, boundaries, working agreement.
