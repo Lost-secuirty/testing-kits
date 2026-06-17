@@ -425,7 +425,7 @@ def oracle_analyze(rss_series: tuple[int, ...]) -> bool:
     ``analyze_snapshots``. Wraps the frozen RSS values in MemorySnapshots and
     returns its ``leaked`` flag against the frozen ``TEETH_THRESHOLD``."""
     snaps = [
-        MemorySnapshot(rss_bytes=v, gc_objects=0, fd_count=0, thread_count=1)
+        MemorySnapshot(rss_bytes=v, gc_objects=0, fd_count=0, thread_count=1, timestamp=0.0)
         for v in rss_series
     ]
     return analyze_snapshots(snaps, threshold_bytes_per_iter=TEETH_THRESHOLD).leaked
@@ -440,7 +440,7 @@ def threshold_boundary(rss_series: tuple[int, ...]) -> bool:
     threshold is a benign steady-state, but this twin reports it as a leak.
     """
     snaps = [
-        MemorySnapshot(rss_bytes=v, gc_objects=0, fd_count=0, thread_count=1)
+        MemorySnapshot(rss_bytes=v, gc_objects=0, fd_count=0, thread_count=1, timestamp=0.0)
         for v in rss_series
     ]
     if len(snaps) < 2:

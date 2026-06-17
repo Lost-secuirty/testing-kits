@@ -773,6 +773,15 @@ def oracle_match(actual: Any, stored: Any) -> bool:
 
 # --- Planted buggy twins (each models a real comparator defect) ----------------
 
+def _shallow_value_matches(av: Any, sv: Any) -> bool:
+    """One key's NON-recursive comparison for ``no_recurse_match``: two nested
+    containers are deemed equal by TYPE alone (never recursed) — the planted
+    bug; everything else falls back to plain equality."""
+    if isinstance(av, (dict, list)) and isinstance(sv, (dict, list)):
+        return type(av) is type(sv)
+    return av == sv
+
+
 def no_recurse_match(actual: Any, stored: Any) -> bool:
     """BUG: compares only the TOP level and never recurses into nested values.
 
@@ -786,16 +795,7 @@ def no_recurse_match(actual: Any, stored: Any) -> bool:
     if isinstance(actual, dict) and isinstance(stored, dict):
         if sorted(actual.keys()) != sorted(stored.keys()):
             return False
-        for k in actual:
-            av, sv = actual[k], stored[k]
-            # BUG: containers are deemed equal by type alone — never recursed.
-            if isinstance(av, (dict, list)) and isinstance(sv, (dict, list)):
-                if type(av) is not type(sv):
-                    return False
-                continue
-            if av != sv:
-                return False
-        return True
+        return all(_shallow_value_matches(actual[k], stored[k]) for k in actual)
     return actual == stored
 
 

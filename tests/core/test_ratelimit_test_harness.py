@@ -1522,6 +1522,7 @@ class TestTeeth(unittest.TestCase):
             text=True,
             capture_output=True,
             check=False,
+            timeout=60,  # a regressed CLI that deadlocks must fail, not hang CI
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("OK:", proc.stdout)

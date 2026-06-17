@@ -793,6 +793,13 @@ LOG_CORPUS: tuple[LogCase, ...] = (
         False,
         "non-ISO-8601 timestamp -> invalid (decoy for the two planted mutants)",
     ),
+    LogCase(
+        "impossible_timestamp",
+        {"timestamp": "2024-13-40T25:61:61Z", "level": "INFO", "message": "m"},
+        False,
+        "calendar-invalid timestamp -> invalid; a regex-shape-only validator "
+        "that never parses the date wrongly accepts it",
+    ),
 )
 
 
@@ -811,7 +818,11 @@ def oracle_validate(entry: dict[str, Any]) -> bool:
     fmt_ok, _ = LogFormatValidator().validate_dict(entry)
     level = entry.get("level")
     level_ok = isinstance(level, str) and level.upper() in ALLOWED_LOG_LEVELS
-    return fmt_ok and level_ok
+    # The format validator only regex-checks timestamp SHAPE; the contract also
+    # requires the value to actually PARSE as ISO-8601 (rejects e.g. month 13).
+    timestamp = entry.get("timestamp")
+    timestamp_ok = isinstance(timestamp, str) and _parse_iso8601(timestamp) is not None
+    return fmt_ok and level_ok and timestamp_ok
 
 
 # --- Planted buggy twins (each models a real validator defect) ---------------
@@ -856,7 +867,7 @@ def prove(impl: Callable[[dict[str, Any]], bool]) -> bool:
     """
     for case in LOG_CORPUS:
         try:
-            verdict = impl(case.entry)
+            verdict = impl(dict(case.entry))  # copy: a normalizing impl must not mutate the frozen corpus
         except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
             return True
         if bool(verdict) != case.expected_valid:
