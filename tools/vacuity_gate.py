@@ -63,13 +63,13 @@ def _mutate(value):
     if isinstance(value, str):
         return value + "_MUT"
     if isinstance(value, frozenset):
-        return frozenset()
+        return frozenset() if value else frozenset({None})
     if isinstance(value, set):
-        return set()
+        return set() if value else {None}
     if isinstance(value, dict):
-        return {}
+        return {} if value else {"_vacuity_mut": None}
     if isinstance(value, (list, tuple)):
-        return type(value)()
+        return type(value)() if value else type(value)((None,))
     return _SENTINEL  # None / custom objects: no type-faithful wrong value
 
 
@@ -105,10 +105,15 @@ def _neuter(module, dotted: str) -> None:
 def _load(module_ref: str):
     """Import a dotted module, or load a fixture by .py path."""
     if module_ref.endswith(".py"):
-        spec = importlib.util.spec_from_file_location("_vacuity_fixture", module_ref)
+        path = Path(module_ref).resolve()
+        if path.parent != (ROOT / "tools" / "_vacuity_fixtures").resolve():
+            raise ValueError(f"refusing to load a .py outside tools/_vacuity_fixtures: {module_ref!r}")
+        spec = importlib.util.spec_from_file_location("_vacuity_fixture", str(path))
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
+    if not module_ref.startswith("harnesses."):
+        raise ValueError(f"refusing to import a module outside harnesses.*: {module_ref!r}")
     return importlib.import_module(module_ref)
 
 
