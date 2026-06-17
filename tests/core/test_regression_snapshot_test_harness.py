@@ -594,20 +594,20 @@ class TestTeeth(unittest.TestCase):
         # proving the literal, not the oracle, is the source of truth.
         import dataclasses
 
-        import harnesses.core.regression_snapshot_test_harness as h
-
         flipped = list(COMPARE_CORPUS)
         flipped[0] = dataclasses.replace(
             flipped[0], expected_match=not flipped[0].expected_match
         )
-        original = h.COMPARE_CORPUS
+        # Patch the module global prove() closes over (no second harness import).
+        module_ns = prove.__globals__
+        original = module_ns["COMPARE_CORPUS"]
         try:
-            h.COMPARE_CORPUS = tuple(flipped)
-            self.assertTrue(h.prove(h.oracle_match))
+            module_ns["COMPARE_CORPUS"] = tuple(flipped)
+            self.assertTrue(prove(oracle_match))
         finally:
-            h.COMPARE_CORPUS = original
+            module_ns["COMPARE_CORPUS"] = original
         # Sanity: restored corpus makes the oracle clean again.
-        self.assertFalse(h.prove(h.oracle_match))
+        self.assertFalse(prove(oracle_match))
 
     def test_no_recurse_caught_by_at_least_two_cases(self):
         # Robustness: the no_recurse mutant must be caught by >=2 corpus cases.

@@ -1043,22 +1043,22 @@ class TestTeeth(unittest.TestCase):
         # caught. This proves prove() compares to baked literals, not the oracle.
         import dataclasses
 
-        import harnesses.core.webhook_test_harness as h
-
         corrupted = dataclasses.replace(
             SIG_CORPUS[0], expected_ok=not SIG_CORPUS[0].expected_ok,
         )
         patched = (corrupted,) + tuple(SIG_CORPUS[1:])
-        original = h.SIG_CORPUS
+        # Patch the module global prove() closes over (no second harness import).
+        module_ns = prove.__globals__
+        original = module_ns["SIG_CORPUS"]
         try:
             # Sanity: against the real corpus the oracle is clean...
-            self.assertFalse(h.prove(h.oracle_validate))
+            self.assertFalse(prove(oracle_validate))
             # ...but flip one literal and the same oracle is now "caught", which
             # is only possible if prove compares to the frozen literal.
-            h.SIG_CORPUS = patched
-            self.assertTrue(h.prove(h.oracle_validate))
+            module_ns["SIG_CORPUS"] = patched
+            self.assertTrue(prove(oracle_validate))
         finally:
-            h.SIG_CORPUS = original
+            module_ns["SIG_CORPUS"] = original
 
     def test_prove_catches_raising_impl(self):
         def boom(*_args, **_kwargs):

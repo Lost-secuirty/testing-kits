@@ -813,15 +813,16 @@ class TestTeeth(unittest.TestCase):
         flipped[0] = dataclasses.replace(
             flipped[0], expected_valid=not flipped[0].expected_valid
         )
-        import harnesses.core.logging_test_harness as h
-        original = h.LOG_CORPUS
+        # Patch the module global prove() closes over (no second harness import).
+        module_ns = prove.__globals__
+        original = module_ns["LOG_CORPUS"]
         try:
-            h.LOG_CORPUS = tuple(flipped)
-            self.assertTrue(h.prove(h.oracle_validate))
+            module_ns["LOG_CORPUS"] = tuple(flipped)
+            self.assertTrue(prove(oracle_validate))
         finally:
-            h.LOG_CORPUS = original
+            module_ns["LOG_CORPUS"] = original
         # Sanity: restored corpus makes the oracle clean again.
-        self.assertFalse(h.prove(h.oracle_validate))
+        self.assertFalse(prove(oracle_validate))
 
     def test_oracle_matches_every_frozen_literal(self):
         for case in LOG_CORPUS:

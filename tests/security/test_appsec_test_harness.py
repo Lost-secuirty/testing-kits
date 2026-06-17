@@ -1038,8 +1038,9 @@ class TestTeeth(unittest.TestCase):
         # Flipping ONE frozen literal must make prove(oracle) flip False->True.
         # If prove derived expectations from the oracle at runtime, it would stay
         # False — so this guards against a circular oracle.
-        import harnesses.security.appsec_test_harness as mod
-        original = mod.SSRF_CORPUS
+        # Patch the module global prove() closes over (no second harness import).
+        module_ns = prove.__globals__
+        original = module_ns["SSRF_CORPUS"]
         try:
             idx = next(i for i, c in enumerate(original)
                        if c.name == "metadata_ip_url")
@@ -1047,12 +1048,12 @@ class TestTeeth(unittest.TestCase):
             corrupted[idx] = dataclasses.replace(
                 corrupted[idx], should_flag=not corrupted[idx].should_flag
             )
-            mod.SSRF_CORPUS = tuple(corrupted)
-            self.assertIs(mod.prove(ssrf_oracle), True)
+            module_ns["SSRF_CORPUS"] = tuple(corrupted)
+            self.assertIs(prove(ssrf_oracle), True)
         finally:
-            mod.SSRF_CORPUS = original
+            module_ns["SSRF_CORPUS"] = original
         # Restored corpus: the oracle is clean again.
-        self.assertIs(mod.prove(ssrf_oracle), False)
+        self.assertIs(prove(ssrf_oracle), False)
 
     def test_each_mutant_caught_by_at_least_two_cases(self):
         # Robustness: avoid single-load-bearing fixtures where cheap.
