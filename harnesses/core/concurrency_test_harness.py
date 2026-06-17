@@ -1700,6 +1700,9 @@ lock_dropped_impl = _make_impl(lock_dropped_midway_program, oracle_guarded_progr
 overdraft_impl = _make_impl(oracle_program, nonatomic_check_then_act_program)
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_impl"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_impl,

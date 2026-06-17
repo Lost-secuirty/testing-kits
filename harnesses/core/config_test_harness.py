@@ -877,6 +877,9 @@ def prove(impl: Callable[[ConfigSources, ConfigSchema], LoadOutcome]) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["load_config"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=load_config,

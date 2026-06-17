@@ -1090,6 +1090,9 @@ def prove(impl: Callable[[ContractSchema, ContractSchema], bool]) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["check_compatibility"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=check_compatibility,

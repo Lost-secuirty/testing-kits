@@ -939,6 +939,9 @@ def prove(impl: Callable[[list[dict[str, Any]]], tuple[GroupAgg, ...]]) -> bool:
     return produced != AGG_CORPUS
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_aggregate"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_aggregate,

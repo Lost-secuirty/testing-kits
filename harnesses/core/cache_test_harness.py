@@ -862,6 +862,9 @@ def prove(impl: Callable[..., Any]) -> bool:
     return any(actual != expected for _name, expected, actual in observed)
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["Cache"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=Cache,
