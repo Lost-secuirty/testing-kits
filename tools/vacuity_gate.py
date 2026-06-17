@@ -137,7 +137,10 @@ def _run_worker(module_ref: str, targets: list[str]) -> int:
     args = [sys.executable, str(Path(__file__)), "--worker", "--module", module_ref]
     if targets:
         args += ["--targets", ",".join(targets)]
-    return subprocess.run(args, capture_output=True, text=True).returncode
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=120).returncode
+    except subprocess.TimeoutExpired:
+        return 124  # a hung self-test is a failure (red), never an infinite gate hang
 
 
 def _classify(module_ref: str, targets: list[str]) -> str:
@@ -151,8 +154,12 @@ def _classify(module_ref: str, targets: list[str]) -> str:
     control = _run_worker(module_ref, [])          # no neuter — harness should be green
     if control != 0:
         return "ERROR"                              # self-test already red without us
-    neutered = _run_worker(module_ref, targets)
-    return "TEETH" if neutered != 0 else "VACUOUS"
+    # Each target must INDEPENDENTLY turn the self-test red — neuter ONE at a time so a
+    # strong target cannot mask another vacuous one (matters once a harness maps >1 target).
+    for target in targets:
+        if _run_worker(module_ref, [target]) == 0:
+            return "VACUOUS"
+    return "TEETH"
 
 
 def _discover() -> list[tuple[str, list[str] | None]]:
