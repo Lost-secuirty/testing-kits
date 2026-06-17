@@ -3,7 +3,7 @@
 Two halves: (a) the committed .fileguard.json must match the live gate machinery (so a
 gate file that changed without a re-baseline fails CI — the whole point); (b) against a
 throwaway tree, the guard must report clean, then BITE on a modified file, a removed
-file, a missing baseline, and a corrupt baseline.
+file, an unbaselined add, a missing baseline, and a corrupt/schema-invalid baseline.
 """
 
 from __future__ import annotations
@@ -53,7 +53,18 @@ class FileGuardBitesTest(unittest.TestCase):
             (tmp / "sub" / "b.txt").unlink()
             self.assertEqual(file_guard.check(tmp, manifest), 1)  # REMOVED bites
 
-    def test_missing_and_corrupt_baseline(self) -> None:
+    def test_unbaselined_add(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            self._stage(tmp)
+            manifest = tmp / ".fileguard.json"
+            self.assertEqual(file_guard.update(tmp, manifest), 0)
+            # A new protected file that is present but absent from the baseline -> drift.
+            file_guard.PROTECTED_FILES = ["a.txt", "sub/b.txt", "c.txt"]
+            (tmp / "c.txt").write_text("gamma\n", encoding="utf-8")
+            self.assertEqual(file_guard.check(tmp, manifest), 1)  # UNBASELINED bites
+
+    def test_missing_and_invalid_baseline(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             tmp = Path(d)
             self._stage(tmp)
@@ -61,6 +72,10 @@ class FileGuardBitesTest(unittest.TestCase):
             self.assertEqual(file_guard.check(tmp, manifest), 2)  # missing baseline
             manifest.write_text("{ not valid json", encoding="utf-8")
             self.assertEqual(file_guard.check(tmp, manifest), 2)  # corrupt baseline
+            manifest.write_text("[]", encoding="utf-8")
+            self.assertEqual(file_guard.check(tmp, manifest), 2)  # schema-invalid (not an object)
+            manifest.write_text('{"files": null}', encoding="utf-8")
+            self.assertEqual(file_guard.check(tmp, manifest), 2)  # schema-invalid (files not a map)
 
 
 if __name__ == "__main__":
