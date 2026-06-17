@@ -911,6 +911,9 @@ def prove(impl: Callable[[dict[str, Any], str], tuple[Any, list[str]]]) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_roundtrip"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_roundtrip,

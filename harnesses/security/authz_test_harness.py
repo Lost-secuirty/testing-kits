@@ -780,6 +780,9 @@ def prove(decider: Callable[[AuthzRequest], str]) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_decide"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_decide,
