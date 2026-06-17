@@ -268,14 +268,14 @@ def _api(method: str, url: str, token: str, payload: dict | None = None) -> dict
     if not url.startswith("https://"):
         raise ValueError(f"refusing non-https GitHub API URL: {url!r}")
     data = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(url, data=data, method=method)
+    req = urllib.request.Request(url, data=data, method=method)  # noqa: S310 (https-only enforced above; controlled GitHub API URL)
     req.add_header("Authorization", f"Bearer {token}")
     req.add_header("Accept", "application/vnd.github+json")
     req.add_header("X-GitHub-Api-Version", "2022-11-28")
     req.add_header("User-Agent", "moe-audit")
     if data is not None:
         req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 (https-only enforced above; controlled GitHub API URL)
         body = resp.read().decode()
     return json.loads(body) if body else {}
 

@@ -33,11 +33,12 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "SIM"]
-ignore = ["E501"]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "S"]
+ignore = ["E501", "S603", "S607"]  # S603/S607: safe list-form subprocess, no signal
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["B011"]
+"tests/**/*.py" = ["B011", "S"]  # tests assert + open local fixture URLs
+"harnesses/**/*.py" = ["S"]  # harnesses intentionally demonstrate insecure patterns
 "experiments/**/*.py" = ["F401", "F841"]
 
 # Advisory mutation lane (tools/mutmut_lane.py). `source_paths` is the mutmut>=3.6
