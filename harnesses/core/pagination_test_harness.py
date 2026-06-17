@@ -637,6 +637,9 @@ def prove(impl: Callable[..., tuple[list[dict[str, Any]], tuple[Any, Any] | None
     return tuple(collected) != _EXPECTED_IDS
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_page"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_page,

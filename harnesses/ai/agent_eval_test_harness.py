@@ -990,6 +990,9 @@ def prove(score: Callable[[Transcript], str]) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_score"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_score,
