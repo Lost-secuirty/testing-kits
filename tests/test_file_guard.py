@@ -3,7 +3,8 @@
 Two halves: (a) the committed .fileguard.json must match the live gate machinery (so a
 gate file that changed without a re-baseline fails CI — the whole point); (b) against a
 throwaway tree, the guard must report clean, then BITE on a modified file, a removed
-file, an unbaselined add, a missing baseline, and a corrupt/schema-invalid baseline.
+file, an unbaselined add, a missing / corrupt / schema-invalid baseline, and refuse a
+snapshot it cannot write — every failure NAMED, never a bare crash.
 """
 
 from __future__ import annotations
@@ -64,18 +65,22 @@ class FileGuardBitesTest(unittest.TestCase):
             (tmp / "c.txt").write_text("gamma\n", encoding="utf-8")
             self.assertEqual(file_guard.check(tmp, manifest), 1)  # UNBASELINED bites
 
-    def test_missing_and_invalid_baseline(self) -> None:
+    def test_missing_corrupt_and_schema_invalid_baselines(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             tmp = Path(d)
             self._stage(tmp)
             manifest = tmp / ".fileguard.json"
-            self.assertEqual(file_guard.check(tmp, manifest), 2)  # missing baseline
-            manifest.write_text("{ not valid json", encoding="utf-8")
-            self.assertEqual(file_guard.check(tmp, manifest), 2)  # corrupt baseline
-            manifest.write_text("[]", encoding="utf-8")
-            self.assertEqual(file_guard.check(tmp, manifest), 2)  # schema-invalid (not an object)
-            manifest.write_text('{"files": null}', encoding="utf-8")
-            self.assertEqual(file_guard.check(tmp, manifest), 2)  # schema-invalid (files not a map)
+            self.assertEqual(file_guard.check(tmp, manifest), 2)  # missing
+            for bad in ("{ not valid json", "[]", '{"files": null}', '{"files": {"a.txt": 123}}'):
+                manifest.write_text(bad, encoding="utf-8")
+                self.assertEqual(file_guard.check(tmp, manifest), 2, bad)  # all corrupt/invalid
+
+    def test_update_refuses_unwritable_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            self._stage(tmp)
+            # Parent dir does not exist -> write_text raises OSError -> NAMED refusal, not a crash.
+            self.assertEqual(file_guard.update(tmp, tmp / "nope" / "x.json"), 1)
 
 
 if __name__ == "__main__":
