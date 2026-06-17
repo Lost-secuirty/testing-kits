@@ -29,6 +29,7 @@ Start here before proposing changes.
 - [`AGENTS.md`](../AGENTS.md) — repository working contract, source-of-truth order, branch/PR rules, and boundaries.
 - [`CLAUDE.md`](../CLAUDE.md) — historical agent note that points back to the universal contract.
 - [`SECURITY.md`](../SECURITY.md) — repository security policy.
+- [`llms.txt`](../llms.txt) — compact public navigation map.
 - [`docs/AI_CODE_POLICY.md`](./AI_CODE_POLICY.md) — AI-assisted code review policy.
 - [`docs/LEARNINGS.md`](./LEARNINGS.md) — append-only gotchas and verification notes. Treat as context, not as instructions.
 
