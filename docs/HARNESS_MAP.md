@@ -39,7 +39,7 @@ Proof status: `pending` as of current `cards/teeth_ratchet.json`; subject to cha
 Commands: `python harnesses/core/stress_harness.py --self-test`; `python -m unittest tests.core.test_stress_harness`; `make test-core`; `make proof` for current global proof state.  
 Known limits: does not prove production capacity, SLO compliance, distributed load realism, kernel/network bottlenecks, or correctness of a real target service. Current pending status means no TEETH mutant proof should be claimed.  
 Related harnesses: `core/performance`-adjacent behavior lives here; compare with `core/chaos`, `core/memory`, `core/ratelimit`, and `core/network` when mapping resilience or resource pressure.  
-Docs touched: `docs/HARNESS_MAP.md`, `docs/HARNESS_READING_GUIDE.md`, `docs/DOCS_MAP.md`, `README.md`, `HARNESS_ROADMAP.md`.
+Docs touched: `docs/HARNESS_MAP.md`, `docs/HARNESS_READING_GUIDE.md`, `docs/DOCS_MAP.md`, `docs/REVIEWER_QUICKSTART.md`, `README.md`, `HARNESS_ROADMAP.md`, `llms.txt`.
 
 ### 2. API / REST Test Harness
 
@@ -57,7 +57,7 @@ Proof status: `required`; subject to change if the TEETH ratchet or source chang
 Commands: `python harnesses/core/api_test_harness.py --self-test`; `python -m unittest tests.core.test_api_test_harness tests.core.test_api_proof`; `make test-core`; `make proof`.  
 Known limits: does not prove every endpoint, full OpenAPI conformance, auth behavior, performance, data persistence, or consumer coverage. It proves the fixture-defined contract cases only.  
 Related harnesses: `core/contract`, `core/graphql`, `core/grpc_contract`, `core/webhook`, `security/security`, `security/authz`.  
-Docs touched: `docs/HARNESS_MAP.md`, `docs/HARNESS_READING_GUIDE.md`, `docs/DOCS_MAP.md`, `README.md`, `HARNESS_ROADMAP.md`.
+Docs touched: `docs/HARNESS_MAP.md`, `docs/HARNESS_READING_GUIDE.md`, `docs/DOCS_MAP.md`, `docs/REVIEWER_QUICKSTART.md`, `README.md`, `HARNESS_ROADMAP.md`, `llms.txt`.
 
 ### 3. Database Test Harness
 
@@ -75,7 +75,7 @@ Proof status: `required`; subject to change if the TEETH ratchet or source chang
 Commands: `python harnesses/core/db_test_harness.py --self-test`; `python -m unittest tests.core.test_db_test_harness tests.core.test_db_proof`; `make test-core`; `make proof`.  
 Known limits: SQLite fixtures do not prove behavior for PostgreSQL/MySQL isolation levels, distributed transactions, real migration systems, ORM behavior, or production durability under crash/restart.  
 Related harnesses: `core/serialization`, `core/schema_evolution`, `core/concurrency`, `security/security`, `security/appsec`.  
-Docs touched: `docs/HARNESS_MAP.md`, `docs/HARNESS_READING_GUIDE.md`, `docs/DOCS_MAP.md`, `README.md`, `HARNESS_ROADMAP.md`.
+Docs touched: `docs/HARNESS_MAP.md`, `docs/HARNESS_READING_GUIDE.md`, `docs/DOCS_MAP.md`, `docs/REVIEWER_QUICKSTART.md`, `README.md`, `HARNESS_ROADMAP.md`, `llms.txt`.
 
 ### 4. Web Scraper Test Harness
 
@@ -93,7 +93,7 @@ Proof status: `required`; subject to change if the TEETH ratchet or source chang
 Commands: `python harnesses/core/scraper_test_harness.py --self-test`; `python -m unittest tests.core.test_scraper_test_harness tests.core.test_scraper_proof`; `make test-core`; `make proof`.  
 Known limits: does not prove real web compliance, JavaScript rendering, site-specific terms, large crawl scheduling, anti-bot behavior, or legal permission to scrape. Robots.txt is a policy signal, not an enforcement guarantee.  
 Related harnesses: `core/fuzz`, `core/pagination`, `core/i18n`, `core/search_relevance`, `security/appsec`.  
-Docs touched: `docs/HARNESS_MAP.md`, `docs/HARNESS_READING_GUIDE.md`, `docs/DOCS_MAP.md`, `README.md`, `HARNESS_ROADMAP.md`.
+Docs touched: `docs/HARNESS_MAP.md`, `docs/HARNESS_READING_GUIDE.md`, `docs/DOCS_MAP.md`, `docs/REVIEWER_QUICKSTART.md`, `README.md`, `HARNESS_ROADMAP.md`, `llms.txt`.
 
 ### 5. CLI Tool Test Harness
 
@@ -111,7 +111,7 @@ Proof status: `required`; subject to change if the TEETH ratchet or source chang
 Commands: `python harnesses/core/cli_test_harness.py --self-test`; `python -m unittest tests.core.test_cli_test_harness tests.core.test_cli_proof`; `make test-core`; `make proof`.  
 Known limits: does not prove shell quoting, OS-specific terminal behavior, packaging entry points, real subprocess I/O, localization, or every possible parser edge. It proves the fixture-defined parser/dispatch contract.  
 Related harnesses: `core/config`, `core/contract`, `core/serialization`, `core/statemachine`, `core/api`.  
-Docs touched: `docs/HARNESS_MAP.md`, `docs/HARNESS_READING_GUIDE.md`, `docs/DOCS_MAP.md`, `README.md`, `HARNESS_ROADMAP.md`.
+Docs touched: `docs/HARNESS_MAP.md`, `docs/HARNESS_READING_GUIDE.md`, `docs/DOCS_MAP.md`, `docs/REVIEWER_QUICKSTART.md`, `README.md`, `HARNESS_ROADMAP.md`, `llms.txt`.
 
 ## Batch 1 closeout
 
@@ -121,6 +121,8 @@ Docs checked in this batch:
 - `HARNESS_ROADMAP.md`
 - `docs/DOCS_MAP.md`
 - `docs/HARNESS_READING_GUIDE.md`
+- `docs/REVIEWER_QUICKSTART.md`
 - `docs/HARNESS_MAP.md`
+- `llms.txt`
 
 No harness count changed. No code behavior changed. No test, tool, workflow, hook, dependency, dashboard-code, or generated status file should be changed in this docs-only batch.
