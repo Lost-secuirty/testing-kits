@@ -34,7 +34,23 @@ import json
 import re
 import sys
 import threading
+from collections.abc import Callable
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path as _Path
+
+if __package__ in {None, ""}:
+    _ROOT = _Path(__file__).resolve().parents[2]
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+
+from harnesses._teeth import (
+    Mutant,
+    Report,
+    Teeth,
+    emit_legacy_self_test,
+    serve_mock_server_until_interrupt,
+)
 
 # ============================================================
 # DETECTION PATTERNS
@@ -51,13 +67,20 @@ _PHONE_RE = re.compile(
 _DOB_ISO_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 _DOB_US_RE = re.compile(r"\b\d{2}/\d{2}/\d{4}\b")
 
+_EMAIL_LABEL = "[EMAIL]"
+_SSN_LABEL = "[SSN]"
+_CREDIT_LABEL = "[CREDIT_CARD]"
+_PHONE_LABEL = "[PHONE]"
+_DOB_LABEL = "[DOB]"
+_MRN_LABEL = "[MRN]"
+
 _ENTITY_LABELS = {
-    "EMAIL": "[EMAIL]",
-    "SSN": "[SSN]",
-    "CREDIT": "[CREDIT_CARD]",
-    "PHONE": "[PHONE]",
-    "DOB": "[DOB]",
-    "MRN": "[MRN]",
+    "EMAIL": _EMAIL_LABEL,
+    "SSN": _SSN_LABEL,
+    "CREDIT": _CREDIT_LABEL,
+    "PHONE": _PHONE_LABEL,
+    "DOB": _DOB_LABEL,
+    "MRN": _MRN_LABEL,
 }
 
 
@@ -196,6 +219,161 @@ class RedactionOracle:
 
 
 # ============================================================
+# TEETH: frozen PII audits + planted leak/over-redaction defects
+# ============================================================
+
+@dataclass(frozen=True)
+class PiiAuditCase:
+    name: str
+    text: str
+    mode: str
+    expected_counts: tuple[tuple[str, int], ...]
+    must_remove: tuple[str, ...]
+    forbidden_labels: tuple[str, ...]
+    expected_events: tuple[str, ...]
+
+
+def _count_items(counts):
+    return tuple(sorted(counts.items()))
+
+
+def _all_raw_secrets_gone(secrets, redacted):
+    return all(not RedactionOracle.secret_survives(secret, redacted) for secret in secrets)
+
+
+def _all_digit_runs_gone(secrets, redacted):
+    return all(not RedactionOracle.digit_run_survives(secret, redacted) for secret in secrets)
+
+
+def _no_forbidden_labels(labels, redacted):
+    return all(label not in redacted for label in labels)
+
+
+def _append_if(events, event, condition):
+    if condition:
+        events.append(event)
+
+
+PII_AUDIT_CORPUS = (
+    PiiAuditCase(
+        name="mixed_entities_are_detected_and_removed",
+        text=(
+            "Patient 123-45-6789 jane.sample@example.com 555-123-4567 "
+            "MRN-000123 DOB 1980-04-12 card 4111 1111 1111 1111"
+        ),
+        mode="label",
+        expected_counts=(
+            ("CREDIT", 1),
+            ("DOB", 1),
+            ("EMAIL", 1),
+            ("MRN", 1),
+            ("PHONE", 1),
+            ("SSN", 1),
+        ),
+        must_remove=(
+            "123-45-6789",
+            "jane.sample@example.com",
+            "555-123-4567",
+            "MRN-000123",
+            "1980-04-12",
+            "4111 1111 1111 1111",
+        ),
+        forbidden_labels=(),
+        expected_events=("counts_match", "raw_secrets_gone", "digit_runs_gone", "idempotent"),
+    ),
+    PiiAuditCase(
+        name="non_luhn_order_number_is_not_card_redacted",
+        text="order 1234 5678 9012 3456 shipped",
+        mode="label",
+        expected_counts=(),
+        must_remove=(),
+        forbidden_labels=(_CREDIT_LABEL,),
+        expected_events=("counts_match", "idempotent", "no_overredaction"),
+    ),
+    PiiAuditCase(
+        name="zip_code_is_not_redacted",
+        text="ZIP 90210 area",
+        mode="label",
+        expected_counts=(),
+        must_remove=(),
+        forbidden_labels=(_SSN_LABEL, _DOB_LABEL, _PHONE_LABEL, _CREDIT_LABEL),
+        expected_events=("counts_match", "idempotent", "no_overredaction"),
+    ),
+    PiiAuditCase(
+        name="mask_mode_hides_full_ssn_digit_run",
+        text="SSN 987-65-4321 end",
+        mode="mask",
+        expected_counts=(("SSN", 1),),
+        must_remove=("987-65-4321",),
+        forbidden_labels=(),
+        expected_events=("counts_match", "raw_secrets_gone", "digit_runs_gone", "idempotent"),
+    ),
+)
+
+
+def oracle_pii_audit(case):
+    redactor = Redactor(mode=case.mode)
+    redacted = redactor.redact(case.text)
+    events = []
+    _append_if(events, "counts_match", _count_items(redactor.counts(case.text)) == case.expected_counts)
+    _append_if(events, "raw_secrets_gone", bool(case.must_remove) and _all_raw_secrets_gone(case.must_remove, redacted))
+    _append_if(events, "digit_runs_gone", bool(case.must_remove) and _all_digit_runs_gone(case.must_remove, redacted))
+    _append_if(events, "idempotent", redactor.redact(redacted) == redacted)
+    _append_if(events, "no_overredaction", bool(case.forbidden_labels) and _no_forbidden_labels(case.forbidden_labels, redacted))
+    return tuple(events)
+
+
+def ssn_blind_pii_auditor(case):
+    events = oracle_pii_audit(case)
+    expected_entities = {etype for etype, _count in case.expected_counts}
+    if "SSN" not in expected_entities:
+        return events
+    return tuple(e for e in events if e not in {"counts_match", "raw_secrets_gone", "digit_runs_gone"})
+
+
+def digit_leak_pii_auditor(case):
+    events = oracle_pii_audit(case)
+    if not case.must_remove:
+        return events
+    return tuple(e for e in events if e != "digit_runs_gone")
+
+
+def luhn_blind_overredacts_pii_auditor(case):
+    events = oracle_pii_audit(case)
+    if _CREDIT_LABEL not in case.forbidden_labels:
+        return events
+    return tuple(e for e in events if e != "no_overredaction")
+
+
+def non_idempotent_pii_auditor(case):
+    events = oracle_pii_audit(case)
+    return tuple(e for e in events if e != "idempotent")
+
+
+def prove(impl: Callable[[PiiAuditCase], tuple[str, ...]]) -> bool:
+    return any(impl(case) != case.expected_events for case in PII_AUDIT_CORPUS)
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_pii_audit,
+    mutants=(
+        Mutant("ssn_blind_pii_auditor", ssn_blind_pii_auditor,
+               "misses SSN detection and lets source SSN material survive"),
+        Mutant("digit_leak_pii_auditor", digit_leak_pii_auditor,
+               "redacts labels but leaves the full numeric digit run recoverable"),
+        Mutant("luhn_blind_overredacts_pii_auditor", luhn_blind_overredacts_pii_auditor,
+               "treats a non-Luhn order number as a credit card"),
+        Mutant("non_idempotent_pii_auditor", non_idempotent_pii_auditor,
+               "changes already-redacted text on a second pass"),
+    ),
+    corpus_size=len(PII_AUDIT_CORPUS),
+    kind="auditor",
+    notes="Frozen PII redaction corpus for entity counts, leak checks, over-redaction, and idempotency.",
+)
+
+
+# ============================================================
 # MOCK HTTP SERVER
 # ============================================================
 
@@ -272,29 +450,29 @@ def run_all_scenarios(verbose=False):
     # 1. SSN removed in label mode
     out = label.redact("Patient SSN is 123-45-6789 on file.")
     check("1. SSN labelled and digits gone",
-          "[SSN]" in out and not RedactionOracle.digit_run_survives("123-45-6789", out),
+          _SSN_LABEL in out and not RedactionOracle.digit_run_survives("123-45-6789", out),
           out)
 
     # 2. Email removed
     out = label.redact("Contact jane.doe@example.com please.")
-    check("2. Email redacted", "[EMAIL]" in out and "jane.doe@example.com" not in out, out)
+    check("2. Email redacted", _EMAIL_LABEL in out and "jane.doe@example.com" not in out, out)
 
     # 3. Phone variants
     samples = ["(555) 123-4567", "555-123-4567", "+1 555 123 4567"]
-    ok3 = all("[PHONE]" in label.redact("call " + s) for s in samples)
+    ok3 = all(_PHONE_LABEL in label.redact("call " + s) for s in samples)
     check("3. Phone formats all redacted", ok3,
           [label.redact(s) for s in samples])
 
     # 4. Luhn-valid credit card redacted
     out = label.redact("card 4111 1111 1111 1111 charged")
     check("4. Valid (Luhn) card redacted",
-          "[CREDIT_CARD]" in out and not RedactionOracle.digit_run_survives("4111111111111111", out),
+          _CREDIT_LABEL in out and not RedactionOracle.digit_run_survives("4111111111111111", out),
           out)
 
     # 5. Non-Luhn 16-digit number NOT redacted as a card (over-redaction guard)
     out = label.redact("order 1234 5678 9012 3456 shipped")
     check("5. Non-Luhn 16-digit not flagged as card",
-          "[CREDIT_CARD]" not in out, out)
+          _CREDIT_LABEL not in out, out)
 
     # 6. Bare ZIP not redacted (over-redaction guard)
     out = label.redact("ZIP 90210 area")
@@ -302,12 +480,12 @@ def run_all_scenarios(verbose=False):
 
     # 7. MRN with configured prefix redacted
     out = label.redact("see MRN-000123 chart")
-    check("7. MRN redacted", "[MRN]" in out and "MRN-000123" not in out, out)
+    check("7. MRN redacted", _MRN_LABEL in out and "MRN-000123" not in out, out)
 
     # 8. DOB ISO + US both caught
     out = label.redact("DOB 1980-04-12 and alt 04/12/1980")
     check("8. Both DOB formats redacted",
-          out.count("[DOB]") == 2, out)
+          out.count(_DOB_LABEL) == 2, out)
 
     # 9. Idempotency
     src = "SSN 123-45-6789 email a@b.co phone 555-123-4567"
@@ -341,9 +519,23 @@ def run_all_scenarios(verbose=False):
     # 14. Adjacent entities both redacted (no swallow)
     out = label.redact("123-45-6789,jane@x.io")
     check("14. Adjacent SSN+email both redacted",
-          "[SSN]" in out and "[EMAIL]" in out, out)
+          _SSN_LABEL in out and _EMAIL_LABEL in out, out)
 
     return results
+
+
+def _emit_self_test_report(results):
+    report = Report("security/pii_redaction")
+    for result in results:
+        report.record(result.name, result.passed, detail=result.detail)
+    for case in PII_AUDIT_CORPUS:
+        report.add(
+            f"oracle_pii_audit:{case.name}",
+            list(case.expected_events),
+            list(oracle_pii_audit(case)),
+        )
+    report.assert_teeth(TEETH)
+    return report.emit()
 
 
 # ============================================================
@@ -366,37 +558,22 @@ def build_parser():
 
 
 def main():
-    import time as _time
     parser = build_parser()
     args = parser.parse_args()
 
     if args.mock_server:
-        server = start_mock_server(args.port)
-        print(f"  PII redaction mock server on http://127.0.0.1:{args.port} â€” Ctrl+C to stop")
-        try:
-            while True:
-                _time.sleep(1)
-        except KeyboardInterrupt:
-            server.shutdown()
-            server.server_close()
-        return
+        return serve_mock_server_until_interrupt(start_mock_server, args.port,
+                                                "PII redaction mock server")
 
     if args.self_test:
-        print("\n  PII REDACTION TEST HARNESS â€” self-test mode")
-        print("  " + "=" * 52)
-        results = run_all_scenarios(verbose=args.verbose)
-        passed = sum(1 for r in results if r.passed)
-        failed = sum(1 for r in results if not r.passed)
-        if not args.verbose:
-            for r in results:
-                print(r)
-        print()
-        print(f"  Results: {passed} passed, {failed} failed out of {len(results)}")
-        print()
-        sys.exit(0 if failed == 0 else 1)
+        return emit_legacy_self_test("PII REDACTION TEST HARNESS",
+                                     run_all_scenarios,
+                                     args.verbose,
+                                     _emit_self_test_report)
 
     parser.print_help()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

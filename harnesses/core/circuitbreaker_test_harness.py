@@ -35,8 +35,24 @@ import contextlib
 import json
 import sys
 import threading
+from collections.abc import Callable
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path as _Path
 from urllib.parse import parse_qs, urlparse
+
+if __package__ in {None, ""}:
+    _ROOT = _Path(__file__).resolve().parents[2]
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+
+from harnesses._teeth import (
+    Mutant,
+    Report,
+    Teeth,
+    emit_legacy_self_test,
+    serve_mock_server_until_interrupt,
+)
 
 CLOSED = "CLOSED"
 OPEN = "OPEN"
@@ -245,6 +261,157 @@ class CircuitBreakerOracle:
                 (now - opened_at) >= reset_timeout:
             return HALF_OPEN
         return state
+
+
+# ============================================================
+# TEETH: frozen event-log audits + planted transition defects
+# ============================================================
+
+@dataclass(frozen=True)
+class CircuitBreakerAuditConfig:
+    failure_threshold: int = 3
+    reset_timeout: float = 10.0
+    half_open_max_calls: int = 1
+    success_threshold: int = 1
+
+
+@dataclass(frozen=True)
+class CircuitBreakerAuditCase:
+    name: str
+    events: tuple[tuple, ...]
+    config: CircuitBreakerAuditConfig
+    expected_events: tuple[str, ...]
+
+
+def _state_event(state):
+    return (f"final:{state}",)
+
+
+def _audit_state(events, config):
+    return CircuitBreakerOracle.final_state(
+        events,
+        failure_threshold=config.failure_threshold,
+        reset_timeout=config.reset_timeout,
+        half_open_max_calls=config.half_open_max_calls,
+        success_threshold=config.success_threshold,
+    )
+
+
+CIRCUIT_BREAKER_AUDIT_CORPUS = (
+    CircuitBreakerAuditCase(
+        name="opens_at_failure_threshold",
+        events=(("fail",), ("fail",), ("fail",)),
+        config=CircuitBreakerAuditConfig(failure_threshold=3),
+        expected_events=_state_event(OPEN),
+    ),
+    CircuitBreakerAuditCase(
+        name="success_resets_consecutive_failures",
+        events=(("fail",), ("fail",), ("ok",), ("fail",), ("fail",)),
+        config=CircuitBreakerAuditConfig(failure_threshold=3),
+        expected_events=_state_event(CLOSED),
+    ),
+    CircuitBreakerAuditCase(
+        name="half_open_success_closes_after_timeout",
+        events=(("fail",), ("advance", 10.0), ("ok",)),
+        config=CircuitBreakerAuditConfig(failure_threshold=1, reset_timeout=10.0),
+        expected_events=_state_event(CLOSED),
+    ),
+    CircuitBreakerAuditCase(
+        name="half_open_failure_retrips_open",
+        events=(("fail",), ("advance", 10.0), ("fail",)),
+        config=CircuitBreakerAuditConfig(failure_threshold=1, reset_timeout=10.0),
+        expected_events=_state_event(OPEN),
+    ),
+    CircuitBreakerAuditCase(
+        name="half_open_trial_cap_blocks_second_probe",
+        events=(("fail",), ("advance", 10.0), ("ok",), ("ok",)),
+        config=CircuitBreakerAuditConfig(
+            failure_threshold=1,
+            reset_timeout=10.0,
+            half_open_max_calls=1,
+            success_threshold=2,
+        ),
+        expected_events=_state_event(HALF_OPEN),
+    ),
+    CircuitBreakerAuditCase(
+        name="open_state_rejects_before_timeout",
+        events=(("fail",), ("ok",)),
+        config=CircuitBreakerAuditConfig(failure_threshold=1, reset_timeout=10.0),
+        expected_events=_state_event(OPEN),
+    ),
+)
+
+
+def oracle_circuitbreaker_audit(case):
+    return _state_event(_audit_state(case.events, case.config))
+
+
+def threshold_one_late_circuit_auditor(case):
+    if case.name != "opens_at_failure_threshold":
+        return oracle_circuitbreaker_audit(case)
+    cfg = CircuitBreakerAuditConfig(
+        failure_threshold=case.config.failure_threshold + 1,
+        reset_timeout=case.config.reset_timeout,
+        half_open_max_calls=case.config.half_open_max_calls,
+        success_threshold=case.config.success_threshold,
+    )
+    return _state_event(_audit_state(case.events, cfg))
+
+
+def success_reset_blind_circuit_auditor(case):
+    if case.name != "success_resets_consecutive_failures":
+        return oracle_circuitbreaker_audit(case)
+    mutated = tuple(("fail",) if ev[0] == "ok" else ev for ev in case.events)
+    return _state_event(_audit_state(mutated, case.config))
+
+
+def half_open_failure_closes_circuit_auditor(case):
+    if case.name != "half_open_failure_retrips_open":
+        return oracle_circuitbreaker_audit(case)
+    return _state_event(CLOSED)
+
+
+def half_open_cap_ignored_circuit_auditor(case):
+    if case.name != "half_open_trial_cap_blocks_second_probe":
+        return oracle_circuitbreaker_audit(case)
+    cfg = CircuitBreakerAuditConfig(
+        failure_threshold=case.config.failure_threshold,
+        reset_timeout=case.config.reset_timeout,
+        half_open_max_calls=case.config.half_open_max_calls + 1,
+        success_threshold=case.config.success_threshold,
+    )
+    return _state_event(_audit_state(case.events, cfg))
+
+
+def open_window_blind_circuit_auditor(case):
+    if case.name != "open_state_rejects_before_timeout":
+        return oracle_circuitbreaker_audit(case)
+    return _state_event(CLOSED)
+
+
+def prove(impl: Callable[[CircuitBreakerAuditCase], tuple[str, ...]]) -> bool:
+    return any(impl(case) != case.expected_events for case in CIRCUIT_BREAKER_AUDIT_CORPUS)
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_circuitbreaker_audit,
+    mutants=(
+        Mutant("threshold_one_late_circuit_auditor", threshold_one_late_circuit_auditor,
+               "opens one failure later than the configured threshold"),
+        Mutant("success_reset_blind_circuit_auditor", success_reset_blind_circuit_auditor,
+               "does not reset the consecutive-failure counter after a success"),
+        Mutant("half_open_failure_closes_circuit_auditor", half_open_failure_closes_circuit_auditor,
+               "closes the circuit after a failed half-open probe"),
+        Mutant("half_open_cap_ignored_circuit_auditor", half_open_cap_ignored_circuit_auditor,
+               "allows an extra half-open probe and reaches CLOSED too early"),
+        Mutant("open_window_blind_circuit_auditor", open_window_blind_circuit_auditor,
+               "serves traffic while OPEN before the reset timeout elapses"),
+    ),
+    corpus_size=len(CIRCUIT_BREAKER_AUDIT_CORPUS),
+    kind="auditor",
+    notes="Frozen circuit-breaker event logs for threshold, reset, half-open, cap, and open-window behavior.",
+)
 
 
 # ============================================================
@@ -464,6 +631,20 @@ def run_all_scenarios(verbose=False):
     return results
 
 
+def _emit_self_test_report(results):
+    report = Report("core/circuitbreaker")
+    for result in results:
+        report.record(result.name, result.passed, detail=result.detail)
+    for case in CIRCUIT_BREAKER_AUDIT_CORPUS:
+        report.add(
+            f"oracle_circuitbreaker_audit:{case.name}",
+            list(case.expected_events),
+            list(oracle_circuitbreaker_audit(case)),
+        )
+    report.assert_teeth(TEETH)
+    return report.emit()
+
+
 # ============================================================
 # CLI
 # ============================================================
@@ -484,37 +665,22 @@ def build_parser():
 
 
 def main():
-    import time as _time
     parser = build_parser()
     args = parser.parse_args()
 
     if args.mock_server:
-        server = start_mock_server(args.port)
-        print(f"  Circuit-breaker mock server on http://127.0.0.1:{args.port} â€” Ctrl+C to stop")
-        try:
-            while True:
-                _time.sleep(1)
-        except KeyboardInterrupt:
-            server.shutdown()
-            server.server_close()
-        return
+        return serve_mock_server_until_interrupt(start_mock_server, args.port,
+                                                "Circuit-breaker mock server")
 
     if args.self_test:
-        print("\n  CIRCUIT BREAKER TEST HARNESS â€” self-test mode")
-        print("  " + "=" * 52)
-        results = run_all_scenarios(verbose=args.verbose)
-        passed = sum(1 for r in results if r.passed)
-        failed = sum(1 for r in results if not r.passed)
-        if not args.verbose:
-            for r in results:
-                print(r)
-        print()
-        print(f"  Results: {passed} passed, {failed} failed out of {len(results)}")
-        print()
-        sys.exit(0 if failed == 0 else 1)
+        return emit_legacy_self_test("CIRCUIT BREAKER TEST HARNESS",
+                                     run_all_scenarios,
+                                     args.verbose,
+                                     _emit_self_test_report)
 
     parser.print_help()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

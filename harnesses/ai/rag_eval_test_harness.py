@@ -29,6 +29,14 @@ import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path as _Path
+
+if __package__ in {None, ""}:
+    _ROOT = _Path(__file__).resolve().parents[2]
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+
+from harnesses._teeth import Mutant, Report, Teeth
 
 _TOK = re.compile(r"[a-z0-9]+")
 
@@ -262,6 +270,142 @@ def evaluate(cases: list[RagCase], corpus: list[Passage],
 
 
 # ---------------------------------------------------------------------------
+# TEETH: frozen RAG audits + planted retrieval/citation/grounding defects
+# ---------------------------------------------------------------------------
+
+RAG_EPS = 1e-9
+
+
+@dataclass(frozen=True)
+class RagAuditCase:
+    name: str
+    check: str
+    expected_events: tuple[str, ...]
+
+
+RAG_AUDIT_CORPUS: tuple[RagAuditCase, ...] = (
+    RagAuditCase(
+        name="retrieval_pipeline_meets_rag_floors",
+        check="benchmark",
+        expected_events=("meets_floors",),
+    ),
+    RagAuditCase(
+        name="citation_fabrication_is_counted",
+        check="citation_fabrication",
+        expected_events=("fabricated_citation_detected",),
+    ),
+    RagAuditCase(
+        name="overflow_drops_tail_claim_context",
+        check="overflow_grounding",
+        expected_events=("overflow_degrades_grounding",),
+    ),
+    RagAuditCase(
+        name="empty_retrieval_scores_zero_recall",
+        check="zero_recall",
+        expected_events=("zero_recall",),
+    ),
+)
+
+
+def _rag_benchmark_events() -> tuple[str, ...]:
+    cfg = RagConfig()
+    rep = evaluate(CASES, CORPUS, cfg)
+    return ("meets_floors",) if rep.meets_floors(cfg) else ()
+
+
+def _rag_citation_fabrication_events() -> tuple[str, ...]:
+    faithfulness, fabricated = citation_audit(
+        ("p0_a", "ghost_doc"),
+        ["p0_a"],
+        _cmap(),
+        ("neural network training",),
+    )
+    detected = fabricated == 1 and faithfulness < 1.0 - RAG_EPS
+    return ("fabricated_citation_detected",) if detected else ()
+
+
+def _rag_overflow_grounding_events() -> tuple[str, ...]:
+    head = Passage("tail_a", "neural network training explained", tokens=400)
+    tail = Passage("tail_b", "fact0 appendix detail", tokens=400)
+    kept, dropped = context_overflow([head, tail], 512)
+    grounding, ungrounded = grounding_audit(("neural network training", "fact0"), kept)
+    degraded = "tail_b" in dropped and abs(grounding - 0.5) < RAG_EPS and ungrounded == 1
+    return ("overflow_degrades_grounding",) if degraded else ()
+
+
+def _rag_zero_recall_events() -> tuple[str, ...]:
+    retrieved = retrieve("zzzznonsense qqqq", CORPUS, 5)
+    score = recall_at_k([p.doc_id for p in retrieved], {"p0_a"}, 5)
+    return ("zero_recall",) if retrieved == [] and score < RAG_EPS else ()
+
+
+RAG_AUDIT_HANDLERS = {
+    "benchmark": _rag_benchmark_events,
+    "citation_fabrication": _rag_citation_fabrication_events,
+    "overflow_grounding": _rag_overflow_grounding_events,
+    "zero_recall": _rag_zero_recall_events,
+}
+
+
+def oracle_rag_audit(case: RagAuditCase) -> tuple[str, ...]:
+    try:
+        return RAG_AUDIT_HANDLERS[case.check]()
+    except KeyError as exc:
+        raise ValueError(f"unknown RAG audit check: {case.check}") from exc
+
+
+def keyword_only_rag_auditor(case: RagAuditCase) -> tuple[str, ...]:
+    if case.check != "benchmark":
+        return oracle_rag_audit(case)
+    cfg = RagConfig()
+    rep = evaluate(CASES, CORPUS, cfg, retriever=keyword_only_retrieve)
+    return ("meets_floors",) if rep.meets_floors(cfg) else ()
+
+
+def citation_fabrication_blind_rag_auditor(case: RagAuditCase) -> tuple[str, ...]:
+    if case.check != "citation_fabrication":
+        return oracle_rag_audit(case)
+    return ()
+
+
+def overflow_blind_rag_auditor(case: RagAuditCase) -> tuple[str, ...]:
+    if case.check != "overflow_grounding":
+        return oracle_rag_audit(case)
+    return ()
+
+
+def empty_retrieval_invents_hit_rag_auditor(case: RagAuditCase) -> tuple[str, ...]:
+    if case.check != "zero_recall":
+        return oracle_rag_audit(case)
+    invented = ["p0_a"]
+    score = recall_at_k(invented, {"p0_a"}, 5)
+    return ("zero_recall",) if score < RAG_EPS else ()
+
+
+def prove(impl: Callable[[RagAuditCase], tuple[str, ...]]) -> bool:
+    return any(impl(case) != case.expected_events for case in RAG_AUDIT_CORPUS)
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_rag_audit,
+    mutants=(
+        Mutant("keyword_only_rag_auditor", keyword_only_rag_auditor,
+               "requires all query terms and misses partial-overlap gold passages"),
+        Mutant("citation_fabrication_blind_rag_auditor", citation_fabrication_blind_rag_auditor,
+               "ignores citations that point outside the retrieved context"),
+        Mutant("overflow_blind_rag_auditor", overflow_blind_rag_auditor,
+               "does not notice context-window overflow dropping a supporting passage"),
+        Mutant("empty_retrieval_invents_hit_rag_auditor", empty_retrieval_invents_hit_rag_auditor,
+               "treats an empty retrieval as if it recovered a gold passage"),
+    ),
+    corpus_size=len(RAG_AUDIT_CORPUS),
+    kind="auditor",
+    notes="Frozen RAG recall, citation-faithfulness, overflow-grounding, and empty-retrieval corpus.",
+)
+
+
+# ---------------------------------------------------------------------------
 # Scenarios
 # ---------------------------------------------------------------------------
 
@@ -449,18 +593,34 @@ def list_scenarios() -> list[str]:
     return list(SCENARIOS.keys())
 
 
-def _run_self_test(verbose: bool = False) -> int:
-    results = [fn() for fn in SCENARIOS.values()]
-    failures = [r for r in results if not r.passed]
+def _print_self_test_results(results: list[RagCheck], verbose: bool) -> None:
     for r in results:
         if verbose or not r.passed:
             mark = "OK  " if r.passed else "FAIL"
             print(f"  {mark}  {r.name:48s} {r.detail}")
+
+
+def _emit_rag_teeth_report() -> int:
+    report = Report("ai/rag_eval")
+    for case in RAG_AUDIT_CORPUS:
+        report.add(
+            f"oracle_rag_audit:{case.name}",
+            list(case.expected_events),
+            list(oracle_rag_audit(case)),
+        )
+    report.assert_teeth(TEETH)
+    return report.emit()
+
+
+def _run_self_test(verbose: bool = False) -> int:
+    results = [fn() for fn in SCENARIOS.values()]
+    failures = [r for r in results if not r.passed]
+    _print_self_test_results(results, verbose)
     if failures:
         print(f"FAILED: {len(failures)}/{len(results)}", file=sys.stderr)
         return 1
     print(f"OK: {len(results)} scenarios passed.")
-    return 0
+    return _emit_rag_teeth_report()
 
 
 def build_parser() -> argparse.ArgumentParser:

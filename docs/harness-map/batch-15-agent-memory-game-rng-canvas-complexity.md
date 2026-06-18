@@ -6,7 +6,7 @@ This is current-state documentation, not command authority. It maps the source, 
 
 Operating rules remain in `AGENTS.md`, `CLAUDE.md`, and `SECURITY.md`.
 
-Proof status is read from `cards/teeth_ratchet.json` at the time this batch is cut: `ai/agent_memory_context` = `required`, `core/game_loop_simulation` = `required`, `core/statistical_rng_oracle` = `required`, `core/canvas_scene_state` = `required`, `core/complexity` = `pending`.
+Proof status is read from `cards/teeth_ratchet.json` at the time this batch is cut: `ai/agent_memory_context` = `required`, `core/game_loop_simulation` = `required`, `core/statistical_rng_oracle` = `required`, `core/canvas_scene_state` = `required`, `core/complexity` = `required`.
 
 ## 69. Agent Memory Context Test Harness
 
@@ -86,16 +86,16 @@ Proof status is read from `cards/teeth_ratchet.json` at the time this batch is c
 - Path: `harnesses/core/complexity_test_harness.py`
 - Category: `core`
 - Failure class: Flags code bloat and maintainability regressions in AI-generated or human code. Computes cyclomatic complexity, cognitive complexity, function length, parameter count, and nesting depth with stdlib `ast`, then gates files or directories against configured thresholds. The self-test pins hand-computed metric values, proves a bad high-complexity fixture is flagged, and proves clean code passes.
-- Logic shape: AND: the current harness, paired tests, and inventory entry must describe the same behavior. NOT: pending status must not be described as TEETH-required proof.
-- Good case: The current pending harness exercises the coverage summarized above; this entry maps that evidence as-is without claiming required TEETH proof.
-- Planted-bad case: none in required TEETH as of this batch; map the current pending evidence as-is.
-- Oracle / proof target: Current proof target: self-test and paired-test evidence visible in the current source, not required TEETH proof.
+- Logic shape: AND: clean-code pass, cognitive/nesting thresholds, length bloat, parameter-count bloat, nested-vs-flat cognitive contrast, paired tests, proof test, and TEETH swap-check must all hold. NOT: a cyclomatic-only, length-blind, params-blind, or nesting-blind auditor must not pass as if it were the oracle.
+- Good case: `oracle_complexity_audit` matches frozen clean, cognitive/nesting, length, params, and nested-vs-flat cases.
+- Planted-bad case: `cyclomatic_only_complexity_auditor`, `length_blind_complexity_auditor`, `params_blind_complexity_auditor`, `nesting_blind_complexity_auditor`.
+- Oracle / proof target: Current proof target: `COMPLEXITY_AUDIT_CORPUS`, `oracle_complexity_audit`, and `TEETH`.
 - External testing pattern: complexity / bloat fixture and regression testing.
 - Usage note: Use this as a maintainability fixture for size, branching, nesting, and bloat thresholds before accepting generated or refactored code.
-- Current outside reference: Radon documents Python code metric analysis including cyclomatic complexity. <https://radon.readthedocs.io/en/latest/>
-- Proof status: `pending` as of current `cards/teeth_ratchet.json`; subject to change as source, tests, or ratchet state changes.
-- Commands: `python tools/teeth_check.py harnesses/core/complexity_test_harness.py`; `python harnesses/core/complexity_test_harness.py --self-test`; `python harnesses/core/complexity_test_harness.py --list-scenarios`; `python -m unittest tests.core.test_complexity_test_harness`; `make test-core`; `make proof`.
-- Known limits: Does not prove production correctness, exhaustive input coverage, or final harness maturity. This dossier maps current source, tests, and ratchet state as of this batch; it is expected to change. Pending status means no required TEETH proof should be claimed.
+- Current outside reference: Radon documents Python code metric analysis including cyclomatic complexity; SonarSource documents Cognitive Complexity as a maintainability-oriented metric. <https://radon.readthedocs.io/en/latest/> <https://www.sonarsource.com/resources/cognitive-complexity/>
+- Proof status: `required` as of current `cards/teeth_ratchet.json`; subject to change as source, tests, or ratchet state changes.
+- Commands: `python tools/teeth_check.py harnesses/core/complexity_test_harness.py`; `python harnesses/core/complexity_test_harness.py --self-test`; `python harnesses/core/complexity_test_harness.py --list-scenarios`; `python -m unittest tests.core.test_complexity_test_harness tests.core.test_complexity_proof`; `make test-core`; `make proof`.
+- Known limits: Does not prove production correctness, exhaustive input coverage, or final harness maturity. This dossier maps current source, tests, and ratchet state as of this batch; it is expected to change.
 - Related harnesses: `core/game_loop_simulation`, `core/statistical_rng_oracle`, `core/canvas_scene_state`.
 
 ## Batch 15 closeout
@@ -109,4 +109,4 @@ Docs and source surfaces checked for this batch:
 - `docs/harness-map/batch-15-agent-memory-game-rng-canvas-complexity.md`
 - `docs/harness-map/README.md`
 
-Scope note: this PR is docs-only. It does not change harness behavior, tests, workflows, hooks, dependencies, dashboard code, generated status files, TEETH status, or central-map consolidation.
+Scope note: this campaign update changes the promoted harness, paired proof test, generated cards/ratchet, and current-state docs for `core/complexity`. It does not change workflows, hooks, dependencies, dashboard code, generated status files outside the cards, or central-map consolidation.

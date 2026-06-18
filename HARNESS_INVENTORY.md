@@ -625,12 +625,12 @@ Classic IR ranking metrics over fixed graded judgment sets plus an analyzer corn
 ## 57. RAG Eval Test Harness
 
 **File:** `harnesses/ai/rag_eval_test_harness.py`
-**Tests:** `tests/ai/test_rag_eval_test_harness.py` — 21 tests
+**Tests:** `tests/ai/test_rag_eval_test_harness.py` (+ `_proof.py`) — 24 tests
 **Port:** none (in-process)
 
-Scores retrieval-augmented answers on four axes RAG fails silently on: retrieval recall@k, citation faithfulness (a citation counts only if it was retrieved AND its passage supports a claim), answer grounding (claims present in the post-overflow context), and context-window overflow (greedy-pack drop of tail passages). A deterministic lexical retriever over an engineered 20-passage / 6-case corpus lets the oracle meet recall ≥ 0.80 / faithfulness ≥ 0.90 / grounding ≥ 0.80. A keyword-only (AND) retriever drops below the recall floor, a truncating retriever degrades grounding, and a citation fabricator drops below the faithfulness floor. 19 self-test scenarios. Distinct from `ai/llm_eval` (answer graders, no retrieval) and `ai/prompt_injection` (safety corpus).
+Scores retrieval-augmented answers on four axes RAG fails silently on: retrieval recall@k, citation faithfulness (a citation counts only if it was retrieved AND its passage supports a claim), answer grounding (claims present in the post-overflow context), and context-window overflow (greedy-pack drop of tail passages). A deterministic lexical retriever over an engineered 20-passage / 6-case corpus lets the oracle meet recall ≥ 0.80 / faithfulness ≥ 0.90 / grounding ≥ 0.80. The current TEETH proof checks frozen recall-floor, fabricated-citation, overflow-grounding, and zero-recall cases; planted auditors catch keyword-only retrieval, citation-fabrication blindness, overflow blindness, and invented hits for empty retrieval. 19 self-test scenarios. Distinct from `ai/llm_eval` (answer graders, no retrieval) and `ai/prompt_injection` (safety corpus).
 
-**Key components:** `Passage`, `RagCase`, `RagConfig`, `retrieve`, `keyword_only_retrieve`, `truncating_retrieve`, `recall_at_k`, `citation_audit`, `grounding_audit`, `context_overflow`, `evaluate`, `RagReport`
+**Key components:** `Passage`, `RagCase`, `RagConfig`, `retrieve`, `keyword_only_retrieve`, `truncating_retrieve`, `recall_at_k`, `citation_audit`, `grounding_audit`, `context_overflow`, `evaluate`, `RagReport`, `RAG_AUDIT_CORPUS`, `oracle_rag_audit`, `TEETH`
 
 ---
 
@@ -661,51 +661,62 @@ Composes a Decimal `Money` (banker's rounding + exact largest-remainder `allocat
 ## 60. Circuit Breaker Resilience Test Harness
 
 **File:** `harnesses/core/circuitbreaker_test_harness.py`
-**Tests:** `tests/core/test_circuitbreaker_test_harness.py` — 17 tests
+**Tests:** `tests/core/test_circuitbreaker_test_harness.py` (+ `_proof.py`) — 20 tests
 **Port:** 19330
 
 Tests the circuit-breaker pattern under an injectable `FakeClock`: CLOSED → OPEN
 on a failure threshold, OPEN rejects calls fast (`CircuitOpenError`), OPEN →
 HALF_OPEN after a reset timeout, HALF_OPEN → CLOSED on a probe success / → OPEN
 on probe failure. `CircuitBreakerOracle` is the reference state model the live
-`CircuitBreaker` is checked against. 13 self-test scenarios. Ported from the
-batch-4 resilience branch into the reorg (port reassigned from 19300 to avoid
-colliding with `core/payments`).
+`CircuitBreaker` is checked against. The current TEETH proof replays frozen
+event logs for threshold trips, success resets, half-open close/retrip, probe
+caps, and pre-timeout open rejection; planted auditors cover late-open,
+reset-blind, half-open-failure-closing, cap-ignoring, and open-window bugs.
+13 self-test scenarios. Ported from the batch-4 resilience branch into the reorg
+(port reassigned from 19300 to avoid colliding with `core/payments`).
 
-**Key components:** `CircuitBreaker`, `CircuitBreakerOracle`, `FakeClock`, `CircuitOpenError`, `CircuitHandler`, `CBTestResult`, `start_mock_server`
+**Key components:** `CircuitBreaker`, `CircuitBreakerOracle`, `FakeClock`, `CircuitOpenError`, `CircuitHandler`, `CBTestResult`, `start_mock_server`, `CIRCUIT_BREAKER_AUDIT_CORPUS`, `oracle_circuitbreaker_audit`, `TEETH`
 
 ---
 
 ## 61. JWT (HS256) Verification Test Harness
 
 **File:** `harnesses/security/jwt_test_harness.py`
-**Tests:** `tests/security/test_jwt_test_harness.py` — 18 tests
+**Tests:** `tests/security/test_jwt_test_harness.py` (+ `_proof.py`) — 21 tests
 **Port:** 19400
 
 Tests JWT encode and — more importantly — *verification* against the classic
 auth-bypass attacks: `alg=none` acceptance, HS/RS algorithm confusion,
 signature stripping/forgery, and expiry handling, using stdlib `hmac`/`hashlib`.
-`VerifyResult` reports pass/fail with a reason string. 14 self-test scenarios.
-Ported from the batch-4 branch (port reassigned 19320 → 19400). Complements the
-injection-focused `security/security` and `security/appsec` harnesses.
+`VerifyResult` reports pass/fail with a reason string. The current TEETH proof
+checks valid-token, `alg=none`, algorithm allow-list, signature tamper,
+expiration, and required-claim cases; planted auditors cover alg-none acceptance,
+allow-list bypass, signature blindness, time-claim blindness, and required-claim
+blindness. 14 self-test scenarios. Ported from the batch-4 branch (port
+reassigned 19320 → 19400). Complements the injection-focused `security/security`
+and `security/appsec` harnesses.
 
-**Key components:** `encode`, `verify`, `VerifyResult`, `JwtHandler`, `JwtTestResult`, `start_mock_server`
+**Key components:** `encode`, `verify`, `VerifyResult`, `JwtHandler`, `JwtTestResult`, `start_mock_server`, `JWT_AUDIT_CORPUS`, `oracle_jwt_audit`, `TEETH`
 
 ---
 
 ## 62. PII / PHI Redaction Test Harness
 
 **File:** `harnesses/security/pii_redaction_test_harness.py`
-**Tests:** `tests/security/test_pii_redaction_test_harness.py` — 20 tests
+**Tests:** `tests/security/test_pii_redaction_test_harness.py` (+ `_proof.py`) — 23 tests
 **Port:** 19410
 
 Tests detection + redaction of PII/PHI (emails, phone numbers, SSNs, card
 numbers, etc.) via stdlib `re` detectors, scored against a `RedactionOracle`
 with precision/recall over a labelled corpus (catches both under-redaction
-leaks and over-redaction false positives). 14 self-test scenarios. Ported from
-the batch-4 branch (port reassigned 19310 → 19410).
+leaks and over-redaction false positives). The current TEETH proof checks mixed
+entity counts, raw-secret removal, digit-run removal, safe-number over-redaction
+guards, ZIP preservation, mask-mode SSN behavior, and idempotency; planted
+auditors cover SSN blindness, digit leakage, Luhn-blind over-redaction, and
+non-idempotent redaction. 14 self-test scenarios. Ported from the batch-4 branch
+(port reassigned 19310 → 19410).
 
-**Key components:** `Redactor`, `RedactionOracle`, `RedactionHandler`, `RedactTestResult`, `start_mock_server`
+**Key components:** `Redactor`, `RedactionOracle`, `RedactionHandler`, `RedactTestResult`, `start_mock_server`, `PII_AUDIT_CORPUS`, `oracle_pii_audit`, `TEETH`
 
 ---
 
@@ -786,12 +797,12 @@ Batch 7 makes proof explicit: each harness keeps a deterministic safe fixture an
 ## 73. Complexity / Bloat Test Harness
 
 **File:** `harnesses/core/complexity_test_harness.py`
-**Tests:** `tests/core/test_complexity_test_harness.py` — 25 tests
+**Tests:** `tests/core/test_complexity_test_harness.py` (+ `_proof.py`) — 28 tests
 **Port:** none (in-process)
 
-Flags code bloat and maintainability regressions in AI-generated or human code. Computes cyclomatic complexity, cognitive complexity, function length, parameter count, and nesting depth with stdlib `ast`, then gates files or directories against configured thresholds. The self-test pins hand-computed metric values, proves a bad high-complexity fixture is flagged, and proves clean code passes.
+Flags code bloat and maintainability regressions in AI-generated or human code. Computes cyclomatic complexity, cognitive complexity, function length, parameter count, and nesting depth with stdlib `ast`, then gates files or directories against configured thresholds. The self-test pins hand-computed metric values, proves a bad high-complexity fixture is flagged, and proves clean code passes. The current TEETH proof checks clean code, cognitive/nesting breaches, length bloat, parameter-count bloat, and nested-vs-flat cognitive contrast; planted auditors cover cyclomatic-only, length-blind, params-blind, and nesting-blind behavior.
 
-**Key components:** `Thresholds`, `FunctionMetrics`, `ComplexityVisitor`, `analyze_source`, `analyze_path`, `gate_metrics`, `run_self_test`
+**Key components:** `Thresholds`, `FunctionMetrics`, `analyze_source`, `analyze_path`, `COMPLEXITY_AUDIT_CORPUS`, `oracle_complexity_audit`, `TEETH`
 
 ---
 
