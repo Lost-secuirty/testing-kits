@@ -118,4 +118,5 @@ Docs checked in this batch:
 - `docs/HARNESS_READING_GUIDE.md`
 - `docs/REVIEWER_QUICKSTART.md`
 - `docs/HARNESS_MAP.md`
+- `docs/LEARNINGS.md`
 - `llms.txt`
