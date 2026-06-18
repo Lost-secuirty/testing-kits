@@ -46,6 +46,7 @@ Each batch file should include:
 - planted-bad case;
 - oracle / proof target;
 - external testing pattern;
+- usage note;
 - current outside reference;
 - proof status;
 - commands;

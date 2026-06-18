@@ -19,6 +19,7 @@ Proof status is read from `cards/teeth_ratchet.json` at the time this batch is c
 - Planted-bad case: `skip_boundary_item`, `duplicate_boundary_item`, `stuck_cursor`
 - Oracle / proof target: Current proof target: `oracle_page`, `_EXPECTED_IDS`.
 - External testing pattern: pagination / cursor consistency fixture and regression testing.
+- Usage note: Use this as a pre-merge fixture for list APIs that support cursor or keyset pagination, especially when inserts, deletes, cursor tampering, or unstable ordering could create duplicate or skipped rows.
 - Current outside reference: GraphQL's cursor pagination guidance describes cursor-based connection traversal and page info. <https://graphql.org/learn/pagination/>
 - Proof status: `required` as of current `cards/teeth_ratchet.json`; subject to change as source, tests, or ratchet state changes.
 - Commands: `python tools/teeth_check.py harnesses/core/pagination_test_harness.py`; `python harnesses/core/pagination_test_harness.py --self-test`; `python harnesses/core/pagination_test_harness.py --list-scenarios`; `python -m unittest tests.core.test_pagination_test_harness`; `make test-core`; `make proof`.
@@ -36,6 +37,7 @@ Proof status is read from `cards/teeth_ratchet.json` at the time this batch is c
 - Planted-bad case: none in required TEETH as of this batch; map the current pending evidence as-is.
 - Oracle / proof target: Current proof target: self-test and paired-test evidence visible in the current source, not required TEETH proof.
 - External testing pattern: accessibility (a11y) fixture and regression testing.
+- Usage note: Use this as a static HTML review aid for alt text, labels, heading order, ARIA attributes, contrast math, language, links, and table structure before relying on browser-based accessibility audits.
 - Current outside reference: WCAG 2.2 defines accessibility success criteria for perceivable, operable, understandable, and robust interfaces. <https://www.w3.org/TR/WCAG22/>
 - Proof status: `pending` as of current `cards/teeth_ratchet.json`; subject to change as source, tests, or ratchet state changes.
 - Commands: `python tools/teeth_check.py harnesses/core/a11y_test_harness.py`; `python harnesses/core/a11y_test_harness.py --self-test`; `python -m unittest tests.core.test_a11y_test_harness`; `make test-core`; `make proof`.
@@ -53,6 +55,7 @@ Proof status is read from `cards/teeth_ratchet.json` at the time this batch is c
 - Planted-bad case: none in required TEETH as of this batch; map the current pending evidence as-is.
 - Oracle / proof target: Current proof target: self-test and paired-test evidence visible in the current source, not required TEETH proof.
 - External testing pattern: AI-feature evaluation and safety-regression fixture mapping.
+- Usage note: Use this as a deterministic agent-control smoke test for tool schema fidelity, loop limits, multi-turn state, plan execution, and guarded dangerous-tool behavior without calling a live model.
 - Current outside reference: OpenAI tool-calling guidance documents model/tool interactions and structured tool invocation behavior. <https://platform.openai.com/docs/guides/function-calling>
 - Proof status: `pending` as of current `cards/teeth_ratchet.json`; subject to change as source, tests, or ratchet state changes.
 - Commands: `python tools/teeth_check.py harnesses/ai/agentic_test_harness.py`; `python -m unittest tests.ai.test_agentic_test_harness`; `make test-ai`; `make proof`.
@@ -70,6 +73,7 @@ Proof status is read from `cards/teeth_ratchet.json` at the time this batch is c
 - Planted-bad case: `skip_integrity`, `allow_unpinned`, `allow_typosquat`
 - Oracle / proof target: Current proof target: `oracle_admit`, `EXPECTED_VERDICTS`, `SUPPLY_CORPUS`.
 - External testing pattern: security regression and control-fixture testing.
+- Usage note: Use this as a docs-and-CI fixture for dependency pinning, artifact integrity, lockfile drift, typosquat or nonexistent-package checks, known-vulnerability matching, and reproducible-build regressions.
 - Current outside reference: SLSA describes supply-chain security levels and build provenance concepts. <https://slsa.dev/spec/v1.0/>
 - Proof status: `required` as of current `cards/teeth_ratchet.json`; subject to change as source, tests, or ratchet state changes.
 - Commands: `python tools/teeth_check.py harnesses/security/supplychain_test_harness.py`; `python harnesses/security/supplychain_test_harness.py --self-test`; `python harnesses/security/supplychain_test_harness.py --list-scenarios`; `python -m unittest tests.security.test_supplychain_test_harness`; `make test-security`; `make proof`.
@@ -87,6 +91,7 @@ Proof status is read from `cards/teeth_ratchet.json` at the time this batch is c
 - Planted-bad case: `trusts_declared_content_type`, `path_traversal_filename`, `skips_size_cap`
 - Oracle / proof target: Current proof target: `oracle_validate`, `EXPECTED_VERDICTS`, `UPLOAD_CORPUS`.
 - External testing pattern: security regression and control-fixture testing.
+- Usage note: Use this as an ingestion regression fixture for upload endpoints or file-processing jobs, covering type sniffing, size caps, filename sanitization, multipart parsing, truncated streams, and decompression-bomb limits.
 - Current outside reference: OWASP File Upload guidance covers extension, content-type, size, and decompression-bomb style controls. <https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html>
 - Proof status: `required` as of current `cards/teeth_ratchet.json`; subject to change as source, tests, or ratchet state changes.
 - Commands: `python tools/teeth_check.py harnesses/security/upload_test_harness.py`; `python harnesses/security/upload_test_harness.py --self-test`; `python harnesses/security/upload_test_harness.py --list-scenarios`; `python -m unittest tests.security.test_upload_test_harness`; `make test-security`; `make proof`.
