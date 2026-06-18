@@ -6,7 +6,7 @@
 
 Testing-kits is a reference collection of **77 self-contained Python test harnesses**. Each harness demonstrates one failure mode with a known-good case and a planted-bad case. It is deliberately a library to read from, learn from, and port from, not a product to deploy.
 
-The current proof model is a ratchet, not a blanket claim that all 77 are proven in the same way. The TEETH campaign distinguishes **required**, **pending**, and **legacy** harnesses. As of the loaded Batch 5 state, the snapshot is **51 required / 18 pending / 8 legacy / 0 failing**. Re-run `make proof` before treating that as a fresh release claim.
+The current proof model is a ratchet, not a blanket claim that all 77 are proven in the same way. The TEETH campaign distinguishes **required**, **pending**, and **legacy** harnesses. As of the current Batch 7 teeth state, the snapshot is **59 required / 10 pending / 8 legacy / 0 failing**. Re-run `make proof` before treating that as a fresh release claim.
 
 ## In plain terms
 
@@ -57,7 +57,7 @@ The Makefile exposes the reviewer command surface: `make test`, focused category
   - `required` — TEETH declared and verified;
   - `pending` — counted but not yet ratcheted into TEETH;
   - `legacy` — pharmacy-domain soft-gate status.
-- **Current loaded proof snapshot:** Batch 5 records **51 required / 18 pending / 8 legacy / 0 failing**. This is a current proof baseline from loaded repo state, not a permanent claim.
+- **Current loaded proof snapshot:** Batch 7 records **59 required / 10 pending / 8 legacy / 0 failing**. This is a current proof baseline from loaded repo state, not a permanent claim.
 - **CI/governance:** `.github/control-policy.json` lists required files and workflows. `tools/control_audit.py` enforces the control-policy presence checks. `STATUS.md` and `STATUS.json` are generated artifacts, not canonical committed status.
 
 ### 5. What it proves — and what it does not

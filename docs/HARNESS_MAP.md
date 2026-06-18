@@ -31,13 +31,13 @@ Batch 1 covers the first five core harnesses in inventory order. These entries a
 - Failure class: load-shape distortion, hidden tail latency, throughput/error-rate visibility gaps, virtual-user exhaustion under stress.
 - Logic shape: `AND`: scheduled requests, completed requests, latency metrics, status counts, and error counts must all be observable. `NOT`: closed-model pacing must not hide tail latency through coordinated omission.
 - Good case: `--self-test` starts the stdlib mock server and drives a short stress run against it.
-- Planted-bad case: none in TEETH yet. Current evidence is self-test/paired-test coverage, not planted-mutant proof.
-- Oracle / proof target: corrected latency from scheduled send time, throughput/error accounting, scenario scheduling, and final report behavior.
+- Planted-bad case: `raw_latency_auditor`, `status_only_error_auditor`, and `equal_weight_auditor`.
+- Oracle / proof target: `oracle_stress_audit`, `STRESS_METRIC_CORPUS`, corrected latency from scheduled send time, transport/HTTP error accounting, and weighted scenario expansion.
 - External testing pattern: open workload load testing / stress testing.
 - Current outside reference: Grafana k6 documents open versus closed models and notes that closed models can reduce arrival rate when the system slows, a coordinated-omission risk; open arrival-rate executors decouple arrivals from iteration duration. <https://grafana.com/docs/k6/latest/using-k6/scenarios/concepts/open-vs-closed/>
-- Proof status: `pending` as of current `cards/teeth_ratchet.json`; subject to change.
-- Commands: `python harnesses/core/stress_harness.py --self-test`; `python -m unittest tests.core.test_stress_harness`; `make test-core`; `make proof` for current global proof state.
-- Known limits: does not prove production capacity, SLO compliance, distributed load realism, kernel/network bottlenecks, or correctness of a real target service. Current pending status means no TEETH mutant proof should be claimed.
+- Proof status: `required` as of current `cards/teeth_ratchet.json`; subject to change.
+- Commands: `python tools/teeth_check.py harnesses/core/stress_harness.py`; `python harnesses/core/stress_harness.py --self-test`; `python harnesses/core/stress_harness.py --json`; `python -m unittest tests.core.test_stress_harness tests.core.test_stress_proof`; `make test-core`; `make proof` for current global proof state.
+- Known limits: does not prove production capacity, SLO compliance, distributed load realism, kernel/network bottlenecks, or correctness of a real target service. The TEETH proof is limited to the frozen stress metric and workload-shape corpus.
 - Related harnesses: `core/performance`-adjacent behavior lives here; compare with `core/chaos`, `core/memory`, `core/ratelimit`, and `core/network` when mapping resilience or resource pressure.
 
 ### 2. API / REST Test Harness

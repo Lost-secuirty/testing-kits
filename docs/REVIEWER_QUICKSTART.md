@@ -13,7 +13,7 @@ case for a specific bug class?"
   - **required** — a non-legacy harness with `TEETH`; the swap-check verifies that the correct oracle is not flagged and every planted mutant is caught.
   - **pending** — a non-legacy harness that is counted in the inventory but has not yet been ratcheted into the required TEETH contract.
   - **legacy** — pharmacy-domain harnesses still tracked under the older soft gate.
-- As of the loaded Batch 5 state, the proof-ratchet snapshot is **51 required / 18 pending / 8 legacy / 0 failing**. Re-run `make proof` before treating that as a fresh release claim.
+- As of the current Batch 7 teeth state, the proof-ratchet snapshot is **59 required / 10 pending / 8 legacy / 0 failing**. Re-run `make proof` before treating that as a fresh release claim.
 - The proof baseline is fixture-defined. It shows known-good cases pass and planted-bad cases fail under the repo's current tooling; it is not total correctness proof.
 
 ## What the repo does not prove

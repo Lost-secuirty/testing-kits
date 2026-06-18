@@ -369,6 +369,11 @@ class TestCLIParser(unittest.TestCase):
         args = parser.parse_args(["--self-test"])
         self.assertTrue(args.self_test)
 
+    def test_json_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["--json"])
+        self.assertTrue(args.json)
+
     def test_invalid_scenario_rejected(self):
         parser = build_parser()
         with self.assertRaises(SystemExit):

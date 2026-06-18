@@ -39,10 +39,12 @@ from harnesses.core.i18n_test_harness import (
     GraphemeResult,
     I18nAnalyzer,
     I18nReport,
+    MOJIBAKE_CAFE,
     NormalizationResult,
     NormalizationTester,
     SurrogateTester,
     estimate_grapheme_clusters,
+    looks_like_mojibake,
     safe_truncate_bytes,
     start_server,
     stop_server,
@@ -344,6 +346,12 @@ class TestMojibakeDetection(unittest.TestCase):
         r = self.tester.detect_mojibake("Hello")
         # ASCII roundtrips cleanly through both encodings
         self.assertFalse(r.is_mojibake)
+
+    def test_corrupted_text_looks_like_mojibake(self):
+        self.assertTrue(looks_like_mojibake(MOJIBAKE_CAFE))
+
+    def test_clean_accented_text_not_flagged_as_mojibake_artifact(self):
+        self.assertFalse(looks_like_mojibake("café"))
 
     def test_mojibake_encoding_label(self):
         r = self.tester.detect_mojibake("café")

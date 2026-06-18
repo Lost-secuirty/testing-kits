@@ -190,3 +190,9 @@ Append-only log of gotchas, fixes, API surprises, tool behavior, and verificatio
 - Do not full-replace large Markdown files from truncated connector output. GitHub file replacement requires the complete file body; if a fetch/blob view is truncated, replacing the file risks deleting unseen sections.
 - Prefer modular batch files and small index updates over one central whole-file edit during active mapping work. Use line-window reads or another verified full-content source before any replacement.
 - If a central doc needs consolidation, do it in a dedicated consolidation PR from a full local checkout or other non-truncated source, not during an active mapping batch.
+
+## 2026-06-18 - Batch 7: stress/i18n/a11y/agentic/clock-skew TEETH
+
+- Flipped 5 more harnesses pending -> required (gate now **59 required / 10 pending / 8 legacy / 0 failing**): core/{stress,i18n,a11y,clock_skew}, ai/agentic.
+- Kept `core/stress` on its existing non-standard `stress_harness.py` filename for this PR. Renaming it would add import/path churn to a proof batch; the current TEETH work is already enough scope.
+- Useful corpus shapes: stress proves corrected latency/error/weight accounting; i18n uses frozen Unicode edge cases rather than locale claims; a11y summarizes issue buckets instead of brittle full messages; agentic adds a real `--self-test` because the prior script could exit 0 without exercising checks; clock-skew keeps the legacy scenario list intact and adds a separate TEETH scenario list.
