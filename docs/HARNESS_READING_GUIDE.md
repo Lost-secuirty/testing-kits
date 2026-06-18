@@ -74,10 +74,9 @@ Proof status:
 Commands:
 Known limits:
 Related harnesses:
-Docs touched:
 ```
 
-Use this structure in future inventory expansions, PR summaries, or per-harness docs. Do not duplicate full source code into docs. Do not claim a `pending` harness has TEETH proof; document it as current-state evidence subject to future upgrade.
+Use this structure in future inventory expansions, PR summaries, or per-harness docs. Keep batch-level metadata in the PR body or a batch closeout section, not inside each dossier. Do not duplicate full source code into docs. Do not claim a `pending` harness has TEETH proof; document it as current-state evidence subject to future upgrade.
 
 ## Logic-shape labels
 
