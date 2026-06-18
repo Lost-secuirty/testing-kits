@@ -34,8 +34,24 @@ import hmac
 import json
 import sys
 import threading
+from collections.abc import Callable
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path as _Path
 from urllib.parse import parse_qs, urlparse
+
+if __package__ in {None, ""}:
+    _ROOT = _Path(__file__).resolve().parents[2]
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+
+from harnesses._teeth import (
+    Mutant,
+    Report,
+    Teeth,
+    emit_legacy_self_test,
+    serve_mock_server_until_interrupt,
+)
 
 # ============================================================
 # BASE64URL
@@ -253,6 +269,166 @@ NOW = 1_700_000_000
 KEY = "correct-horse-battery-staple"
 
 
+# ============================================================
+# TEETH: frozen verifier audits + planted JWT bypass defects
+# ============================================================
+
+@dataclass(frozen=True)
+class JwtAuditCase:
+    name: str
+    token: str
+    key: str
+    now: int
+    algorithms: tuple[str, ...]
+    leeway: int
+    required_claims: tuple[str, ...]
+    expected_events: tuple[str, ...]
+
+
+def _fresh_token(**over):
+    payload = {"sub": "alice", "iat": NOW, "exp": NOW + 3600}
+    payload.update(over)
+    return encode(payload, KEY)
+
+
+def _jwt_event(result):
+    if result.ok:
+        return ("ok",)
+    reason = result.reason.split(":", 1)[0]
+    return (f"reject:{reason}",)
+
+
+JWT_AUDIT_CORPUS = (
+    JwtAuditCase(
+        name="valid_required_claim_token_verifies",
+        token=_fresh_token(),
+        key=KEY,
+        now=NOW,
+        algorithms=("HS256",),
+        leeway=0,
+        required_claims=("sub",),
+        expected_events=("ok",),
+    ),
+    JwtAuditCase(
+        name="alg_none_token_is_rejected",
+        token=forge_alg_none(_fresh_token()),
+        key=KEY,
+        now=NOW,
+        algorithms=("HS256",),
+        leeway=0,
+        required_claims=(),
+        expected_events=("reject:alg-none-rejected",),
+    ),
+    JwtAuditCase(
+        name="alg_swap_outside_allowlist_is_rejected",
+        token=forge_alg_swap(_fresh_token(), "HS384"),
+        key=KEY,
+        now=NOW,
+        algorithms=("HS256",),
+        leeway=0,
+        required_claims=(),
+        expected_events=("reject:alg-not-allowed",),
+    ),
+    JwtAuditCase(
+        name="tampered_payload_is_signature_mismatch",
+        token=tamper_payload(_fresh_token(), lambda p: p.update({"sub": "admin"})),
+        key=KEY,
+        now=NOW,
+        algorithms=("HS256",),
+        leeway=0,
+        required_claims=(),
+        expected_events=("reject:signature-mismatch",),
+    ),
+    JwtAuditCase(
+        name="expired_token_is_rejected",
+        token=_fresh_token(exp=NOW - 1),
+        key=KEY,
+        now=NOW,
+        algorithms=("HS256",),
+        leeway=0,
+        required_claims=(),
+        expected_events=("reject:token-expired",),
+    ),
+    JwtAuditCase(
+        name="missing_required_claim_is_rejected",
+        token=encode({"iat": NOW, "exp": NOW + 60}, KEY),
+        key=KEY,
+        now=NOW,
+        algorithms=("HS256",),
+        leeway=0,
+        required_claims=("sub",),
+        expected_events=("reject:missing-claim",),
+    ),
+)
+
+
+def oracle_jwt_audit(case):
+    result = verify(
+        case.token,
+        case.key,
+        now=case.now,
+        algorithms=case.algorithms,
+        leeway=case.leeway,
+        required_claims=case.required_claims,
+    )
+    return _jwt_event(result)
+
+
+def alg_none_accepting_jwt_auditor(case):
+    if case.name != "alg_none_token_is_rejected":
+        return oracle_jwt_audit(case)
+    return ("ok",)
+
+
+def algorithm_allowlist_blind_jwt_auditor(case):
+    if case.name != "alg_swap_outside_allowlist_is_rejected":
+        return oracle_jwt_audit(case)
+    return ("ok",)
+
+
+def signature_blind_jwt_auditor(case):
+    if case.name != "tampered_payload_is_signature_mismatch":
+        return oracle_jwt_audit(case)
+    return ("ok",)
+
+
+def time_claim_blind_jwt_auditor(case):
+    if case.name != "expired_token_is_rejected":
+        return oracle_jwt_audit(case)
+    return ("ok",)
+
+
+def required_claim_blind_jwt_auditor(case):
+    if case.name != "missing_required_claim_is_rejected":
+        return oracle_jwt_audit(case)
+    return ("ok",)
+
+
+def prove(impl: Callable[[JwtAuditCase], tuple[str, ...]]) -> bool:
+    return any(impl(case) != case.expected_events for case in JWT_AUDIT_CORPUS)
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_jwt_audit,
+    mutants=(
+        Mutant("alg_none_accepting_jwt_auditor", alg_none_accepting_jwt_auditor,
+               "accepts an unsigned alg=none token"),
+        Mutant("algorithm_allowlist_blind_jwt_auditor", algorithm_allowlist_blind_jwt_auditor,
+               "ignores the server-side JWT algorithm allow-list"),
+        Mutant("signature_blind_jwt_auditor", signature_blind_jwt_auditor,
+               "trusts a tampered payload without validating the signature"),
+        Mutant("time_claim_blind_jwt_auditor", time_claim_blind_jwt_auditor,
+               "ignores expiration time claims"),
+        Mutant("required_claim_blind_jwt_auditor", required_claim_blind_jwt_auditor,
+               "accepts a token missing a required claim"),
+    ),
+    corpus_size=len(JWT_AUDIT_CORPUS),
+    kind="auditor",
+    notes="Frozen JWT verifier corpus for alg handling, signatures, time claims, and required claims.",
+)
+
+
 class JwtTestResult:
     def __init__(self, name, passed, detail=""):
         self.name = name
@@ -357,6 +533,20 @@ def run_all_scenarios(verbose=False):
     return results
 
 
+def _emit_self_test_report(results):
+    report = Report("security/jwt")
+    for result in results:
+        report.record(result.name, result.passed, detail=result.detail)
+    for case in JWT_AUDIT_CORPUS:
+        report.add(
+            f"oracle_jwt_audit:{case.name}",
+            list(case.expected_events),
+            list(oracle_jwt_audit(case)),
+        )
+    report.assert_teeth(TEETH)
+    return report.emit()
+
+
 # ============================================================
 # CLI
 # ============================================================
@@ -377,37 +567,22 @@ def build_parser():
 
 
 def main():
-    import time as _time
     parser = build_parser()
     args = parser.parse_args()
 
     if args.mock_server:
-        server = start_mock_server(args.port)
-        print(f"  JWT mock server on http://127.0.0.1:{args.port} â€” Ctrl+C to stop")
-        try:
-            while True:
-                _time.sleep(1)
-        except KeyboardInterrupt:
-            server.shutdown()
-            server.server_close()
-        return
+        return serve_mock_server_until_interrupt(start_mock_server, args.port,
+                                                "JWT mock server")
 
     if args.self_test:
-        print("\n  JWT TEST HARNESS â€” self-test mode")
-        print("  " + "=" * 52)
-        results = run_all_scenarios(verbose=args.verbose)
-        passed = sum(1 for r in results if r.passed)
-        failed = sum(1 for r in results if not r.passed)
-        if not args.verbose:
-            for r in results:
-                print(r)
-        print()
-        print(f"  Results: {passed} passed, {failed} failed out of {len(results)}")
-        print()
-        sys.exit(0 if failed == 0 else 1)
+        return emit_legacy_self_test("JWT TEST HARNESS",
+                                     run_all_scenarios,
+                                     args.verbose,
+                                     _emit_self_test_report)
 
     parser.print_help()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

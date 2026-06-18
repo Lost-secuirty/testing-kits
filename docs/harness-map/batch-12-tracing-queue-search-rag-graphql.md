@@ -6,7 +6,7 @@ This is current-state documentation, not command authority. It maps the source, 
 
 Operating rules remain in `AGENTS.md`, `CLAUDE.md`, and `SECURITY.md`.
 
-Proof status is read from `cards/teeth_ratchet.json` at the time this campaign update is cut: `core/tracing` = `required`, `core/queue` = `required`, `core/search_relevance` = `required`, `ai/rag_eval` = `pending`, `core/graphql` = `required`.
+Proof status is read from `cards/teeth_ratchet.json` at the time this campaign update is cut: `core/tracing` = `required`, `core/queue` = `required`, `core/search_relevance` = `required`, `ai/rag_eval` = `required`, `core/graphql` = `required`.
 
 ## 54. Distributed Tracing Test Harness
 
@@ -68,16 +68,16 @@ Proof status is read from `cards/teeth_ratchet.json` at the time this campaign u
 - Path: `harnesses/ai/rag_eval_test_harness.py`
 - Category: `ai`
 - Failure class: Scores retrieval-augmented answers on four axes RAG fails silently on: retrieval recall@k, citation faithfulness (a citation counts only if it was retrieved AND its passage supports a claim), answer grounding (claims present in the post-overflow context), and context-window overflow (greedy-pack drop of tail passages). A deterministic lexical retriever over an engineered 20-passage / 6-case corpus lets the oracle meet recall ≥ 0.80 / faithfulness ≥ 0.90 / grounding ≥ 0.80. A keyword-only (AND) retriever drops below the recall floor, a truncating retriever degrades grounding, and a citation fabricator drops below the faithfulness floor. 19 self-test scenarios. Distinct from `ai/llm_eval` (answer graders, no retrieval) and `ai/prompt_injection` (safety corpus).
-- Logic shape: AND: the current harness, paired tests, and inventory entry must describe the same behavior. NOT: pending status must not be described as TEETH-required proof.
-- Good case: The current pending harness exercises the coverage summarized above; this entry maps that evidence as-is without claiming required TEETH proof.
-- Planted-bad case: none in required TEETH as of this batch; map the current pending evidence as-is.
-- Oracle / proof target: Current proof target: self-test and paired-test evidence visible in the current source, not required TEETH proof.
+- Logic shape: AND: retrieval floors, citation fabrication checks, overflow grounding, empty-retrieval behavior, paired tests, proof test, and TEETH swap-check must all hold. NOT: a degraded retriever, citation-blind audit, overflow-blind audit, or invented-hit audit must not pass as if it were the oracle.
+- Good case: `oracle_rag_audit` matches frozen RAG recall, fabricated-citation, overflow-grounding, and zero-recall cases.
+- Planted-bad case: `keyword_only_rag_auditor`, `citation_fabrication_blind_rag_auditor`, `overflow_blind_rag_auditor`, `empty_retrieval_invents_hit_rag_auditor`.
+- Oracle / proof target: Current proof target: `RAG_AUDIT_CORPUS`, `oracle_rag_audit`, and `TEETH`.
 - External testing pattern: AI-feature evaluation and safety-regression fixture mapping.
 - Usage note: Use this as a retrieval-augmented generation fixture for retrieval quality, groundedness, citation coverage, and answer refusal behavior without depending on a live model.
-- Current outside reference: OpenAI retrieval guidance describes retrieval-augmented workflows that search external knowledge before generation. <https://platform.openai.com/docs/guides/retrieval>
-- Proof status: `pending` as of current `cards/teeth_ratchet.json`; subject to change as source, tests, or ratchet state changes.
-- Commands: `python tools/teeth_check.py harnesses/ai/rag_eval_test_harness.py`; `python harnesses/ai/rag_eval_test_harness.py --self-test`; `python harnesses/ai/rag_eval_test_harness.py --list-scenarios`; `python -m unittest tests.ai.test_rag_eval_test_harness`; `make test-ai`; `make proof`.
-- Known limits: Does not prove production correctness, exhaustive input coverage, or final harness maturity. This dossier maps current source, tests, and ratchet state as of this batch; it is expected to change. Pending status means no required TEETH proof should be claimed.
+- Current outside reference: Microsoft RAG evaluators describe groundedness, relevance, and retrieval evaluation for RAG systems; TREC remains a standard relevance-evaluation benchmark practice. <https://learn.microsoft.com/en-us/azure/foundry/concepts/evaluation-evaluators/rag-evaluators> <https://trec.nist.gov/>
+- Proof status: `required` as of current `cards/teeth_ratchet.json`; subject to change as source, tests, or ratchet state changes.
+- Commands: `python tools/teeth_check.py harnesses/ai/rag_eval_test_harness.py`; `python harnesses/ai/rag_eval_test_harness.py --self-test`; `python harnesses/ai/rag_eval_test_harness.py --list-scenarios`; `python -m unittest tests.ai.test_rag_eval_test_harness tests.ai.test_rag_eval_proof`; `make test-ai`; `make proof`.
+- Known limits: Does not prove production correctness, exhaustive input coverage, or final harness maturity. This dossier maps current source, tests, and ratchet state as of this batch; it is expected to change.
 - Related harnesses: `core/tracing`, `core/queue`, `core/search_relevance`, `core/graphql`.
 
 ## 58. GraphQL Contract Test Harness

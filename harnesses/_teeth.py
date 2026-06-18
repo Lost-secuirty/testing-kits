@@ -214,3 +214,40 @@ class Report:
             stream = sys.stdout if self.passed else sys.stderr
             print(f"{mark}: {self.harness} - {len(self.checks)} checks{tail}", file=stream)
         return 0 if self.passed else 1
+
+
+def serve_mock_server_until_interrupt(start_server: Callable[[int], Any],
+                                      port: int,
+                                      label: str) -> int:
+    """Run a legacy harness mock server until Ctrl+C, then shut it down."""
+    import time as _time
+    server = start_server(port)
+    print(f"  {label} on http://127.0.0.1:{port} - Ctrl+C to stop")
+    try:
+        while True:
+            _time.sleep(1)
+    except KeyboardInterrupt:
+        server.shutdown()
+        server.server_close()
+    return 0
+
+
+def emit_legacy_self_test(title: str,
+                          run_all_scenarios: Callable[..., list[Any]],
+                          verbose: bool,
+                          emit_report: Callable[[list[Any]], int]) -> int:
+    """Print the older list-of-results self-test format, then emit a Report."""
+    print(f"\n  {title} - self-test mode")
+    print("  " + "=" * 52)
+    results = run_all_scenarios(verbose=verbose)
+    passed = sum(1 for r in results if r.passed)
+    failed = sum(1 for r in results if not r.passed)
+    if not verbose:
+        for r in results:
+            print(r)
+    print()
+    print(f"  Results: {passed} passed, {failed} failed out of {len(results)}")
+    print()
+    if failed:
+        return 1
+    return emit_report(results)

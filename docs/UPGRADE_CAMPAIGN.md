@@ -19,15 +19,15 @@ and **reports its findings** (structured). Gate + contract are documented in
   → `--self-test`/`--json` `Report` → pair unittest → (security/ai: proof test) →
   flip `pending → required` → draft PR (operator merges).
 
-## Status snapshot (Batch 8, 2026-06-18)
+## Status snapshot (Batch 9, 2026-06-18)
 
 | Scope | Count | Meaning |
 |---|---:|---|
-| required (teeth verified) | 64 | proven by the swap-check; gate blocks on these |
-| pending | 5 | in scope, no `TEETH` yet — counted, non-blocking |
+| required (teeth verified) | 69 | proven by the swap-check; gate blocks on these |
+| pending | 0 | in scope, no `TEETH` yet — counted, non-blocking |
 | legacy (pharmacy) | 8 | older soft gate, out of campaign |
 
-**required (64):** Batch 0 (9) core/{check_digit_identifier,feature_flag,graphql,
+**required (69):** Batch 0 (9) core/{check_digit_identifier,feature_flag,graphql,
 grpc_contract,idempotency,queue,tracing}, security/{ci_workflow_hardening,diff_secret_gate}
 · Batch 1 (10) core/{api,cache,cli,config,contract,null_propagation,pagination,serialization,
 statemachine}, security/authz · Batch 2 (10) core/{db,scraper,fuzz,numeric,concurrency,
@@ -39,6 +39,7 @@ property}, ai/llm_eval · Batch 5 (6) core/{logging,memory,ratelimit,regression_
 webhook}, security/appsec · Batch 6 (3) core/{mutation,network}, security/security ·
 Batch 7 (5) core/{stress,i18n,a11y,clock_skew}, ai/agentic · Batch 8 (5)
 core/{cardinality,dormant_code,hermeticity,search_relevance}, ai/prompt_injection.
+· Batch 9 (5) core/{circuitbreaker,complexity}, security/{jwt,pii_redaction}, ai/rag_eval.
 
 ## Batch roadmap (provisional; exact membership ranked at each batch start)
 
@@ -94,8 +95,14 @@ core/{cardinality,dormant_code,hermeticity,search_relevance}, ai/prompt_injectio
   discovery, OpenTelemetry cardinality guidance, Bazel hermetic-test expectations, OWASP
   LLM01 prompt injection, and OpenSearch relevance evaluation. Gate 59 → 64 required /
   5 pending / 8 legacy / 0 failing.
-- **Batch 9+ — drain the remaining 5 pending → SILVER, then GOLD enrich**, plus the NEW
-  NOVEL_COMPOSITION candidates below.
+- **Batch 9 — DONE (2026-06-18):** real TEETH wired into the last 5 pending harnesses,
+  all flipped pending → required: core/{circuitbreaker,complexity}, security/{jwt,
+  pii_redaction}, ai/rag_eval. Research anchors: Azure circuit-breaker pattern,
+  RFC 8725/RFC 7519 for JWT verification, NIST SP 800-122 for PII protection,
+  Microsoft RAG evaluators / TREC relevance-evaluation practice, and Radon plus
+  Sonar Cognitive Complexity for maintainability metrics. Gate 64 → 69 required /
+  0 pending / 8 legacy / 0 failing.
+- **Next phase — GOLD enrich**, plus the NEW NOVEL_COMPOSITION candidates below.
 - **Candidate NEW harnesses (NOVEL_COMPOSITION; from the 2026-06-15 Gemini Deep Research
   docs — vet before building; keep pure-stdlib + a frozen-literal corpus + non-circular
   prove):**
@@ -117,8 +124,9 @@ core/{cardinality,dormant_code,hermeticity,search_relevance}, ai/prompt_injectio
   Provenance + the doc fact-check corrections live in memory `project_gemini_doc_idea_backlog`.
 
 ## Per-tier research to apply (verified 2026-06-14; act at the batch)
-- **security/jwt** — CVE-2026-48526 (public JWK string accepted as HMAC secret →
-  forged HS256, alg confusion), CVE-2026-48523 (alg allow-list bypass). Mutants.
+- **security/jwt** — applied in Batch 9: alg=none, alg allow-list, signature, time-claim,
+  and required-claim mutants. Future enrichment can add public-JWK-as-HMAC-secret fixtures
+  if the harness grows beyond HS256-only stdlib verification.
 - **security/ci_workflow_hardening** (already GOLD — enrich) — pwn_request
   CVE-2026-45132 (CVSS 10), actions-cool tag-redirect, Shai-Hulud/Miasma OIDC token
   theft. New rules + mutants.
@@ -141,19 +149,19 @@ core/{cardinality,dormant_code,hermeticity,search_relevance}, ai/prompt_injectio
 Legend: `R` required · `P` pending · (pharmacy = legacy, omitted).
 
 **core (52):** R a11y, api, browser_e2e, cache, canvas_scene_state, cardinality, chaos,
-check_digit_identifier, cli, clock_skew, concurrency, config, contract, datetime, db,
-dormant_code, error_path_leak, errorpath, feature_flag, fuzz, game_loop_simulation,
-graphql, grpc_contract, hermeticity, idempotency, i18n, iot_telemetry,
+check_digit_identifier, circuitbreaker, cli, clock_skew, complexity, concurrency, config,
+contract, datetime, db, dormant_code, error_path_leak, errorpath, feature_flag, fuzz,
+game_loop_simulation, graphql, grpc_contract, hermeticity, idempotency, i18n, iot_telemetry,
 lexical_date_canonicalization, logging, memory, mutation, network, null_propagation,
 numeric, pagination, payments, pipeline, property, queue, ratelimit, regression_snapshot,
 schema_evolution, scraper, search_relevance, serialization, statemachine,
-statistical_rng_oracle, stress, tracing, webhook · P circuitbreaker, complexity
+statistical_rng_oracle, stress, tracing, webhook
 
-**security (10):** R appsec, authz, ci_workflow_hardening, cwe_kev_regression, diff_secret_gate,
-supplychain, upload, security · P jwt, pii_redaction
+**security (10):** R appsec, authz, ci_workflow_hardening, cwe_kev_regression,
+diff_secret_gate, jwt, pii_redaction, security, supplychain, upload
 
 **ai (7):** R agent_eval, agent_memory_context, agentic, drift_detection, llm_eval,
-prompt_injection · P rag_eval
+prompt_injection, rag_eval
 
 > `core/stress` still uses the non-standard `stress_harness.py` filename
 > (vs `*_test_harness.py`). Batch 7 promoted it without a rename to keep the proof diff scoped.
