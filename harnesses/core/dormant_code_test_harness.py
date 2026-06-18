@@ -33,7 +33,15 @@ import sys
 import textwrap
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path as _Path
 from typing import Any
+
+if __package__ in {None, ""}:
+    _ROOT = _Path(__file__).resolve().parents[2]
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+
+from harnesses._teeth import Mutant, Report, Teeth
 
 # ---------------------------------------------------------------------------
 # Coverage probe
@@ -110,6 +118,109 @@ def drive_synthetic(target: Callable, target_filename: str,
                 crashes.append(f"input={kwargs}: {type(exc).__name__}: {exc}")
         extra_taken |= probe.taken
     return extra_taken - baseline_taken, crashes
+
+
+# ---------------------------------------------------------------------------
+# TEETH: frozen dormant-path audit corpus + planted analyzer defects
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DormantAuditCase:
+    name: str
+    reachable: frozenset[int]
+    baseline_taken: frozenset[int]
+    synthetic_taken: frozenset[int]
+    crashes: tuple[str, ...]
+    expected_events: tuple[str, ...]
+
+
+DORMANT_AUDIT_CORPUS: tuple[DormantAuditCase, ...] = (
+    DormantAuditCase(
+        name="synthetic_input_reaches_crashing_branch",
+        reachable=frozenset(range(1, 8)),
+        baseline_taken=frozenset({1, 2, 3}),
+        synthetic_taken=frozenset({3, 4, 5}),
+        crashes=("AttributeError: 'NoneType' object has no attribute 'info'",),
+        expected_events=("coverage_extended", "crash_surfaced", "still_dormant"),
+    ),
+    DormantAuditCase(
+        name="synthetic_input_exhausts_reachable_lines",
+        reachable=frozenset({1, 2, 3, 4}),
+        baseline_taken=frozenset({1, 2}),
+        synthetic_taken=frozenset({3, 4}),
+        crashes=(),
+        expected_events=("coverage_extended", "no_dormant_lines"),
+    ),
+    DormantAuditCase(
+        name="synthetic_driver_misses_remaining_branch",
+        reachable=frozenset({1, 2, 3, 4, 5}),
+        baseline_taken=frozenset({1, 2, 3}),
+        synthetic_taken=frozenset({1, 2, 3}),
+        crashes=(),
+        expected_events=("no_synthetic_extension", "still_dormant"),
+    ),
+)
+
+
+def oracle_dormant_audit(case: DormantAuditCase) -> tuple[str, ...]:
+    newly_taken = case.synthetic_taken - case.baseline_taken
+    still_dormant = case.reachable - case.baseline_taken - newly_taken
+    events: list[str] = []
+    events.append("coverage_extended" if newly_taken else "no_synthetic_extension")
+    if case.crashes:
+        events.append("crash_surfaced")
+    events.append("still_dormant" if still_dormant else "no_dormant_lines")
+    return tuple(events)
+
+
+def baseline_only_dormant_auditor(case: DormantAuditCase) -> tuple[str, ...]:
+    still_dormant = case.reachable - case.baseline_taken
+    events = ["no_synthetic_extension"]
+    if case.crashes:
+        events.append("crash_surfaced")
+    events.append("still_dormant" if still_dormant else "no_dormant_lines")
+    return tuple(events)
+
+
+def crash_blind_dormant_auditor(case: DormantAuditCase) -> tuple[str, ...]:
+    newly_taken = case.synthetic_taken - case.baseline_taken
+    still_dormant = case.reachable - case.baseline_taken - newly_taken
+    return (
+        "coverage_extended" if newly_taken else "no_synthetic_extension",
+        "still_dormant" if still_dormant else "no_dormant_lines",
+    )
+
+
+def overcovered_dormant_auditor(case: DormantAuditCase) -> tuple[str, ...]:
+    newly_taken = case.reachable - case.baseline_taken
+    events: list[str] = []
+    events.append("coverage_extended" if newly_taken else "no_synthetic_extension")
+    if case.crashes:
+        events.append("crash_surfaced")
+    events.append("no_dormant_lines")
+    return tuple(events)
+
+
+def prove(impl: Callable[[DormantAuditCase], tuple[str, ...]]) -> bool:
+    return any(impl(case) != case.expected_events for case in DORMANT_AUDIT_CORPUS)
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_dormant_audit,
+    mutants=(
+        Mutant("baseline_only_dormant_auditor", baseline_only_dormant_auditor,
+               "ignores synthetic coverage and misses newly activated branches"),
+        Mutant("crash_blind_dormant_auditor", crash_blind_dormant_auditor,
+               "extends coverage but fails to report first-hit crashes"),
+        Mutant("overcovered_dormant_auditor", overcovered_dormant_auditor,
+               "treats every reachable line as covered after the synthetic pass"),
+    ),
+    corpus_size=len(DORMANT_AUDIT_CORPUS),
+    kind="auditor",
+    notes="Frozen dormant-line, synthetic-extension, and first-hit crash corpus.",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -222,8 +333,18 @@ def _run_self_test(verbose: bool = False) -> int:
         for f in failures:
             print(f"  - {f}", file=sys.stderr)
         return 1
+    report = Report("core/dormant_code")
+    for case in DORMANT_AUDIT_CORPUS:
+        report.add(
+            f"oracle_dormant_audit:{case.name}",
+            list(case.expected_events),
+            list(oracle_dormant_audit(case)),
+        )
+    report.assert_teeth(TEETH)
+    if not report.passed:
+        return report.emit()
     print("OK: dormant-path crash surfaced; coverage extended by synthetic inputs.")
-    return 0
+    return report.emit()
 
 
 def build_parser() -> argparse.ArgumentParser:
