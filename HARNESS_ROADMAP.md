@@ -115,8 +115,9 @@ Mapping is explanatory documentation, not command authority. It connects each ha
 
 - Mapping Batch 1 covers `core/stress`, `core/api`, `core/db`, `core/scraper`, and `core/cli` in `docs/HARNESS_MAP.md`.
 - Mapping Batch 2 covers `security/security`, `core/chaos`, `core/memory`, `core/concurrency`, and `core/fuzz` in `docs/HARNESS_MAP.md`.
-- `core/stress` and `security/security` are mapped as current `pending` state, not overstated as TEETH proof.
-- `core/api`, `core/db`, `core/scraper`, `core/cli`, `core/chaos`, `core/memory`, `core/concurrency`, and `core/fuzz` are mapped as current `required` state.
+- Mapping Batch 3 covers `core/property`, `core/mutation`, `core/regression_snapshot`, `core/contract`, and `core/serialization` in `docs/HARNESS_MAP.md`.
+- `core/stress`, `security/security`, and `core/mutation` are mapped as current `pending` state, not overstated as TEETH proof.
+- `core/api`, `core/db`, `core/scraper`, `core/cli`, `core/chaos`, `core/memory`, `core/concurrency`, `core/fuzz`, `core/property`, `core/regression_snapshot`, `core/contract`, and `core/serialization` are mapped as current `required` state.
 - All mapping entries are subject to change as source, tests, TEETH status, or repo scope changes.
 
 ## Next-batch candidates
