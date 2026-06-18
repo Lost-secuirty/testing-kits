@@ -53,7 +53,7 @@ Proof status is read from `cards/teeth_ratchet.json` at the time this batch is c
 - Logic shape: AND: the current harness, paired tests, and inventory entry must describe the same behavior. NOT: pending status must not be described as TEETH-required proof.
 - Good case: The current pending harness exercises the coverage summarized above; this entry maps that evidence as-is without claiming required TEETH proof.
 - Planted-bad case: none in required TEETH as of this batch; map the current pending evidence as-is.
-- Oracle / proof target: Current proof target: self-test and paired-test evidence visible in the current source, not required TEETH proof.
+- Oracle / proof target: Current proof target: source and paired-test evidence visible in the current tree, not required TEETH proof.
 - External testing pattern: AI-feature evaluation and safety-regression fixture mapping.
 - Usage note: Use this as a deterministic agent-control smoke test for tool schema fidelity, loop limits, multi-turn state, plan execution, and guarded dangerous-tool behavior without calling a live model.
 - Current outside reference: OpenAI tool-calling guidance documents model/tool interactions and structured tool invocation behavior. <https://platform.openai.com/docs/guides/function-calling>
