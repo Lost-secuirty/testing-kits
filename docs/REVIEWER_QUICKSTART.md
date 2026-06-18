@@ -64,16 +64,17 @@ port collision that is not a harness failure.
 Use one harness as a traceable sample before trusting the inventory.
 
 1. Pick a harness from `HARNESS_INVENTORY.md`.
-2. Open the harness file under `harnesses/<category>/`.
-3. Find the safe fixture or reference implementation.
-4. Find the planted bad fixture, buggy implementation, or negative control.
-5. Open the paired test under `tests/<category>/`.
-6. Confirm the paired test covers both API behavior and CLI/self-test behavior
+2. Check `docs/HARNESS_MAP.md` if the harness has already been mapped; map entries explain failure class, logic shape, outside testing pattern, proof status, and known limits.
+3. Open the harness file under `harnesses/<category>/`.
+4. Find the safe fixture or reference implementation.
+5. Find the planted bad fixture, buggy implementation, or negative control.
+6. Open the paired test under `tests/<category>/`.
+7. Confirm the paired test covers both API behavior and CLI/self-test behavior
    where the harness exposes a CLI.
-7. If the harness is `required`, inspect its `TEETH` declaration and confirm the
+8. If the harness is `required`, inspect its `TEETH` declaration and confirm the
    proof predicate judges the implementation against fixed fixtures rather than
    re-deriving expected behavior from the oracle at runtime.
-8. Run the harness self-test directly.
+9. Run the harness self-test directly.
 
 Example:
 

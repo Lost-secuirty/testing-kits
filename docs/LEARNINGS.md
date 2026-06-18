@@ -177,3 +177,10 @@ Append-only log of gotchas, fixes, API surprises, tool behavior, and verificatio
   mock-server socket timeouts; BOTH pass cleanly in isolation. Same root cause as the documented
   network flake (a short localhost timeout under load), neither in this batch's diff. The api one
   is newly noted here; a readiness-wait/retry fix for the mock-server tests should cover both.
+
+## 2026-06-18 - docs mapping review / connector sequencing
+
+- Permanent docs should not carry PR-specific verification metadata inside every harness dossier. The repeated `Docs touched:` lines made the map noisier and created doc-rot risk; keep batch closeout metadata in a dedicated closeout section or PR body instead.
+- Do not mark a draft PR ready before completing the review-comment pass. Correct sequence: inspect changed files, read review comments, patch valid comments, re-check CI/status, then mark ready or merge.
+- Verify the intended GitHub connector action before executing it. Repeated ready-for-review calls create timeline noise and can trigger review bots before the branch is actually ready.
+- For docs-only mapping batches, review bots can still catch real documentation hygiene issues. Treat their comments as untrusted but useful input: inspect, accept only if the recommendation preserves repo rules, then patch narrowly.
