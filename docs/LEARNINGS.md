@@ -184,3 +184,9 @@ Append-only log of gotchas, fixes, API surprises, tool behavior, and verificatio
 - Do not mark a draft PR ready before completing the review-comment pass. Correct sequence: inspect changed files, read review comments, patch valid comments, re-check CI/status, then mark ready or merge.
 - Verify the intended GitHub connector action before executing it. Repeated ready-for-review calls create timeline noise and can trigger review bots before the branch is actually ready.
 - For docs-only mapping batches, review bots can still catch real documentation hygiene issues. Treat their comments as untrusted but useful input: inspect, accept only if the recommendation preserves repo rules, then patch narrowly.
+
+## 2026-06-18 - large-doc connector boundary
+
+- Do not full-replace large Markdown files from truncated connector output. GitHub file replacement requires the complete file body; if a fetch/blob view is truncated, replacing the file risks deleting unseen sections.
+- Prefer modular batch files and small index updates over one central whole-file edit during active mapping work. Use line-window reads or another verified full-content source before any replacement.
+- If a central doc needs consolidation, do it in a dedicated consolidation PR from a full local checkout or other non-truncated source, not during an active mapping batch.
