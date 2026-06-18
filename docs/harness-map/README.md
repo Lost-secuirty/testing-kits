@@ -69,5 +69,5 @@ Before merge, verify:
 - pending vs required language matches `cards/teeth_ratchet.json`;
 - CI is green;
 - required review bots have finished;
-- CodeRabbit has no actionable comments;
+- required automated review comments are resolved;
 - the PR body states proof limits and does not claim proof upgrades.
