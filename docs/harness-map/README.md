@@ -17,6 +17,8 @@ Going forward, new mapping batches should live in small batch files that can be 
 - Batch 3: property, mutation, snapshot, contract, and serialization harnesses. Current location: `docs/HARNESS_MAP.md`.
 - Batch 4: config, logging, network, pipeline, and datetime harnesses. Current location: `docs/HARNESS_MAP_BATCH_4.md`.
 
+- Batch 5: inventory #21-#25. Current location: `docs/harness-map/batch-05-idempotency-statemachine-numeric-authz-llm-eval.md`.
+
 ## Preferred future layout
 
 Use small files such as:
