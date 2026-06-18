@@ -38,8 +38,8 @@
   "core/lexical_date_canonicalization": "required",
   "core/logging": "required",
   "core/memory": "required",
-  "core/mutation": "pending",
-  "core/network": "pending",
+  "core/mutation": "required",
+  "core/network": "required",
   "core/null_propagation": "required",
   "core/numeric": "required",
   "core/pagination": "required",
@@ -73,7 +73,7 @@
   "security/diff_secret_gate": "required",
   "security/jwt": "pending",
   "security/pii_redaction": "pending",
-  "security/security": "pending",
+  "security/security": "required",
   "security/supplychain": "required",
   "security/upload": "required"
 }

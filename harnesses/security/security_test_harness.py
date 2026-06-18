@@ -22,14 +22,22 @@ import http.server
 import json
 import re
 import socket
+import sys
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path as _Path
 from typing import Any
+
+# Make the shared teeth contract importable whether run as a module or a script.
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Enumerations and result types
@@ -1150,6 +1158,196 @@ class SecurityScanner:
 
 
 # ---------------------------------------------------------------------------
+# TEETH: frozen security-audit corpus + planted auditor defects
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class SecurityAuditCase:
+    """One frozen security observation with a hand-authored flag decision."""
+
+    name: str
+    vector: str
+    status_code: int
+    body: str
+    should_flag: bool
+    note: str = ""
+
+
+# The corpus is pure data, not live HTTP. It pins the same failure classes the
+# mock server exercises while keeping the TEETH path deterministic and fast.
+SECURITY_AUDIT_CORPUS: tuple[SecurityAuditCase, ...] = (
+    SecurityAuditCase(
+        "safe_sql_parameterized",
+        "sqli",
+        200,
+        '{"query":"SELECT * FROM products WHERE name = ?","rows":[]}',
+        False,
+        "parameterized SQL should not be flagged",
+    ),
+    SecurityAuditCase(
+        "sqli_reflected_tautology",
+        "sqli",
+        200,
+        "executed_query=SELECT * FROM users WHERE name = '' OR '1'='1'",
+        True,
+        "reflected SQL tautology must be flagged",
+    ),
+    SecurityAuditCase(
+        "xss_escaped_script",
+        "xss",
+        200,
+        "&lt;script&gt;alert(1)&lt;/script&gt;",
+        False,
+        "escaped HTML is safe for this reflection fixture",
+    ),
+    SecurityAuditCase(
+        "xss_raw_script",
+        "xss",
+        200,
+        "<script>alert(1)</script>",
+        True,
+        "raw script reflection must be flagged",
+    ),
+    SecurityAuditCase(
+        "command_reflected",
+        "command",
+        200,
+        "executed: report; cat /etc/passwd",
+        True,
+        "command metacharacter reflection must be flagged",
+    ),
+    SecurityAuditCase(
+        "path_safe_rejected",
+        "path",
+        400,
+        '{"error":"invalid path"}',
+        False,
+        "safe endpoint rejected traversal",
+    ),
+    SecurityAuditCase(
+        "path_traversal_reflected",
+        "path",
+        200,
+        '{"path":"../../etc/passwd"}',
+        True,
+        "accepted traversal path must be flagged",
+    ),
+    SecurityAuditCase(
+        "auth_rejects_missing_token",
+        "auth",
+        401,
+        '{"error":"unauthorized"}',
+        False,
+        "protected route rejects missing token",
+    ),
+    SecurityAuditCase(
+        "auth_bypass_allows_missing_token",
+        "auth",
+        200,
+        '{"admin":true}',
+        True,
+        "protected route accepted missing token",
+    ),
+    SecurityAuditCase(
+        "profile_safe_redacted",
+        "sensitive",
+        200,
+        '{"username":"alice","email":"alice@example.test"}',
+        False,
+        "profile-safe omits secrets",
+    ),
+    SecurityAuditCase(
+        "profile_leaks_secret",
+        "sensitive",
+        200,
+        '{"username":"alice","password":"supersecret123","api_key":"key-abcdef"}',
+        True,
+        "profile-vuln leaks password and api key",
+    ),
+    SecurityAuditCase(
+        "crlf_reflected",
+        "crlf",
+        200,
+        "raw_location=http://example.com\r\nX-Injected-Marker: hacked",
+        True,
+        "CRLF marker reflected in response body",
+    ),
+)
+
+
+def oracle_security_audit(case: SecurityAuditCase) -> bool:
+    """Correct pure auditor over frozen security observations."""
+    body = case.body
+    low = body.lower()
+    if case.vector == "sqli":
+        return any(pattern.search(body) for pattern in SQL_REFLECTION_PATTERNS)
+    if case.vector == "xss":
+        return bool(re.search(r"<\s*script|onerror\s*=|javascript:", body, re.I))
+    if case.vector == "command":
+        return any(pattern.search(body) for pattern in CMD_REFLECTION_PATTERNS)
+    if case.vector == "path":
+        return case.status_code == 200 and ("../" in body or "..\\" in body or "%2e" in low)
+    if case.vector == "auth":
+        return case.status_code < 400
+    if case.vector == "sensitive":
+        return any(pattern.search(body) for _label, pattern in SENSITIVE_PATTERNS)
+    if case.vector == "crlf":
+        return "\r\n" in body or CRLF_MARKER in body
+    raise ValueError(f"unknown security vector: {case.vector}")
+
+
+def status_only_auditor(case: SecurityAuditCase) -> bool:
+    """BUG: treats HTTP error status as the only vulnerability signal."""
+    return case.status_code >= 400
+
+
+def secret_blind_auditor(case: SecurityAuditCase) -> bool:
+    """BUG: drops sensitive-data exposure detection entirely."""
+    if case.vector == "sensitive":
+        return False
+    return oracle_security_audit(case)
+
+
+def escape_blind_xss_auditor(case: SecurityAuditCase) -> bool:
+    """BUG: unescapes HTML before XSS matching, false-flagging escaped output."""
+    if case.vector == "xss":
+        return bool(re.search(r"<\s*script|onerror\s*=|javascript:", html.unescape(case.body), re.I))
+    return oracle_security_audit(case)
+
+
+def prove(impl: Callable[[SecurityAuditCase], bool]) -> bool:
+    """True iff the auditor diverges from any frozen case decision."""
+    for case in SECURITY_AUDIT_CORPUS:
+        try:
+            if bool(impl(case)) != case.should_flag:
+                return True
+        except Exception:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_security_audit,
+    mutants=(
+        Mutant("status_only_auditor", status_only_auditor,
+               "misses reflected 200-status vulnerabilities and false-flags expected rejects"),
+        Mutant("secret_blind_auditor", secret_blind_auditor,
+               "misses password/api-key exposure"),
+        Mutant("escape_blind_xss_auditor", escape_blind_xss_auditor,
+               "treats escaped HTML as raw script execution"),
+    ),
+    corpus_size=len(SECURITY_AUDIT_CORPUS),
+    kind="auditor",
+    notes="Frozen security observation corpus for scanner verdict drift.",
+)
+
+
+def list_scenarios() -> list[str]:
+    return [case.name for case in SECURITY_AUDIT_CORPUS]
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
@@ -1167,16 +1365,24 @@ def _run_self_test(verbose: bool = False) -> int:
         s = SecurityScanner(base_url).run().summary()
     finally:
         server.stop()
-    checks = [
-        ("scanner ran tests", s["total_tests"] >= 1, f"tests={s['total_tests']}"),
-        ("found planted vulnerabilities", s["vulnerabilities_found"] >= 1,
-         f"vulns={s['vulnerabilities_found']}"),
-    ]
-    failures = [n for n, ok, _ in checks if not ok]
-    for n, ok, d in checks:
-        print(f"  [{'PASS' if ok else 'FAIL'}] {n}  ({d})")
-    print(f"\n  {len(checks) - len(failures)}/{len(checks)} checks passed")
-    return 0 if not failures else 1
+    report = Report("security/security")
+    report.record("scanner_ran_tests", s["total_tests"] >= 1, detail=f"tests={s['total_tests']}")
+    report.record(
+        "found_planted_vulnerabilities",
+        s["vulnerabilities_found"] >= 1,
+        detail=f"vulns={s['vulnerabilities_found']}",
+    )
+    report.record(
+        "frozen_corpus_has_safe_and_bad",
+        any(not c.should_flag for c in SECURITY_AUDIT_CORPUS)
+        and any(c.should_flag for c in SECURITY_AUDIT_CORPUS),
+        detail=f"cases={len(SECURITY_AUDIT_CORPUS)}",
+    )
+    for case in SECURITY_AUDIT_CORPUS:
+        report.add(f"oracle_security_audit:{case.name}", case.should_flag,
+                   oracle_security_audit(case), detail=case.note)
+    report.assert_teeth(TEETH)
+    return report.emit()
 
 
 def main() -> None:
@@ -1199,7 +1405,16 @@ def main() -> None:
         action="store_true",
         help="Run built-in scenarios and exit",
     )
+    parser.add_argument(
+        "--list-scenarios",
+        action="store_true",
+        help="List frozen TEETH scenario names and exit",
+    )
     args = parser.parse_args()
+
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return
 
     if args.self_test:
         raise SystemExit(_run_self_test())
