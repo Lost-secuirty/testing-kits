@@ -114,8 +114,9 @@ Current language rule: "77 harnesses" describes inventory size. "51 required / 1
 Mapping is explanatory documentation, not command authority. It connects each harness to its failure class, logic shape, proof status, outside testing pattern, and limits.
 
 - Mapping Batch 1 covers `core/stress`, `core/api`, `core/db`, `core/scraper`, and `core/cli` in `docs/HARNESS_MAP.md`.
-- `core/stress` is mapped as current `pending` state, not overstated as TEETH proof.
-- `core/api`, `core/db`, `core/scraper`, and `core/cli` are mapped as current `required` state.
+- Mapping Batch 2 covers `security/security`, `core/chaos`, `core/memory`, `core/concurrency`, and `core/fuzz` in `docs/HARNESS_MAP.md`.
+- `core/stress` and `security/security` are mapped as current `pending` state, not overstated as TEETH proof.
+- `core/api`, `core/db`, `core/scraper`, `core/cli`, `core/chaos`, `core/memory`, `core/concurrency`, and `core/fuzz` are mapped as current `required` state.
 - All mapping entries are subject to change as source, tests, TEETH status, or repo scope changes.
 
 ## Next-batch candidates

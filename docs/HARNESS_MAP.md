@@ -120,3 +120,101 @@ Docs checked in this batch:
 - `docs/HARNESS_MAP.md`
 - `docs/LEARNINGS.md`
 - `llms.txt`
+
+## Batch 2 — security and resilience foundation harnesses
+
+Batch 2 covers harnesses #6-#10 in inventory order. It also carries forward the Batch 1 review lesson by keeping batch metadata out of individual dossiers.
+
+### 6. Security Test Harness
+
+- Name: Security Test Harness
+- Path: `harnesses/security/security_test_harness.py`
+- Category: `security`
+- Failure class: injection sink exposure, reflected XSS, command injection, path traversal, header/CRLF injection, authentication bypass, sensitive-data exposure.
+- Logic shape: `AND`: scanners, mock endpoints, result status, severity, evidence, and remediation fields must stay observable. `NOT`: known unsafe payloads must not be reflected or accepted by safe endpoints. `XNOR`: scanner results should match the fixture-defined safe/vulnerable endpoint split.
+- Good case: safe endpoint variants sanitize, reject, or omit dangerous input; protected endpoints require the valid token; profile-safe omits password/API-key fields.
+- Planted-bad case: none in TEETH yet. Current evidence is self-test/paired-test coverage over safe/vulnerable fixtures, not planted-mutant proof.
+- Oracle / proof target: scanner verdicts over the built-in mock server fixtures for SQL injection, XSS, command injection, path traversal, CRLF/header injection, auth, and sensitive-data exposure.
+- External testing pattern: web application security testing / attack-payload regression testing.
+- Current outside reference: OWASP WSTG lists web-application security testing areas including authentication, authorization, input validation, SQL injection, command injection, HTTP response splitting, host-header injection, and API testing. <https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/>
+- Proof status: `pending` as of current `cards/teeth_ratchet.json`; subject to change.
+- Commands: `python harnesses/security/security_test_harness.py --self-test`; `python -m unittest tests.security.test_security_test_harness`; `make test-security`; `make proof` for current global proof state.
+- Known limits: does not prove production security, scanner completeness, exploitability, authz correctness, CSRF coverage, browser execution, or absence of vulnerabilities. Pending status means no TEETH mutant proof should be claimed.
+- Related harnesses: `security/appsec`, `security/authz`, `security/jwt`, `security/pii_redaction`, `security/cwe_kev_regression`, `core/api`, `core/fuzz`.
+
+### 7. Chaos / Resilience Test Harness
+
+- Name: Chaos / Resilience Test Harness
+- Path: `harnesses/core/chaos_test_harness.py`
+- Category: `core`
+- Failure class: circuit-breaker threshold error, missing OPEN fast-reject, faulty recovery edge, resilience-state-machine drift.
+- Logic shape: `AND`: the breaker must trip on exact threshold, reject while open, recover through half-open, and re-open on failed probe. `NOT`: OPEN state must not serve calls before cooldown. `XNOR`: observed `(state, was_rejected)` timeline must match frozen literal expectations.
+- Good case: `oracle_run` reproduces every `BREAKER_CORPUS` timeline and the self-test asserts TEETH.
+- Planted-bad case: `trips_one_late` and `serves_while_open`.
+- Oracle / proof target: `BREAKER_CORPUS`; `prove()` compares deterministic circuit-breaker timelines against hand-computed literal observations using an injected integer step-clock, not real time or sockets.
+- External testing pattern: chaos/resilience testing with controlled fault experiments and steady-state disruption checks.
+- Current outside reference: Principles of Chaos Engineering defines chaos engineering as controlled experimentation to build confidence under turbulent production conditions and describes steady-state hypotheses plus real-world event variables. <https://principlesofchaos.org/>
+- Proof status: `required`; subject to change if the TEETH ratchet or source changes.
+- Commands: `python harnesses/core/chaos_test_harness.py --self-test`; `python harnesses/core/chaos_test_harness.py --list-scenarios`; `python -m unittest tests.core.test_chaos_test_harness`; `make test-core`; `make proof`.
+- Known limits: does not prove distributed-system resilience, production blast-radius safety, real dependency behavior, traffic realism, or SLO durability. TEETH proves only the fixture-defined breaker transition corpus and planted breaker defects.
+- Related harnesses: `core/stress`, `core/network`, `core/ratelimit`, `core/circuitbreaker`, `core/tracing`, `core/queue`.
+
+### 8. Memory / Soak Test Harness
+
+- Name: Memory / Soak Test Harness
+- Path: `harnesses/core/memory_test_harness.py`
+- Category: `core`
+- Failure class: leak false positive, leak false negative, threshold-boundary error, span-based memory-spike misclassification, resource-counter drift.
+- Logic shape: `AND`: RSS series analysis, threshold handling, object lifecycle accounting, and TEETH swap-check must all hold. `NOT`: noisy-but-flat memory should not be reported as a leak. `XNOR`: leak verdicts must match frozen literal expectations.
+- Good case: `oracle_analyze` reproduces every `LEAK_CORPUS` verdict; object tracker reports an unbalanced created/destroyed count as a leak.
+- Planted-bad case: `threshold_boundary` and `peak_minus_min`.
+- Oracle / proof target: `LEAK_CORPUS`; `prove()` compares deterministic leak verdicts for frozen RSS integer series against hand-derived literals using the shared `TEETH_THRESHOLD`.
+- External testing pattern: memory-allocation tracing and leak-regression testing.
+- Current outside reference: Python `tracemalloc` is documented as a debug tool for tracing memory blocks, allocation tracebacks, per-line allocation statistics, and snapshot differences to detect memory leaks. <https://docs.python.org/3/library/tracemalloc.html>
+- Proof status: `required`; subject to change if the TEETH ratchet or source changes.
+- Commands: `python harnesses/core/memory_test_harness.py --self-test`; `python harnesses/core/memory_test_harness.py --list-scenarios`; `python -m unittest tests.core.test_memory_test_harness`; `make test-core`; `make proof`.
+- Known limits: does not prove production memory stability, allocator behavior across platforms, long soak duration realism, C-extension leaks, or OS-level RSS accuracy. TEETH proves only the frozen leak-regression corpus and lifecycle invariant.
+- Related harnesses: `core/stress`, `core/chaos`, `core/concurrency`, `core/error_path_leak`, `core/hermeticity`.
+
+### 9. Concurrency Test Harness
+
+- Name: Concurrency Test Harness
+- Path: `harnesses/core/concurrency_test_harness.py`
+- Category: `core`
+- Failure class: lost update, missing lock, broken critical section, non-atomic check-then-act, overdraft-style invariant violation.
+- Logic shape: `AND`: lock coverage, read-modify-write atomicity, guarded update, and deterministic schedule replay must all hold. `NAND`: shared mutable state plus missing/broken lock must never produce an accepted final state. `XNOR`: simulated final state must equal frozen literal expectations.
+- Good case: `oracle_impl` preserves increments and refuses overdraft under the forced interleavings.
+- Planted-bad case: `missing_lock_lost_update`, `lock_dropped_before_write`, and `nonatomic_check_then_act_overdraft`.
+- Oracle / proof target: `SCENARIOS`; `prove()` drives single-thread deterministic step programs under frozen adversarial schedules and compares final shared-cell state to hand-computed literals.
+- External testing pattern: concurrency-control and synchronization testing with explicit lock/condition semantics.
+- Current outside reference: Python `threading` documents lock acquisition/release behavior, the need to pair acquires/releases, deadlock risk, and condition-variable wait/notify behavior under an associated lock. <https://docs.python.org/3/library/threading.html>
+- Proof status: `required`; subject to change if the TEETH ratchet or source changes.
+- Commands: `python harnesses/core/concurrency_test_harness.py --self-test`; `python harnesses/core/concurrency_test_harness.py --list-scenarios`; `python -m unittest tests.core.test_concurrency_test_harness`; `make test-core`; `make proof`.
+- Known limits: does not prove real scheduler coverage, all data races, CPU memory-model behavior, async concurrency, multiprocessing, or deadlock freedom in production. TEETH intentionally avoids real thread timing and proves only frozen interleavings.
+- Related harnesses: `core/memory`, `core/chaos`, `core/db`, `core/queue`, `core/pipeline`, `core/hermeticity`.
+
+### 10. Fuzz Test Harness
+
+- Name: Fuzz Test Harness
+- Path: `harnesses/core/fuzz_test_harness.py`
+- Category: `core`
+- Failure class: crash on malformed input, fixed-width integer overflow, unescaped delimiter handling, empty/None off-by-one/null-dereference defect.
+- Logic shape: `AND`: frozen input replay, crash recording, crash deduplication, and TEETH swap-check must all hold. `NOT`: robust target must not crash on any frozen adversarial input. `XNOR`: crash/no-crash verdict must match the frozen corpus expectation.
+- Good case: `oracle_target` survives every `_FUZZ_CORPUS` input and deterministic replay produces the same crash count.
+- Planted-bad case: `int32_overflow`, `unescaped_delimiter`, and `empty_off_by_one`.
+- Oracle / proof target: `_FUZZ_CORPUS`; `prove()` replays a fixed list through `FuzzRunner.fuzz_with_inputs` and treats any recorded crash as the harness flagging the implementation.
+- External testing pattern: fuzz testing / malformed-input crash discovery.
+- Current outside reference: OWASP describes fuzzing as automatically providing unexpected, malformed, or semi-malformed inputs to identify bugs, vulnerabilities, or unexpected behavior. <https://owasp.org/www-community/Fuzzing>
+- Proof status: `required`; subject to change if the TEETH ratchet or source changes.
+- Commands: `python harnesses/core/fuzz_test_harness.py --self-test`; `python harnesses/core/fuzz_test_harness.py --list-scenarios`; `python -m unittest tests.core.test_fuzz_test_harness`; `make test-core`; `make proof`.
+- Known limits: does not prove exhaustive input safety, coverage-guided depth, parser grammar coverage, sanitizer coverage, or absence of crashes beyond the frozen corpus and configured generators. TEETH proves only deterministic replay over pinned adversarial inputs.
+- Related harnesses: `core/property`, `core/mutation`, `core/scraper`, `security/security`, `security/appsec`, `security/upload`.
+
+## Batch 2 closeout
+
+Docs checked in this batch:
+
+- `HARNESS_ROADMAP.md`
+- `docs/HARNESS_READING_GUIDE.md`
+- `docs/HARNESS_MAP.md`
+- `docs/LEARNINGS.md`
