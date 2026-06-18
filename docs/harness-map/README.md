@@ -23,6 +23,24 @@ Going forward, new mapping batches should live in small batch files that can be 
 
 - Batch 7: inventory #31-#35. Current location: `docs/harness-map/batch-07-pagination-a11y-agentic-supplychain-upload.md`.
 
+- Batch 8: inventory #36-#40. Current location: `docs/harness-map/batch-08-appsec-srs-clinical-lockout-backup.md`.
+
+- Batch 9: inventory #41-#43. Current location: `docs/harness-map/batch-09-auditlog-expiry-partial-fill.md`.
+
+- Batch 10: inventory #44-#48. Current location: `docs/harness-map/batch-10-null-error-leak-feature-flag-clock-skew-schema.md`.
+
+- Batch 11: inventory #49-#53. Current location: `docs/harness-map/batch-11-dormant-cardinality-hermeticity-drug-prompt.md`.
+
+- Batch 12: inventory #54-#58. Current location: `docs/harness-map/batch-12-tracing-queue-search-rag-graphql.md`.
+
+- Batch 13: inventory #59-#63. Current location: `docs/harness-map/batch-13-payments-circuitbreaker-jwt-pii-agent-eval.md`.
+
+- Batch 14: inventory #64-#68. Current location: `docs/harness-map/batch-14-iot-grpc-browser-drift-cwe-kev.md`.
+
+- Batch 15: inventory #69-#73. Current location: `docs/harness-map/batch-15-agent-memory-game-rng-canvas-complexity.md`.
+
+- Batch 16: inventory #74-#77. Current location: `docs/harness-map/batch-16-ci-check-digit-diff-secret-lexical-date.md`.
+
 ## Preferred future layout
 
 Use small files such as:
