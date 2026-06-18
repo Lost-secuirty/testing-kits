@@ -21,16 +21,27 @@ Port: 19040 (dynamic, picked at runtime)
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import json
 import socket
+import sys
 import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path as _Path
 from typing import Any
+
+if __package__ in {None, ""}:
+    _ROOT = _Path(__file__).resolve().parents[2]
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+
+from harnesses._teeth import Mutant, Report, Teeth
 
 # ---------------------------------------------------------------------------
 # Data Classes
@@ -64,6 +75,171 @@ class RetryPolicy:
         """Return the sleep duration for the given attempt number (0-indexed)."""
         raw = self.base_delay * (self.multiplier ** attempt)
         return min(raw, self.max_delay)
+
+
+# ---------------------------------------------------------------------------
+# TEETH: frozen network-analysis corpus + planted analyzer defects
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class NetworkAuditCase:
+    """One frozen network observation with literal expected analysis labels."""
+
+    name: str
+    kind: str
+    status_code: int = 200
+    declared_length: int | None = None
+    body: bytes = b""
+    retry_policy: RetryPolicy | None = None
+    pool_max_size: int = 0
+    checkout_count: int = 0
+    dns_success: bool = False
+    error: str | None = None
+    expected_events: tuple[str, ...] = ()
+
+
+NETWORK_AUDIT_CORPUS: tuple[NetworkAuditCase, ...] = (
+    NetworkAuditCase(
+        name="protocol_ok",
+        kind="protocol",
+        status_code=200,
+        declared_length=15,
+        body=b'{"status":"ok"}',
+        expected_events=("protocol_ok",),
+    ),
+    NetworkAuditCase(
+        name="content_length_mismatch",
+        kind="protocol",
+        status_code=200,
+        declared_length=42,
+        body=b"pong",
+        expected_events=("content_length_mismatch",),
+    ),
+    NetworkAuditCase(
+        name="retry_backoff_capped",
+        kind="retry",
+        retry_policy=RetryPolicy(
+            base_delay=0.1,
+            multiplier=3.0,
+            max_delay=1.0,
+            max_attempts=5,
+        ),
+        expected_events=(
+            "delay:0.100",
+            "delay:0.300",
+            "delay:0.900",
+            "delay:1.000",
+        ),
+    ),
+    NetworkAuditCase(
+        name="pool_denies_over_capacity",
+        kind="pool",
+        pool_max_size=2,
+        checkout_count=3,
+        expected_events=("pool_granted:2", "pool_denied:1"),
+    ),
+    NetworkAuditCase(
+        name="dns_error_result",
+        kind="dns",
+        dns_success=False,
+        error="Name or service not known",
+        expected_events=("dns_error_returned",),
+    ),
+)
+
+
+def oracle_network_audit(case: NetworkAuditCase) -> tuple[str, ...]:
+    """Correct pure analyzer over frozen network observations."""
+    if case.kind == "protocol":
+        if case.status_code != 200:
+            return ("bad_status",)
+        if case.declared_length is None:
+            return ("missing_content_length",)
+        if case.declared_length != len(case.body):
+            return ("content_length_mismatch",)
+        return ("protocol_ok",)
+
+    if case.kind == "retry":
+        if case.retry_policy is None:
+            raise ValueError("retry case missing retry_policy")
+        return tuple(
+            f"delay:{case.retry_policy.delay_for(i):.3f}"
+            for i in range(max(0, case.retry_policy.max_attempts - 1))
+        )
+
+    if case.kind == "pool":
+        if case.pool_max_size < 0 or case.checkout_count < 0:
+            raise ValueError("pool sizes must be non-negative")
+        granted = min(case.pool_max_size, case.checkout_count)
+        denied = max(0, case.checkout_count - granted)
+        return (f"pool_granted:{granted}", f"pool_denied:{denied}")
+
+    if case.kind == "dns":
+        if case.dns_success:
+            return ("dns_success",)
+        if case.error:
+            return ("dns_error_returned",)
+        return ("dns_error_missing",)
+
+    raise ValueError(f"unknown network case kind: {case.kind}")
+
+
+def ignores_content_length(case: NetworkAuditCase) -> tuple[str, ...]:
+    """BUG: treats any HTTP 200 response as protocol-ok."""
+    if case.kind == "protocol" and case.status_code == 200:
+        return ("protocol_ok",)
+    return oracle_network_audit(case)
+
+
+def linear_backoff_planner(case: NetworkAuditCase) -> tuple[str, ...]:
+    """BUG: computes retry delay linearly instead of exponentially."""
+    if case.kind == "retry":
+        if case.retry_policy is None:
+            raise ValueError("retry case missing retry_policy")
+        return tuple(
+            f"delay:{min(case.retry_policy.base_delay * (i + 1), case.retry_policy.max_delay):.3f}"
+            for i in range(max(0, case.retry_policy.max_attempts - 1))
+        )
+    return oracle_network_audit(case)
+
+
+def unbounded_pool_planner(case: NetworkAuditCase) -> tuple[str, ...]:
+    """BUG: grants every checkout request and never reports pool exhaustion."""
+    if case.kind == "pool":
+        return (f"pool_granted:{case.checkout_count}", "pool_denied:0")
+    return oracle_network_audit(case)
+
+
+def prove(impl: Callable[[NetworkAuditCase], tuple[str, ...]]) -> bool:
+    """True iff the analyzer diverges from any frozen literal expectation."""
+    for case in NETWORK_AUDIT_CORPUS:
+        try:
+            if tuple(impl(case)) != case.expected_events:
+                return True
+        except Exception:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_network_audit,
+    mutants=(
+        Mutant("ignores_content_length", ignores_content_length,
+               "misses declared/body content-length mismatches"),
+        Mutant("linear_backoff_planner", linear_backoff_planner,
+               "uses linear retry delay instead of exponential backoff with cap"),
+        Mutant("unbounded_pool_planner", unbounded_pool_planner,
+               "allows over-capacity pool checkouts"),
+    ),
+    corpus_size=len(NETWORK_AUDIT_CORPUS),
+    kind="oracle_swap",
+    notes="Frozen protocol/retry/pool/DNS analysis corpus.",
+)
+
+
+def list_scenarios() -> list[str]:
+    return [case.name for case in NETWORK_AUDIT_CORPUS]
 
 
 # ---------------------------------------------------------------------------
@@ -918,6 +1094,66 @@ def run_all() -> NetworkReport:
     return report
 
 
-if __name__ == "__main__":
+def _network_report_to_dict(report: NetworkReport) -> dict[str, Any]:
+    return {
+        "protocol_results": report.protocol_results,
+        "timeout_results": report.timeout_results,
+        "retry_results": report.retry_results,
+        "payload_results": report.payload_results,
+        "pool_results": report.pool_results,
+        "shutdown_results": report.shutdown_results,
+        "dns_results": report.dns_results,
+        "total_tests": report.total_tests,
+        "passed": report.passed,
+    }
+
+
+def _run_self_test(as_json: bool = False) -> int:
+    report = Report("core/network")
+    live = run_all()
+    report.record("protocol_checks_present", len(live.protocol_results) >= 1)
+    report.record("retry_checks_present", len(live.retry_results) >= 1)
+    report.record("pool_checks_present", len(live.pool_results) >= 1)
+    report.record("dns_checks_present", len(live.dns_results) >= 1)
+    report.record(
+        "local_mock_protocol_green",
+        all(live.protocol_results.values()),
+        detail=f"protocol={live.protocol_results}",
+    )
+    for case in NETWORK_AUDIT_CORPUS:
+        report.add(
+            f"oracle_network_audit:{case.name}",
+            list(case.expected_events),
+            list(oracle_network_audit(case)),
+        )
+    report.assert_teeth(TEETH)
+    return report.emit(as_json=as_json)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Network / Protocol Test Harness")
+    parser.add_argument("--self-test", action="store_true",
+                        help="Run built-in scenarios and exit")
+    parser.add_argument("--list-scenarios", action="store_true",
+                        help="List frozen TEETH scenario names and exit")
+    parser.add_argument("--json", action="store_true",
+                        help="Output self-test or run-all result as JSON")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
+
+    if args.self_test:
+        return _run_self_test(as_json=args.json)
+
     report = run_all()
-    print(report.summary())
+    if args.json:
+        print(json.dumps(_network_report_to_dict(report), indent=2, default=repr))
+    else:
+        print(report.summary())
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

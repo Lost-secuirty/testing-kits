@@ -10,7 +10,7 @@ Batch 4 covers harnesses #16-#20:
 - `core/pipeline`
 - `core/datetime`
 
-Proof status is tied to the current `cards/teeth_ratchet.json` state. `core/network` is mapped as `pending`; the other four are mapped as `required`.
+Proof status is tied to the current `cards/teeth_ratchet.json` state. All five Batch 4 harnesses are mapped as `required`; this remains current-state documentation and is subject to change as the harnesses evolve.
 
 ## 16. Configuration Validation Test Harness
 
@@ -52,15 +52,15 @@ Proof status is tied to the current `cards/teeth_ratchet.json` state. `core/netw
 - Path: `harnesses/core/network_test_harness.py`
 - Category: `core`
 - Failure class: protocol-format mismatch, timeout handling gap, retry/backoff drift, payload-size handling failure, connection-pool exhaustion/reuse bug, graceful-shutdown race, DNS failure crash.
-- Logic shape: `AND`: protocol checks, timeout checks, retry checks, payload checks, pool checks, shutdown checks, and DNS failure handling must all be observable. `NOT`: invalid hostnames and network errors must not crash the harness. `XNOR`: report fields should match the fixture-defined network scenario outcomes.
-- Good case: `run_all()` records protocol, timeout, retry, payload, pool, shutdown, and DNS checks in a `NetworkReport`; invalid hosts return failed `ConnectionResult` values instead of uncaught exceptions.
-- Planted-bad case: none in TEETH yet. Current evidence is self-test/paired-test style network behavior coverage, not planted-mutant TEETH proof.
-- Oracle / proof target: `NetworkReport` over the built-in mock server and network helper classes: `ProtocolTester`, `TimeoutTester`, `RetryTester`, `PayloadTester`, `ConnectionPoolTester`, `ShutdownTester`, and `DNSTester`.
+- Logic shape: `AND`: protocol checks, timeout checks, retry checks, payload checks, pool checks, shutdown checks, DNS failure handling, and the pure TEETH corpus must all be observable. `NOT`: invalid hostnames and network errors must not crash the harness. `XNOR`: frozen protocol/retry/pool/DNS analysis events should match the fixture-defined expected labels.
+- Good case: `run_all()` records protocol, timeout, retry, payload, pool, shutdown, and DNS checks in a `NetworkReport`; invalid hosts return failed `ConnectionResult` values instead of uncaught exceptions; `oracle_network_audit` matches every `NETWORK_AUDIT_CORPUS` event tuple.
+- Planted-bad case: `ignores_content_length`, `linear_backoff_planner`, and `unbounded_pool_planner`.
+- Oracle / proof target: `NETWORK_AUDIT_CORPUS`; `prove()` compares pure protocol content-length, exponential retry backoff, connection-pool capacity, and DNS failure labels against hand-authored literals. The live local mock-server run remains self-test/paired-test evidence.
 - External testing pattern: protocol/network resilience fixture testing.
 - Current outside reference: Python `socket` documents low-level networking and timeout behavior; this maps to the harness's connection timeout, listener readiness, DNS failure, and connection lifecycle checks. <https://docs.python.org/3/library/socket.html>
-- Proof status: `pending` as of current `cards/teeth_ratchet.json`; subject to change.
-- Commands: `python harnesses/core/network_test_harness.py`; `python -m unittest tests.core.test_network_test_harness`; `make test-core`; `make proof` for current global proof state.
-- Known limits: does not prove production network reliability, kernel/socket behavior across platforms, packet loss, TLS correctness, remote DNS behavior, proxy behavior, or distributed timeout policy. Pending status means no TEETH mutant proof should be claimed.
+- Proof status: `required`; subject to change if the TEETH ratchet or source changes.
+- Commands: `python harnesses/core/network_test_harness.py --self-test`; `python harnesses/core/network_test_harness.py --list-scenarios`; `python -m unittest tests.core.test_network_test_harness tests.core.test_network_proof`; `make test-core`; `make proof`.
+- Known limits: does not prove production network reliability, kernel/socket behavior across platforms, packet loss, TLS correctness, remote DNS behavior, proxy behavior, or distributed timeout policy. TEETH proves only the frozen protocol/retry/pool/DNS corpus and planted analyzer defects as of this batch.
 - Related harnesses: `core/chaos`, `core/stress`, `core/ratelimit`, `core/circuitbreaker`, `core/webhook`, `core/grpc_contract`.
 
 ## 19. Data Pipeline / ETL Test Harness

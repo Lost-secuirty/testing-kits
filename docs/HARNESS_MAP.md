@@ -131,15 +131,15 @@ Batch 2 covers harnesses #6-#10 in inventory order. It also carries forward the 
 - Path: `harnesses/security/security_test_harness.py`
 - Category: `security`
 - Failure class: injection sink exposure, reflected XSS, command injection, path traversal, header/CRLF injection, authentication bypass, sensitive-data exposure.
-- Logic shape: `AND`: scanners, mock endpoints, result status, severity, evidence, and remediation fields must stay observable. `NOT`: known unsafe payloads must not be reflected or accepted by safe endpoints. `XNOR`: scanner results should match the fixture-defined safe/vulnerable endpoint split.
-- Good case: safe endpoint variants sanitize, reject, or omit dangerous input; protected endpoints require the valid token; profile-safe omits password/API-key fields.
-- Planted-bad case: none in TEETH yet. Current evidence is self-test/paired-test coverage over safe/vulnerable fixtures, not planted-mutant proof.
-- Oracle / proof target: scanner verdicts over the built-in mock server fixtures for SQL injection, XSS, command injection, path traversal, CRLF/header injection, auth, and sensitive-data exposure.
+- Logic shape: `AND`: scanners, mock endpoints, result status, severity, evidence, remediation fields, and the frozen audit corpus must stay observable. `NOT`: known unsafe payloads must not be reflected or accepted by safe endpoints. `XNOR`: pure security-audit verdicts should match the fixture-defined safe/vulnerable split.
+- Good case: safe endpoint variants sanitize, reject, or omit dangerous input; protected endpoints require the valid token; profile-safe omits password/API-key fields; `oracle_security_audit` matches every frozen `SECURITY_AUDIT_CORPUS` decision.
+- Planted-bad case: `status_only_auditor`, `secret_blind_auditor`, and `escape_blind_xss_auditor`.
+- Oracle / proof target: `SECURITY_AUDIT_CORPUS`; `prove()` compares pure audit verdicts for SQL injection, XSS, command injection, path traversal, auth bypass, sensitive-data exposure, and CRLF/header reflection against hand-authored literals. The live mock-server scanner remains self-test/paired-test evidence.
 - External testing pattern: web application security testing / attack-payload regression testing.
 - Current outside reference: OWASP WSTG lists web-application security testing areas including authentication, authorization, input validation, SQL injection, command injection, HTTP response splitting, host-header injection, and API testing. <https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/>
-- Proof status: `pending` as of current `cards/teeth_ratchet.json`; subject to change.
-- Commands: `python harnesses/security/security_test_harness.py --self-test`; `python -m unittest tests.security.test_security_test_harness`; `make test-security`; `make proof` for current global proof state.
-- Known limits: does not prove production security, scanner completeness, exploitability, authz correctness, CSRF coverage, browser execution, or absence of vulnerabilities. Pending status means no TEETH mutant proof should be claimed.
+- Proof status: `required`; subject to change if the TEETH ratchet or source changes.
+- Commands: `python harnesses/security/security_test_harness.py --self-test`; `python harnesses/security/security_test_harness.py --list-scenarios`; `python -m unittest tests.security.test_security_test_harness tests.security.test_security_proof`; `make test-security`; `make proof`.
+- Known limits: does not prove production security, scanner completeness, exploitability, authz correctness, CSRF coverage, browser execution, or absence of vulnerabilities. TEETH proves only the frozen audit corpus and planted auditor defects as of this batch.
 - Related harnesses: `security/appsec`, `security/authz`, `security/jwt`, `security/pii_redaction`, `security/cwe_kev_regression`, `core/api`, `core/fuzz`.
 
 ### 7. Chaos / Resilience Test Harness
@@ -246,15 +246,15 @@ Batch 3 covers harnesses #11-#15 in inventory order. It keeps proof status tied 
 - Path: `harnesses/core/mutation_test_harness.py`
 - Category: `core`
 - Failure class: survived mutant, weak assertion suite, mutation operator blind spot, timeout/error classification drift.
-- Logic shape: `AND`: mutant generation, test execution, result classification, score calculation, and reporting must all remain observable. `NOT`: a killed mutant must not be counted as survived. `XNOR`: generated mutation reports should match the fixture-defined result classification.
-- Good case: `--self-test` mutates a small `classify` function and confirms multiple mutants are generated, at least one mutant is killed, and the mutation score is within `(0, 1]`.
-- Planted-bad case: none in TEETH yet. Current evidence is self-test/paired-test coverage, not planted-mutant TEETH proof.
-- Oracle / proof target: mutation operators over source strings plus `MutationRunner` result classification: `KILLED`, `SURVIVED`, `ERROR`, and `TIMEOUT`.
+- Logic shape: `AND`: mutant generation, test execution, result classification, score calculation, report descriptions, and TEETH swap-check must all remain observable. `NOT`: a surviving mutant must not be counted as killed. `XNOR`: generated mutation summaries should match the frozen source/assertion fixtures.
+- Good case: `--self-test` mutates a small `classify` function and confirms multiple mutants are generated, at least one mutant is killed, and the mutation score is within `(0, 1]`; `oracle_mutation_analyze` matches every `MUTATION_ANALYSIS_CORPUS` literal.
+- Planted-bad case: `no_mutants_analyzer`, `comparison_disabled_analyzer`, and `survivors_counted_as_killed`.
+- Oracle / proof target: `MUTATION_ANALYSIS_CORPUS`; `prove()` compares total/killed/survived/error/timeout counts, rounded mutation score, and mutation descriptions against hand-authored literals for source-string fixtures.
 - External testing pattern: mutation testing for test-suite strength.
 - Current outside reference: mutmut documents Python mutation testing as changing code and checking whether tests fail, exposing test-suite gaps when mutants survive. <https://mutmut.readthedocs.io/en/latest/>
-- Proof status: `pending` as of current `cards/teeth_ratchet.json`; subject to change.
-- Commands: `python harnesses/core/mutation_test_harness.py --self-test`; `python -m unittest tests.core.test_mutation_test_harness`; `make test-core`; `make proof` for current global proof state.
-- Known limits: pending status means no TEETH mutant proof should be claimed. Regex mutation operators do not prove semantic mutation completeness, equivalent-mutant handling, real subprocess isolation, or production-grade sandbox security.
+- Proof status: `required`; subject to change if the TEETH ratchet or source changes.
+- Commands: `python harnesses/core/mutation_test_harness.py --self-test`; `python harnesses/core/mutation_test_harness.py --list-scenarios`; `python -m unittest tests.core.test_mutation_test_harness tests.core.test_mutation_proof`; `make test-core`; `make proof`.
+- Known limits: regex mutation operators do not prove semantic mutation completeness, equivalent-mutant handling, real subprocess isolation, or production-grade sandbox security. TEETH proves only the frozen mutation-analysis corpus and planted analyzer defects as of this batch.
 - Related harnesses: `core/property`, `core/fuzz`, `core/complexity`, `core/ci_workflow_hardening`, `security/supplychain`.
 
 ### 13. Regression & Snapshot Test Harness
