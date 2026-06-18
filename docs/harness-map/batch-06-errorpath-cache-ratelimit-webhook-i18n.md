@@ -6,7 +6,7 @@ This is current-state documentation, not command authority. It maps the source, 
 
 Operating rules remain in `AGENTS.md`, `CLAUDE.md`, and `SECURITY.md`.
 
-Proof status is read from `cards/teeth_ratchet.json` at the time this batch is cut: `core/errorpath` = `required`, `core/cache` = `required`, `core/ratelimit` = `required`, `core/webhook` = `required`, `core/i18n` = `pending`.
+Current proof status is read from `cards/teeth_ratchet.json`: `core/errorpath` = `required`, `core/cache` = `required`, `core/ratelimit` = `required`, `core/webhook` = `required`, `core/i18n` = `required`.
 
 ## 26. Error-Path / Negative Coverage Test Harness
 
@@ -81,16 +81,16 @@ Proof status is read from `cards/teeth_ratchet.json` at the time this batch is c
 - Name: i18n / Unicode / Encoding Test Harness
 - Path: `harnesses/core/i18n_test_harness.py`
 - Category: `core`
-- Failure class: Tests text-handling correctness that AI code routinely botches (distinct from the format-focused Serialization harness #15). Covers encoding round-trips (utf-8/utf-16/latin-1/ascii) with mojibake detection (utf-8 bytes decoded as latin-1), BOM detection/stripping (utf-8-sig, utf-16 LE/BE), surrogate-pair / astral-plane handling (emoji code-point vs UTF-16-unit vs byte counts all differ; lone surrogates flagged), grapheme-vs-code-point counting (ZWJ family emoji: naive `len()`=7 vs grapheme=1), NFC/NFD normalization (byte-unequal but normalize-equal; the un-normalized dedup bug is demonstrated), casefolding (German ß → ss, Turkish dotless-ı trap), byte-safe truncation and East-Asian display width, and RTL/bidi detection including a flagged Trojan-Source bidi-override injection.
-- Logic shape: AND: the current harness, paired tests, and inventory entry must describe the same behavior. NOT: pending status must not be described as TEETH-required proof.
-- Good case: The current pending harness exercises the coverage summarized above; this entry maps that evidence as-is without claiming required TEETH proof.
-- Planted-bad case: none in required TEETH as of this batch; map the current pending evidence as-is.
-- Oracle / proof target: Current proof target: self-test and paired-test evidence visible in the current source, not required TEETH proof.
+- Failure class: Tests text-handling correctness that AI code routinely botches (distinct from the format-focused Serialization harness #15). Covers encoding round-trips (utf-8/utf-16/latin-1/ascii), already-corrupted mojibake detection with a clean accented negative, BOM detection/stripping (utf-8-sig, utf-16 LE/BE), surrogate-pair / astral-plane handling (emoji code-point vs UTF-16-unit vs byte counts all differ; lone surrogates flagged), grapheme-vs-code-point counting (ZWJ family emoji: naive `len()`=7 vs grapheme=1), NFC/NFD normalization (byte-unequal but normalize-equal; the un-normalized dedup bug is demonstrated), casefolding (German ß → ss, Turkish dotless-ı trap), byte-safe truncation and East-Asian display width, and RTL/bidi detection including a flagged Trojan-Source bidi-override injection.
+- Logic shape: AND: Unicode normalization, mojibake detection, grapheme counting, safe truncation, display width, bidi detection, paired tests, and TEETH swap-check must all hold. NOT: byte/code-point-only shortcuts must not pass as equivalent Unicode handling.
+- Good case: `oracle_i18n_audit` matches the frozen `I18N_AUDIT_CORPUS` for NFC/NFD equivalence, mojibake-positive and clean-negative samples, ZWJ graphemes, UTF-8-safe truncation, East-Asian width, and bidi override detection.
+- Planted-bad case: `raw_normalization_auditor`, `generated_mojibake_auditor`, `naive_grapheme_auditor`, `byte_slice_truncation_auditor`, and `bidi_blind_auditor`.
+- Oracle / proof target: Current proof target: `oracle_i18n_audit`, `I18N_AUDIT_CORPUS`.
 - External testing pattern: i18n / unicode / encoding fixture and regression testing.
-- Current outside reference: Python `unicodedata` documents Unicode character database access and normalization support. <https://docs.python.org/3/library/unicodedata.html>
-- Proof status: `pending` as of current `cards/teeth_ratchet.json`; subject to change as source, tests, or ratchet state changes.
-- Commands: `python tools/teeth_check.py harnesses/core/i18n_test_harness.py`; `python harnesses/core/i18n_test_harness.py --self-test`; `python -m unittest tests.core.test_i18n_test_harness`; `make test-core`; `make proof`.
-- Known limits: Does not prove production correctness, exhaustive input coverage, or final harness maturity. This dossier maps current source, tests, and ratchet state as of this batch; it is expected to change. Pending status means no required TEETH proof should be claimed.
+- Current outside reference: Unicode UAX #15 defines normalization forms, and W3C Character Model guidance covers string matching and normalization concerns. <https://www.unicode.org/reports/tr15/> <https://www.w3.org/TR/charmod-norm/>
+- Proof status: `required` as of current `cards/teeth_ratchet.json`; subject to change as source, tests, or ratchet state changes.
+- Commands: `python tools/teeth_check.py harnesses/core/i18n_test_harness.py`; `python harnesses/core/i18n_test_harness.py --self-test`; `python harnesses/core/i18n_test_harness.py --list-scenarios`; `python -m unittest tests.core.test_i18n_test_harness tests.core.test_i18n_proof`; `make test-core`; `make proof`.
+- Known limits: Does not prove production correctness, exhaustive input coverage, locale-complete collation, or final harness maturity. This dossier maps current source, tests, and ratchet state; it is expected to change.
 - Related harnesses: `core/errorpath`, `core/cache`, `core/ratelimit`, `core/webhook`.
 
 ## Batch 6 closeout
@@ -104,4 +104,4 @@ Docs and source surfaces checked for this batch:
 - `docs/harness-map/batch-06-errorpath-cache-ratelimit-webhook-i18n.md`
 - `docs/harness-map/README.md`
 
-Scope note: this PR is docs-only. It does not change harness behavior, tests, workflows, hooks, dependencies, dashboard code, generated status files, TEETH status, or central-map consolidation.
+Scope note: this batch file originated in a docs-only mapping PR. The current teeth-campaign update changes `core/i18n` source/tests/cards and refreshes this dossier to the new required ratchet state.

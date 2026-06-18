@@ -35,13 +35,22 @@ import sys
 import threading
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path as _Path
 from typing import Any
 from urllib.parse import urlparse
+
+if __package__ in {None, ""}:
+    _ROOT = _Path(__file__).resolve().parents[2]
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+
+from harnesses._teeth import Mutant, Report, Teeth
 
 # ============================================================
 # CONFIGURATION & DATA CLASSES
@@ -287,6 +296,206 @@ def resolve_body(body: dict | None, seq: int) -> bytes | None:
     raw = raw.replace("{{TIMESTAMP}}", datetime.now(timezone.utc).isoformat())
     raw = raw.replace("{{SEQ}}", str(seq))
     return raw.encode("utf-8")
+
+
+# ============================================================
+# TEETH: frozen stress-metric corpus + planted analyzer defects
+# ============================================================
+
+REQUESTS_ONE = "requests:1"
+
+
+@dataclass(frozen=True)
+class StressMetricCase:
+    """One frozen stress observation with hand-authored metric events."""
+
+    name: str
+    results: tuple[RequestResult, ...] = ()
+    tasks: tuple[TaskDef, ...] = ()
+    expected_events: tuple[str, ...] = ()
+
+
+def _result(
+    *,
+    task_name: str,
+    status: int,
+    latency_ms: float,
+    scheduled_at: float,
+    sent_at: float,
+    completed_at: float,
+    error: str | None = None,
+) -> RequestResult:
+    return RequestResult(
+        task_name=task_name,
+        method="GET",
+        url="https://example.invalid/",
+        status=status,
+        latency_ms=latency_ms,
+        scheduled_at=scheduled_at,
+        sent_at=sent_at,
+        completed_at=completed_at,
+        error=error,
+    )
+
+
+STRESS_METRIC_CORPUS: tuple[StressMetricCase, ...] = (
+    StressMetricCase(
+        name="corrected_latency_includes_scheduler_lag",
+        results=(
+            _result(
+                task_name="read",
+                status=200,
+                latency_ms=50.0,
+                scheduled_at=0.00,
+                sent_at=0.20,
+                completed_at=0.25,
+            ),
+        ),
+        expected_events=(
+            REQUESTS_ONE,
+            "errors:0",
+            "max_corrected_ms:250.0",
+            "p95_corrected_ms:250.0",
+        ),
+    ),
+    StressMetricCase(
+        name="http_status_counts_as_error",
+        results=(
+            _result(
+                task_name="write",
+                status=500,
+                latency_ms=20.0,
+                scheduled_at=0.00,
+                sent_at=0.00,
+                completed_at=0.02,
+            ),
+        ),
+        expected_events=(
+            REQUESTS_ONE,
+            "errors:1",
+            "max_corrected_ms:20.0",
+            "p95_corrected_ms:20.0",
+        ),
+    ),
+    StressMetricCase(
+        name="connection_error_counts_as_error",
+        results=(
+            _result(
+                task_name="read",
+                status=0,
+                latency_ms=5.0,
+                scheduled_at=0.00,
+                sent_at=0.00,
+                completed_at=0.005,
+                error="connection_refused",
+            ),
+        ),
+        expected_events=(
+            REQUESTS_ONE,
+            "errors:1",
+            "max_corrected_ms:5.0",
+            "p95_corrected_ms:5.0",
+        ),
+    ),
+    StressMetricCase(
+        name="weighted_scenario_expansion",
+        tasks=(
+            TaskDef(name="read", method="GET", path="/", weight=3),
+            TaskDef(name="write", method="POST", path="/api", weight=1),
+        ),
+        expected_events=(
+            "weighted_total:4",
+            "task:read:3",
+            "task:write:1",
+        ),
+    ),
+)
+
+
+def oracle_stress_audit(case: StressMetricCase) -> tuple[str, ...]:
+    """Correct pure analyzer for stress-metric observations."""
+    if case.tasks:
+        expanded = build_weighted_task_list(list(case.tasks))
+        events = [f"weighted_total:{len(expanded)}"]
+        counts: dict[str, int] = defaultdict(int)
+        for task in expanded:
+            counts[task.name] += 1
+        events.extend(f"task:{name}:{counts[name]}" for name in sorted(counts))
+        return tuple(events)
+
+    latencies = [r.corrected_latency_ms for r in case.results]
+    errors = sum(1 for r in case.results if r.error or r.status >= 400)
+    return (
+        f"requests:{len(case.results)}",
+        f"errors:{errors}",
+        f"max_corrected_ms:{max(latencies) if latencies else 0.0:.1f}",
+        f"p95_corrected_ms:{MetricsCollector._percentile(latencies, 95):.1f}",
+    )
+
+
+def raw_latency_auditor(case: StressMetricCase) -> tuple[str, ...]:
+    """BUG: uses raw request duration and misses scheduler lag."""
+    if case.tasks:
+        return oracle_stress_audit(case)
+    latencies = [r.latency_ms for r in case.results]
+    errors = sum(1 for r in case.results if r.error or r.status >= 400)
+    return (
+        f"requests:{len(case.results)}",
+        f"errors:{errors}",
+        f"max_corrected_ms:{max(latencies) if latencies else 0.0:.1f}",
+        f"p95_corrected_ms:{MetricsCollector._percentile(latencies, 95):.1f}",
+    )
+
+
+def status_only_error_auditor(case: StressMetricCase) -> tuple[str, ...]:
+    """BUG: counts HTTP failures but misses transport errors."""
+    if case.tasks:
+        return oracle_stress_audit(case)
+    latencies = [r.corrected_latency_ms for r in case.results]
+    errors = sum(1 for r in case.results if r.status >= 400)
+    return (
+        f"requests:{len(case.results)}",
+        f"errors:{errors}",
+        f"max_corrected_ms:{max(latencies) if latencies else 0.0:.1f}",
+        f"p95_corrected_ms:{MetricsCollector._percentile(latencies, 95):.1f}",
+    )
+
+
+def equal_weight_auditor(case: StressMetricCase) -> tuple[str, ...]:
+    """BUG: treats every task as weight=1, distorting load mix."""
+    if not case.tasks:
+        return oracle_stress_audit(case)
+    events = [f"weighted_total:{len(case.tasks)}"]
+    events.extend(f"task:{task.name}:1" for task in sorted(case.tasks, key=lambda t: t.name))
+    return tuple(events)
+
+
+def prove(impl: Callable[[StressMetricCase], tuple[str, ...]]) -> bool:
+    """True iff the analyzer diverges from any frozen stress metric case."""
+    for case in STRESS_METRIC_CORPUS:
+        try:
+            if tuple(impl(case)) != case.expected_events:
+                return True
+        except Exception:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_stress_audit,
+    mutants=(
+        Mutant("raw_latency_auditor", raw_latency_auditor,
+               "misses coordinated omission by ignoring scheduled send time"),
+        Mutant("status_only_error_auditor", status_only_error_auditor,
+               "misses transport-level failures with status 0"),
+        Mutant("equal_weight_auditor", equal_weight_auditor,
+               "ignores weighted scenario expansion"),
+    ),
+    corpus_size=len(STRESS_METRIC_CORPUS),
+    kind="oracle_swap",
+    notes="Frozen stress metric and workload-shape corpus.",
+)
 
 
 # ============================================================
@@ -651,13 +860,19 @@ Examples:
                     help="Port for mock server (default: 8080)")
     p.add_argument("--self-test", action="store_true",
                     help="Run mock server + stress test together")
+    p.add_argument("--json", action="store_true",
+                    help="Run self-test and emit the structured Report as JSON")
     p.add_argument("--list-scenarios", action="store_true",
                     help="List available scenarios and exit")
 
     return p
 
 
-def list_scenarios():
+def list_scenarios() -> list[str]:
+    return [case.name for case in STRESS_METRIC_CORPUS]
+
+
+def print_workload_scenarios() -> None:
     print("\nAvailable Scenarios:")
     print("-" * 50)
     for name, tasks in SCENARIOS.items():
@@ -678,7 +893,7 @@ async def async_main():
     args = parser.parse_args()
 
     if args.list_scenarios:
-        list_scenarios()
+        print_workload_scenarios()
         return
 
     if args.mock_server:
@@ -715,19 +930,41 @@ async def async_main():
         with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, engine.stop)
 
-    mock_server = None
-    if args.self_test:
-        print("\n  SELF-TEST MODE: starting mock server + stress test\n")
-        config.target_url = f"http://127.0.0.1:{args.mock_port}"
-        mock_server = start_mock_server(args.mock_port)
-        await asyncio.sleep(0.3)  # let server bind
+    if args.json:
+        args.self_test = True
 
-    try:
-        await engine.run()
-    finally:
-        if mock_server:
-            mock_server.shutdown()
-            mock_server.server_close()
+    mock_server = None
+    run_context = contextlib.redirect_stdout(sys.stderr) if args.json else contextlib.nullcontext()
+    with run_context:
+        if args.self_test:
+            print("\n  SELF-TEST MODE: starting mock server + stress test\n")
+            config.target_url = f"http://127.0.0.1:{args.mock_port}"
+            mock_server = start_mock_server(args.mock_port)
+            await asyncio.sleep(0.3)  # let server bind
+
+        try:
+            await engine.run()
+        finally:
+            if mock_server:
+                mock_server.shutdown()
+                mock_server.server_close()
+
+    if args.self_test:
+        report = Report("core/stress")
+        report.record(
+            "self_test_recorded_requests",
+            metrics.total_requests >= 1,
+            detail=f"requests={metrics.total_requests}",
+        )
+        report.add("self_test_errors", 0, metrics.total_errors)
+        for case in STRESS_METRIC_CORPUS:
+            report.add(
+                f"oracle_stress_audit:{case.name}",
+                list(case.expected_events),
+                list(oracle_stress_audit(case)),
+            )
+        report.assert_teeth(TEETH)
+        raise SystemExit(report.emit(as_json=args.json))
 
 
 def main():

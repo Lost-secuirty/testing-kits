@@ -1,10 +1,16 @@
 """
 Test suite for a11y_test_harness.py - ~127 tests covering all checkers.
 """
+import contextlib
+import io
+import json
+import sys
 import unittest
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import urlopen
 
+from harnesses.core import a11y_test_harness as harness
 from harnesses.core.a11y_test_harness import (
     A11yIssue,
     A11yReport,
@@ -17,6 +23,7 @@ from harnesses.core.a11y_test_harness import (
     LinkTextChecker,
     MockA11yServer,
     TableChecker,
+    _run_self_test,
     contrast_ratio,
     find_free_port,
     parse_color,
@@ -104,6 +111,27 @@ class TestA11yReport(unittest.TestCase):
         r = A11yReport()
         self.assertEqual(r.counts(), {"ERROR": 0, "WARNING": 0, "INFO": 0})
         self.assertEqual(r.errors(), [])
+
+
+class TestA11ySelfTest(unittest.TestCase):
+    def test_json_verbose_self_test_emits_parseable_report(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = _run_self_test(verbose=True, as_json=True)
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["harness"], "core/a11y")
+        self.assertTrue(payload["passed"])
+
+    def test_json_cli_emits_parseable_report(self):
+        buf = io.StringIO()
+        with patch.object(sys, "argv", [harness.__file__, "--json", "--verbose"]):
+            with contextlib.redirect_stdout(buf):
+                rc = harness.main()
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["harness"], "core/a11y")
+        self.assertTrue(payload["passed"])
 
 
 # ---------------------------------------------------------------------------

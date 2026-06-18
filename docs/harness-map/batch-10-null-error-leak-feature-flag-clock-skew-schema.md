@@ -6,7 +6,7 @@ This is current-state documentation, not command authority. It maps the source, 
 
 Operating rules remain in `AGENTS.md`, `CLAUDE.md`, and `SECURITY.md`.
 
-Proof status is read from `cards/teeth_ratchet.json` at the time this batch is cut: `core/null_propagation` = `required`, `core/error_path_leak` = `required`, `core/feature_flag` = `required`, `core/clock_skew` = `pending`, `core/schema_evolution` = `required`.
+Current proof status is read from `cards/teeth_ratchet.json`: `core/null_propagation` = `required`, `core/error_path_leak` = `required`, `core/feature_flag` = `required`, `core/clock_skew` = `required`, `core/schema_evolution` = `required`.
 
 ## 44. Null Propagation Test Harness
 
@@ -68,16 +68,16 @@ Proof status is read from `cards/teeth_ratchet.json` at the time this batch is c
 - Path: `harnesses/core/clock_skew_test_harness.py`
 - Category: `core`
 - Failure class: Distributed-time bugs: NTP jumps, monotonic regression, cross-node skew vs TTL/LWW merges.
-- Logic shape: AND: the current harness, paired tests, and inventory entry must describe the same behavior. NOT: pending status must not be described as TEETH-required proof.
-- Good case: The current pending harness exercises the coverage summarized above; this entry maps that evidence as-is without claiming required TEETH proof.
-- Planted-bad case: none in required TEETH as of this batch; map the current pending evidence as-is.
-- Oracle / proof target: Current proof target: self-test and paired-test evidence visible in the current source, not required TEETH proof.
+- Logic shape: AND: monotonic-vs-wall-clock TTL behavior, monotonic regression detection, implausible LWW skew rejection, future-dated expiry handling, paired tests, and TEETH swap-check must all hold. NOT: wall-clock-only logic must not pass as skew-safe.
+- Good case: `oracle_clock_skew_audit` matches the frozen `CLOCK_SKEW_AUDIT_CORPUS` for TTL wall jumps, monotonic regression, implausible LWW skew, and future-dated expiry.
+- Planted-bad case: `wall_clock_ttl_auditor`, `monotonic_blind_auditor`, and `trusts_lww_outlier_auditor`.
+- Oracle / proof target: Current proof target: `oracle_clock_skew_audit`, `CLOCK_SKEW_AUDIT_CORPUS`.
 - External testing pattern: clock skew fixture and regression testing.
 - Usage note: Use this as a timing fixture for monotonic-vs-wall-clock behavior, expiry windows, and clock-jump regressions.
-- Current outside reference: Python `time` documents monotonic clocks for elapsed-time measurement independent of wall-clock adjustments. <https://docs.python.org/3/library/time.html#time.monotonic>
-- Proof status: `pending` as of current `cards/teeth_ratchet.json`; subject to change as source, tests, or ratchet state changes.
-- Commands: `python tools/teeth_check.py harnesses/core/clock_skew_test_harness.py`; `python harnesses/core/clock_skew_test_harness.py --self-test`; `python harnesses/core/clock_skew_test_harness.py --list-scenarios`; `python -m unittest tests.core.test_clock_skew_test_harness`; `make test-core`; `make proof`.
-- Known limits: Does not prove production correctness, exhaustive input coverage, or final harness maturity. This dossier maps current source, tests, and ratchet state as of this batch; it is expected to change. Pending status means no required TEETH proof should be claimed.
+- Current outside reference: RFC 5905 specifies NTPv4 clock synchronization behavior; this harness stays local and deterministic while modeling the bug classes clock adjustment can expose. <https://datatracker.ietf.org/doc/html/rfc5905>
+- Proof status: `required` as of current `cards/teeth_ratchet.json`; subject to change as source, tests, or ratchet state changes.
+- Commands: `python tools/teeth_check.py harnesses/core/clock_skew_test_harness.py`; `python harnesses/core/clock_skew_test_harness.py --self-test`; `python harnesses/core/clock_skew_test_harness.py --json`; `python harnesses/core/clock_skew_test_harness.py --list-scenarios`; `python -m unittest tests.core.test_clock_skew_test_harness tests.core.test_clock_skew_proof`; `make test-core`; `make proof`.
+- Known limits: Does not prove production correctness, exhaustive distributed-system timing behavior, real NTP behavior, or final harness maturity. This dossier maps current source, tests, and ratchet state; it is expected to change.
 - Related harnesses: `core/null_propagation`, `core/error_path_leak`, `core/feature_flag`, `core/schema_evolution`.
 
 ## 48. Schema Evolution Test Harness
@@ -109,4 +109,4 @@ Docs and source surfaces checked for this batch:
 - `docs/harness-map/batch-10-null-error-leak-feature-flag-clock-skew-schema.md`
 - `docs/harness-map/README.md`
 
-Scope note: this PR is docs-only. It does not change harness behavior, tests, workflows, hooks, dependencies, dashboard code, generated status files, TEETH status, or central-map consolidation.
+Scope note: this batch file originated in a docs-only mapping PR. The current teeth-campaign update changes `core/clock_skew` source/tests/cards and refreshes this dossier to the new required ratchet state.
