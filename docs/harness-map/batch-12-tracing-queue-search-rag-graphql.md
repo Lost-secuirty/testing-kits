@@ -6,7 +6,7 @@ This is current-state documentation, not command authority. It maps the source, 
 
 Operating rules remain in `AGENTS.md`, `CLAUDE.md`, and `SECURITY.md`.
 
-Proof status is read from `cards/teeth_ratchet.json` at the time this batch is cut: `core/tracing` = `required`, `core/queue` = `required`, `core/search_relevance` = `pending`, `ai/rag_eval` = `pending`, `core/graphql` = `required`.
+Proof status is read from `cards/teeth_ratchet.json` at the time this campaign update is cut: `core/tracing` = `required`, `core/queue` = `required`, `core/search_relevance` = `required`, `ai/rag_eval` = `pending`, `core/graphql` = `required`.
 
 ## 54. Distributed Tracing Test Harness
 
@@ -50,16 +50,16 @@ Proof status is read from `cards/teeth_ratchet.json` at the time this batch is c
 - Path: `harnesses/core/search_relevance_test_harness.py`
 - Category: `core`
 - Failure class: Classic IR ranking metrics over fixed graded judgment sets plus an analyzer corner-case oracle. Computes recall@k, precision@k, MRR, and NDCG (graded gain `2^grade-1`). A stdlib analyzer applies NFKC, casefold, accent-fold, naive plural-stem, stop-word drop, and CJK no-space segmentation, checked against an 8-case oracle. A lexical retriever (distinct-overlap, stable tie-break) over an engineered 20-doc / 6-query corpus lets the oracle meet recall ≥ 0.80 / MRR ≥ 0.70 / NDCG ≥ 0.80; a `reversed_search` ranker falls below the NDCG floor and a `no_fold_analyze` analyzer fails the fold cases. 22 self-test scenarios. Distinct from `llm_eval`/`rag_eval` (LLM answer quality) and `pagination` (cursor consistency).
-- Logic shape: AND: the current harness, paired tests, and inventory entry must describe the same behavior. NOT: pending status must not be described as TEETH-required proof.
-- Good case: The current pending harness exercises the coverage summarized above; this entry maps that evidence as-is without claiming required TEETH proof.
-- Planted-bad case: none in required TEETH as of this batch; map the current pending evidence as-is.
-- Oracle / proof target: Current proof target: self-test and paired-test evidence visible in the current source, not required TEETH proof.
+- Logic shape: AND: ranking floors, analyzer corner cases, stable tie-breaks, empty-query behavior, paired tests, proof test, and TEETH swap-check must all hold. NOT: a degraded ranker or analyzer mutant must not pass as if it were the oracle.
+- Good case: `oracle_search_relevance_audit` matches frozen relevance-floor, analyzer, tie-break, and empty-query cases.
+- Planted-bad case: `reversed_ranker_search_auditor`, `no_fold_search_auditor`, `unstable_tiebreak_search_auditor`, `empty_query_returns_all_auditor`.
+- Oracle / proof target: Current proof target: `SEARCH_RELEVANCE_AUDIT_CORPUS`, `oracle_search_relevance_audit`, and `TEETH`.
 - External testing pattern: search-relevance fixture and regression testing.
 - Usage note: Use this as a ranking regression fixture for query scoring, tie-breaking, normalization, and relevance drift in small controlled corpora.
-- Current outside reference: OpenSearch relevance documentation describes scoring, queries, and ranking behavior for search results. <https://opensearch.org/docs/latest/search-plugins/searching-data/index/>
-- Proof status: `pending` as of current `cards/teeth_ratchet.json`; subject to change as source, tests, or ratchet state changes.
-- Commands: `python tools/teeth_check.py harnesses/core/search_relevance_test_harness.py`; `python harnesses/core/search_relevance_test_harness.py --self-test`; `python harnesses/core/search_relevance_test_harness.py --list-scenarios`; `python -m unittest tests.core.test_search_relevance_test_harness`; `make test-core`; `make proof`.
-- Known limits: Does not prove production correctness, exhaustive input coverage, or final harness maturity. This dossier maps current source, tests, and ratchet state as of this batch; it is expected to change. Pending status means no required TEETH proof should be claimed.
+- Current outside reference: OpenSearch relevance tooling describes query comparison, result evaluation, and A/B testing as search-relevance workflows; NDCG remains a standard graded ranking metric for offline relevance checks. <https://docs.opensearch.org/latest/search-plugins/search-relevance/index/>
+- Proof status: `required` as of current `cards/teeth_ratchet.json`; subject to change as source, tests, or ratchet state changes.
+- Commands: `python tools/teeth_check.py harnesses/core/search_relevance_test_harness.py`; `python harnesses/core/search_relevance_test_harness.py --self-test`; `python harnesses/core/search_relevance_test_harness.py --list-scenarios`; `python -m unittest tests.core.test_search_relevance_test_harness tests.core.test_search_relevance_proof`; `make test-core`; `make proof`.
+- Known limits: Does not prove production correctness, exhaustive input coverage, or final harness maturity. This dossier maps current source, tests, and ratchet state as of this batch; it is expected to change.
 - Related harnesses: `core/tracing`, `core/queue`, `core/graphql`.
 
 ## 57. RAG Eval Test Harness
@@ -109,4 +109,4 @@ Docs and source surfaces checked for this batch:
 - `docs/harness-map/batch-12-tracing-queue-search-rag-graphql.md`
 - `docs/harness-map/README.md`
 
-Scope note: this PR is docs-only. It does not change harness behavior, tests, workflows, hooks, dependencies, dashboard code, generated status files, TEETH status, or central-map consolidation.
+Scope note: this campaign update changes only the harnesses, paired proof tests, generated cards/ratchet, and current-state docs for the promoted entries. It does not change workflows, hooks, dependencies, dashboard code, or central-map consolidation.

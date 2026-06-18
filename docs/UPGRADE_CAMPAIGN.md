@@ -19,15 +19,15 @@ and **reports its findings** (structured). Gate + contract are documented in
   → `--self-test`/`--json` `Report` → pair unittest → (security/ai: proof test) →
   flip `pending → required` → draft PR (operator merges).
 
-## Status snapshot (Batch 7, 2026-06-18)
+## Status snapshot (Batch 8, 2026-06-18)
 
 | Scope | Count | Meaning |
 |---|---:|---|
-| required (teeth verified) | 59 | proven by the swap-check; gate blocks on these |
-| pending | 10 | in scope, no `TEETH` yet — counted, non-blocking |
+| required (teeth verified) | 64 | proven by the swap-check; gate blocks on these |
+| pending | 5 | in scope, no `TEETH` yet — counted, non-blocking |
 | legacy (pharmacy) | 8 | older soft gate, out of campaign |
 
-**required (59):** Batch 0 (9) core/{check_digit_identifier,feature_flag,graphql,
+**required (64):** Batch 0 (9) core/{check_digit_identifier,feature_flag,graphql,
 grpc_contract,idempotency,queue,tracing}, security/{ci_workflow_hardening,diff_secret_gate}
 · Batch 1 (10) core/{api,cache,cli,config,contract,null_propagation,pagination,serialization,
 statemachine}, security/authz · Batch 2 (10) core/{db,scraper,fuzz,numeric,concurrency,
@@ -37,7 +37,8 @@ iot_telemetry,browser_e2e,lexical_date_canonicalization}, security/cwe_kev_regre
 ai/{agent_eval,drift_detection} · Batch 4 (6) core/{chaos,datetime,errorpath,pipeline,
 property}, ai/llm_eval · Batch 5 (6) core/{logging,memory,ratelimit,regression_snapshot,
 webhook}, security/appsec · Batch 6 (3) core/{mutation,network}, security/security ·
-Batch 7 (5) core/{stress,i18n,a11y,clock_skew}, ai/agentic.
+Batch 7 (5) core/{stress,i18n,a11y,clock_skew}, ai/agentic · Batch 8 (5)
+core/{cardinality,dormant_code,hermeticity,search_relevance}, ai/prompt_injection.
 
 ## Batch roadmap (provisional; exact membership ranked at each batch start)
 
@@ -87,7 +88,13 @@ Batch 7 (5) core/{stress,i18n,a11y,clock_skew}, ai/agentic.
   k6 open-vs-closed load models for stress, Unicode/W3C normalization for i18n, WCAG 2.2 for
   a11y, agent process/trajectory evaluation papers for agentic tool-use checks, and RFC 5905
   for clock-skew/NTP context. Gate 54 → 59 required / 10 pending / 8 legacy / 0 failing.
-- **Batch 8+ — drain the remaining 10 pending → SILVER, then GOLD enrich**, plus the NEW
+- **Batch 8 — DONE (2026-06-18):** real TEETH wired into 5 more pending harnesses, all
+  flipped pending → required: core/{cardinality,dormant_code,hermeticity,search_relevance},
+  ai/prompt_injection. Research anchors: Coverage.py branch coverage for dormant-path
+  discovery, OpenTelemetry cardinality guidance, Bazel hermetic-test expectations, OWASP
+  LLM01 prompt injection, and OpenSearch relevance evaluation. Gate 59 → 64 required /
+  5 pending / 8 legacy / 0 failing.
+- **Batch 9+ — drain the remaining 5 pending → SILVER, then GOLD enrich**, plus the NEW
   NOVEL_COMPOSITION candidates below.
 - **Candidate NEW harnesses (NOVEL_COMPOSITION; from the 2026-06-15 Gemini Deep Research
   docs — vet before building; keep pure-stdlib + a frozen-literal corpus + non-circular
@@ -133,20 +140,20 @@ Batch 7 (5) core/{stress,i18n,a11y,clock_skew}, ai/agentic.
 ## Full in-scope status
 Legend: `R` required · `P` pending · (pharmacy = legacy, omitted).
 
-**core (52):** R a11y, api, browser_e2e, cache, canvas_scene_state, chaos,
+**core (52):** R a11y, api, browser_e2e, cache, canvas_scene_state, cardinality, chaos,
 check_digit_identifier, cli, clock_skew, concurrency, config, contract, datetime, db,
-error_path_leak, errorpath, feature_flag, fuzz, game_loop_simulation, graphql, grpc_contract,
-idempotency, i18n, iot_telemetry, lexical_date_canonicalization, logging, memory, mutation,
-network, null_propagation, numeric, pagination, payments, pipeline, property, queue,
-ratelimit, regression_snapshot, schema_evolution, scraper, serialization, statemachine,
-statistical_rng_oracle, stress, tracing, webhook · P cardinality, circuitbreaker, complexity,
-dormant_code, hermeticity, search_relevance
+dormant_code, error_path_leak, errorpath, feature_flag, fuzz, game_loop_simulation,
+graphql, grpc_contract, hermeticity, idempotency, i18n, iot_telemetry,
+lexical_date_canonicalization, logging, memory, mutation, network, null_propagation,
+numeric, pagination, payments, pipeline, property, queue, ratelimit, regression_snapshot,
+schema_evolution, scraper, search_relevance, serialization, statemachine,
+statistical_rng_oracle, stress, tracing, webhook · P circuitbreaker, complexity
 
 **security (10):** R appsec, authz, ci_workflow_hardening, cwe_kev_regression, diff_secret_gate,
 supplychain, upload, security · P jwt, pii_redaction
 
-**ai (7):** R agent_eval, agent_memory_context, agentic, drift_detection, llm_eval · P
-prompt_injection, rag_eval
+**ai (7):** R agent_eval, agent_memory_context, agentic, drift_detection, llm_eval,
+prompt_injection · P rag_eval
 
 > `core/stress` still uses the non-standard `stress_harness.py` filename
 > (vs `*_test_harness.py`). Batch 7 promoted it without a rename to keep the proof diff scoped.
