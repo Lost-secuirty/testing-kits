@@ -21,6 +21,8 @@ Going forward, new mapping batches should live in small batch files that can be 
 
 - Batch 6: inventory #26-#30. Current location: `docs/harness-map/batch-06-errorpath-cache-ratelimit-webhook-i18n.md`.
 
+- Batch 7: inventory #31-#35. Current location: `docs/harness-map/batch-07-pagination-a11y-agentic-supplychain-upload.md`.
+
 ## Preferred future layout
 
 Use small files such as:
