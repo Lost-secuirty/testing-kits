@@ -13,7 +13,7 @@ Proof status is read from `cards/teeth_ratchet.json` at the time this batch is c
 - Name: Agent Memory Context Test Harness
 - Path: `harnesses/ai/agent_memory_context_test_harness.py`
 - Category: `ai`
-- Failure class: `tests/ai/test_agent_memory_context_test_harness.py`
+- Failure class: Checks agent context-boundary behavior and memory retrieval as deterministic fixtures, without live model calls. Boundary scenarios reject spoofed system/developer authority, poisoned protected-memory writes, unapproved dangerous tools, and destructive follow-up after failed tool output. The current TEETH proof models memory retrieval invariants: session isolation, pinned items surviving eviction, and token-budget assembly that keeps required pinned context; planted retrievers cover cross-session leakage, pinned-item eviction, and budget truncation that drops required context.
 - Logic shape: AND: source fixture behavior, paired tests, ratchet entry, and TEETH swap-check must all hold. XNOR: `prove()` should agree with the frozen expected corpus for the current source. NOT: a planted mutant must not pass as if it were the oracle.
 - Good case: The current oracle path is expected to remain clean against `oracle_retrieve`, `EXPECTED_RETRIEVED`, `MEMORY_CORPUS`.
 - Planted-bad case: `cross_session_leak`, `evicts_pinned_item`, `budget_drops_required`
@@ -31,7 +31,7 @@ Proof status is read from `cards/teeth_ratchet.json` at the time this batch is c
 - Name: Game Loop Simulation Test Harness
 - Path: `harnesses/core/game_loop_simulation_test_harness.py`
 - Category: `core`
-- Failure class: `tests/core/test_game_loop_simulation_test_harness.py`
+- Failure class: Validates replayable fixed-step game-loop behavior without a renderer. The harness checks input release, pause freeze, progression gates, restart reset, and collision damage through a small deterministic engine. The current TEETH proof judges simulated end positions against a frozen tick corpus so it catches double-stepping inside one tick, off-by-one loops that skip the last tick, and input starvation that applies only one held key per tick.
 - Logic shape: AND: source fixture behavior, paired tests, ratchet entry, and TEETH swap-check must all hold. XNOR: `prove()` should agree with the frozen expected corpus for the current source. NOT: a planted mutant must not pass as if it were the oracle.
 - Good case: The current oracle path is expected to remain clean against `oracle_simulate`, `TICK_CORPUS`.
 - Planted-bad case: `double_step_per_tick`, `skip_last_tick`, `input_starvation`
@@ -49,7 +49,7 @@ Proof status is read from `cards/teeth_ratchet.json` at the time this batch is c
 - Name: Statistical RNG Oracle Test Harness
 - Path: `harnesses/core/statistical_rng_oracle_test_harness.py`
 - Category: `core`
-- Failure class: `tests/core/test_statistical_rng_oracle_test_harness.py`
+- Failure class: Provides deterministic, replayable checks for game or slot-style weighted random selection. The harness samples a fixed weighted table with a seeded LCG, checks advertised proportions within a CI-sized tolerance, verifies seed replay, and treats unreachable declared outcomes as a failure. The current TEETH proof compares counts against frozen fair-proportion literals and catches planted samplers with a stuck biased source, an off-by-one cursor that drops the jackpot bucket, and a truncated RNG range that makes top outcomes unreachable.
 - Logic shape: AND: source fixture behavior, paired tests, ratchet entry, and TEETH swap-check must all hold. XNOR: `prove()` should agree with the frozen expected corpus for the current source. NOT: a planted mutant must not pass as if it were the oracle.
 - Good case: The current oracle path is expected to remain clean against `oracle_sampler`.
 - Planted-bad case: `biased_rng`, `cursor_drops_jackpot`, `truncated_range_rng`
@@ -67,7 +67,7 @@ Proof status is read from `cards/teeth_ratchet.json` at the time this batch is c
 - Name: Canvas Scene State Test Harness
 - Path: `harnesses/core/canvas_scene_state_test_harness.py`
 - Category: `core`
-- Failure class: `tests/core/test_canvas_scene_state_test_harness.py`
+- Failure class: Checks renderer-independent canvas/WebGL scene data before browser smoke testing. The harness analyzes viewport bounds, draw ordering, asset fallback, duplicate node IDs, and debug-only nodes leaking into normal play mode. The current TEETH proof compares scene reports to a frozen scene corpus and catches planted analyzers that drop duplicate-ID detection, ignore z-index collisions, or leak debug nodes outside debug mode.
 - Logic shape: AND: source fixture behavior, paired tests, ratchet entry, and TEETH swap-check must all hold. XNOR: `prove()` should agree with the frozen expected corpus for the current source. NOT: a planted mutant must not pass as if it were the oracle.
 - Good case: The current oracle path is expected to remain clean against `oracle_analyze`, `SCENE_CORPUS`.
 - Planted-bad case: `drops_duplicate_id_check`, `ignores_z_collisions`, `leaks_debug_nodes`

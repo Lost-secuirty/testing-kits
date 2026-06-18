@@ -13,7 +13,7 @@ Proof status is read from `cards/teeth_ratchet.json` at the time this batch is c
 - Name: IoT / Telemetry Ingest Test Harness
 - Path: `harnesses/core/iot_telemetry_test_harness.py`
 - Category: `core`
-- Failure class: Models an MQTT-like telemetry ingest path as pure data with an injectable `FakeClock` for server-ingest time. The oracle `ingest()` enforces QoS semantics (QoS-2 exactly-once, QoS-1 at-least-once-deduped, QoS-0 best-effort), per-topic re-sequencing by `seq` (final order strictly increasing), idempotency-key dedupe, clock-skew handling (flag > 60s, reject > 1h, canonical timestamp = server ingest, skewed event-time excluded from windowing), watermark/allowed-lateness windowing, retained-latest-only, persistent-session replay on reconnect, and last-will on abnormal disconnect. Eight buggy ingesters each break one invariant and are caught: QoS-2 at-least-once, no-resequence, no-dedupe, device-clock-truster, non-persistent-session, retain-all, no-watermark, no-last-will. 24 self-test scenarios. Distinct from `core/queue` (broker delivery) and `core/clock_skew` (TTL/LWW).
+- Failure class: Models an MQTT-like telemetry ingest path as pure data with an injectable `FakeClock` for server-ingest time. The oracle `ingest()` enforces QoS semantics, per-topic re-sequencing by `seq`, idempotency-key dedupe, clock-skew handling, watermark/allowed-lateness windowing, retained-latest-only, persistent-session replay, and last-will behavior. The current TEETH proof also uses an aggregate fingerprint over the frozen stream and reading set, so planted-bad cases include ingest/order defects plus `float_mean_drift`, which catches binary-float drift in the rolled reading mean.
 - Logic shape: AND: source fixture behavior, paired tests, ratchet entry, and TEETH swap-check must all hold. XNOR: `prove()` should agree with the frozen expected corpus for the current source. NOT: a planted mutant must not pass as if it were the oracle.
 - Good case: The current oracle path is expected to remain clean against `oracle_aggregate`, `SCENARIOS`.
 - Planted-bad case: `accept_late_window`, `no_resequence`, `no_qos2_dedupe`, `float_mean_drift`
@@ -85,7 +85,7 @@ Proof status is read from `cards/teeth_ratchet.json` at the time this batch is c
 - Name: CWE / KEV Regression Test Harness
 - Path: `harnesses/security/cwe_kev_regression_test_harness.py`
 - Category: `security`
-- Failure class: `tests/security/test_cwe_kev_regression_test_harness.py`
+- Failure class: Maps high-frequency vulnerability classes to deterministic CWE/KEV-style fixtures. The general regression cases cover safe and unsafe inputs for XSS, SQL injection, CSRF, authorization bypass/IDOR, path traversal, command injection, code execution, dangerous upload extension, insecure deserialization, SSRF, and resource-limit abuse. The current TEETH oracle audits a frozen SQLi/path-traversal/XSS corpus with true-positive and false-positive cases, and the planted auditors model over-narrow SQLi and traversal detection plus over-broad XSS flagging.
 - Logic shape: AND: source fixture behavior, paired tests, ratchet entry, and TEETH swap-check must all hold. XNOR: `prove()` should agree with the frozen expected corpus for the current source. NOT: a planted mutant must not pass as if it were the oracle.
 - Good case: The current oracle path is expected to remain clean against `oracle_audit`, `AUDIT_CORPUS`, `CASES`.
 - Planted-bad case: `weak_sqli_auditor`, `weak_traversal_auditor`, `overbroad_xss_auditor`
