@@ -218,3 +218,101 @@ Docs checked in this batch:
 - `docs/HARNESS_READING_GUIDE.md`
 - `docs/HARNESS_MAP.md`
 - `docs/LEARNINGS.md`
+
+## Batch 3 — property, mutation, snapshot, contract, and serialization harnesses
+
+Batch 3 covers harnesses #11-#15 in inventory order. It keeps proof status tied to the current ratchet state rather than to historical inventory wording.
+
+### 11. Property-Based Test Harness
+
+- Name: Property-Based Test Harness
+- Path: `harnesses/core/property_test_harness.py`
+- Category: `core`
+- Failure class: non-minimal counterexample, shrinker disabled by early return, shrinker overshoot to a passing input, invariant/counterexample reporting drift.
+- Logic shape: `AND`: generated property checks, shrinking behavior, frozen shrink corpus, and TEETH swap-check must all hold. `NOT`: a reported counterexample must not be a passing input. `XNOR`: shrink output must match the frozen minimal literal.
+- Good case: `oracle_shrink` shrinks frozen integer/list failures to the smallest still-failing literal values in `SHRINK_CORPUS`.
+- Planted-bad case: `stops_early` and `overshoots`.
+- Oracle / proof target: `SHRINK_CORPUS`; `prove()` compares shrinker output against hand-computed minimal counterexamples and excludes RNG-driven property generation from the TEETH path.
+- External testing pattern: property-based testing with shrinking/minimal counterexample reporting.
+- Current outside reference: Hypothesis documents property-based testing for Python, including generating examples and simplifying failing examples to make bugs easier to understand. <https://hypothesis.readthedocs.io/en/latest/>
+- Proof status: `required`; subject to change if the TEETH ratchet or source changes.
+- Commands: `python harnesses/core/property_test_harness.py --self-test`; `python harnesses/core/property_test_harness.py --list-scenarios`; `python -m unittest tests.core.test_property_test_harness`; `make test-core`; `make proof`.
+- Known limits: does not prove exhaustive input coverage, Hypothesis compatibility, statistical generator quality, or correctness of every property predicate. TEETH proves only deterministic shrinking over the frozen corpus.
+- Related harnesses: `core/fuzz`, `core/mutation`, `core/statistical_rng_oracle`, `core/numeric`, `core/serialization`.
+
+### 12. Mutation Test Harness
+
+- Name: Mutation Test Harness
+- Path: `harnesses/core/mutation_test_harness.py`
+- Category: `core`
+- Failure class: survived mutant, weak assertion suite, mutation operator blind spot, timeout/error classification drift.
+- Logic shape: `AND`: mutant generation, test execution, result classification, score calculation, and reporting must all remain observable. `NOT`: a killed mutant must not be counted as survived. `XNOR`: generated mutation reports should match the fixture-defined result classification.
+- Good case: `--self-test` mutates a small `classify` function and confirms multiple mutants are generated, at least one mutant is killed, and the mutation score is within `(0, 1]`.
+- Planted-bad case: none in TEETH yet. Current evidence is self-test/paired-test coverage, not planted-mutant TEETH proof.
+- Oracle / proof target: mutation operators over source strings plus `MutationRunner` result classification: `KILLED`, `SURVIVED`, `ERROR`, and `TIMEOUT`.
+- External testing pattern: mutation testing for test-suite strength.
+- Current outside reference: mutmut documents Python mutation testing as changing code and checking whether tests fail, exposing test-suite gaps when mutants survive. <https://mutmut.readthedocs.io/en/latest/>
+- Proof status: `pending` as of current `cards/teeth_ratchet.json`; subject to change.
+- Commands: `python harnesses/core/mutation_test_harness.py --self-test`; `python -m unittest tests.core.test_mutation_test_harness`; `make test-core`; `make proof` for current global proof state.
+- Known limits: pending status means no TEETH mutant proof should be claimed. Regex mutation operators do not prove semantic mutation completeness, equivalent-mutant handling, real subprocess isolation, or production-grade sandbox security.
+- Related harnesses: `core/property`, `core/fuzz`, `core/complexity`, `core/ci_workflow_hardening`, `security/supplychain`.
+
+### 13. Regression & Snapshot Test Harness
+
+- Name: Regression & Snapshot Test Harness
+- Path: `harnesses/core/regression_snapshot_test_harness.py`
+- Category: `core`
+- Failure class: shallow snapshot comparison, order-sensitive false regression, missed nested value regression, noisy snapshot drift.
+- Logic shape: `AND`: normalized comparison, nested traversal, checksum-backed snapshots, and TEETH swap-check must all hold. `NOT`: reordered dict keys must not create a false regression. `XNOR`: comparator verdict must match frozen `COMPARE_CORPUS` literals.
+- Good case: `oracle_match` treats dict key order as irrelevant at every depth while still reporting changed nested values as mismatches.
+- Planted-bad case: `no_recurse` and `order_sensitive`.
+- Oracle / proof target: `COMPARE_CORPUS`; `prove()` compares pure `(actual, stored) -> bool` verdicts against frozen expected match booleans and excludes clock/filesystem-backed snapshot persistence from TEETH.
+- External testing pattern: snapshot/regression testing with normalized structural comparison.
+- Current outside reference: pytest-regressions documents regression helpers for checking data, files, and numeric outputs against previously saved expected values. <https://pytest-regressions.readthedocs.io/en/latest/>
+- Proof status: `required`; subject to change if the TEETH ratchet or source changes.
+- Commands: `python harnesses/core/regression_snapshot_test_harness.py --self-test`; `python harnesses/core/regression_snapshot_test_harness.py --list-scenarios`; `python -m unittest tests.core.test_regression_snapshot_test_harness`; `make test-core`; `make proof`.
+- Known limits: does not prove snapshot approval policy, golden-file review quality, filesystem durability, timestamp stability, or broad UI snapshot correctness. TEETH proves only normalized comparison against the frozen structural corpus.
+- Related harnesses: `core/serialization`, `core/config`, `core/schema_evolution`, `core/search_relevance`, `core/contract`.
+
+### 14. Contract / Interface Test Harness
+
+- Name: Contract / Interface Test Harness
+- Path: `harnesses/core/contract_test_harness.py`
+- Category: `core`
+- Failure class: precondition/postcondition miss, interface drift, invariant failure, backward-incompatible schema/contract change accepted as compatible.
+- Logic shape: `AND`: preconditions, postconditions, type checks, invariants, compatibility corpus, and TEETH swap-check must all hold. `NOT`: removed fields, changed types, and new required fields must not be accepted as compatible. `XNOR`: compatibility verdict must match frozen `COMPAT_CASES` literals.
+- Good case: `check_compatibility` accepts compatible changes such as optional-field additions and enum widening, and rejects removed fields, type changes, new required fields, enum narrowing, and optional-to-required changes.
+- Planted-bad case: `ignores_removed_field`, `ignores_type_change`, and `allows_new_required_field`.
+- Oracle / proof target: `COMPAT_CASES`; `prove()` compares compatibility verdicts to frozen literal expectations and the self-test also routes the oracle through the harness's `Contract` and `InvariantChecker` machinery.
+- External testing pattern: design-by-contract / consumer-facing compatibility contract testing.
+- Current outside reference: icontract documents Python design-by-contract support for preconditions, postconditions, invariants, and runtime contract checking. <https://icontract.readthedocs.io/en/latest/>
+- Proof status: `required`; subject to change if the TEETH ratchet or source changes.
+- Commands: `python harnesses/core/contract_test_harness.py --self-test`; `python harnesses/core/contract_test_harness.py --list-scenarios`; `python -m unittest tests.core.test_contract_test_harness`; `make test-core`; `make proof`.
+- Known limits: does not prove all API compatibility rules, distributed consumer coverage, semantic versioning policy, OpenAPI/Pact coverage, or production runtime behavior. TEETH proves only the frozen backward-compatibility corpus and planted checker defects.
+- Related harnesses: `core/api`, `core/config`, `core/serialization`, `core/graphql`, `core/grpc_contract`, `core/webhook`.
+
+### 15. Serialization / Roundtrip Test Harness
+
+- Name: Serialization / Roundtrip Test Harness
+- Path: `harnesses/core/serialization_test_harness.py`
+- Category: `core`
+- Failure class: lossy roundtrip, dropped field, int-to-float precision corruption, tuple-to-list coercion missed, fixed-schema field loss.
+- Logic shape: `AND`: encode/decode, loss detection, field preservation, frozen corpus, and TEETH swap-check must all hold. `NOT`: serializers must not silently drop falsy fields or schema-unknown fields. `XNOR`: decoded value and lossy-field verdict must match frozen `SER_CORPUS` literals.
+- Good case: `oracle_roundtrip` preserves clean JSON fields, flags tuple-to-list loss, keeps `2**53 + 1` exact in JSON, and flags binary schema drops.
+- Planted-bad case: `drops_falsy_field`, `int_float_coercion_blind`, and `schema_drop_blind`.
+- Oracle / proof target: `SER_CORPUS`; `prove()` compares decoded field values and lossy-field verdicts against frozen literal expectations using pure in-process JSON/binary roundtrips.
+- External testing pattern: serialization/deserialization roundtrip testing and data-loss detection.
+- Current outside reference: Python's `pickle` docs define serialization/deserialization for Python objects and the standard library also provides data-format modules such as `json`, `csv`, and `configparser` used by this harness. <https://docs.python.org/3/library/pickle.html>
+- Proof status: `required`; subject to change if the TEETH ratchet or source changes.
+- Commands: `python harnesses/core/serialization_test_harness.py --self-test`; `python harnesses/core/serialization_test_harness.py --list-scenarios`; `python -m unittest tests.core.test_serialization_test_harness`; `make test-core`; `make proof`.
+- Known limits: does not prove arbitrary format compatibility, untrusted pickle safety, schema migration correctness, cross-language interoperability, or all floating-point/data-model edge cases. TEETH proves only the frozen JSON/binary loss-detection corpus.
+- Related harnesses: `core/db`, `core/config`, `core/regression_snapshot`, `core/schema_evolution`, `core/api`.
+
+## Batch 3 closeout
+
+Docs checked in this batch:
+
+- `HARNESS_INVENTORY.md`
+- `HARNESS_ROADMAP.md`
+- `docs/HARNESS_MAP.md`
+- `cards/teeth_ratchet.json`
