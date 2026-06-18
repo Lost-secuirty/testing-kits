@@ -19,6 +19,8 @@ Going forward, new mapping batches should live in small batch files that can be 
 
 - Batch 5: inventory #21-#25. Current location: `docs/harness-map/batch-05-idempotency-statemachine-numeric-authz-llm-eval.md`.
 
+- Batch 6: inventory #26-#30. Current location: `docs/harness-map/batch-06-errorpath-cache-ratelimit-webhook-i18n.md`.
+
 ## Preferred future layout
 
 Use small files such as:
