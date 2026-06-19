@@ -77,9 +77,18 @@ FRAGILITY_EXEMPT: dict[str, str] = {
 
 def _teeth_kwarg(tree: ast.Module, name: str) -> ast.AST | None:
     for node in tree.body:
-        if isinstance(node, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id == "TEETH" for t in node.targets
-        ) and isinstance(node.value, ast.Call):
+        # accept both ``TEETH = Teeth(...)`` and the annotated ``TEETH: Teeth = Teeth(...)``
+        # — an AnnAssign-blind check would silently skip an annotated harness (the same
+        # blind spot fixed in _module_assigns; keep the two consistent).
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not isinstance(node.value, ast.Call):
+            continue
+        is_teeth = (
+            (isinstance(node, ast.Assign)
+             and any(isinstance(t, ast.Name) and t.id == "TEETH" for t in node.targets))
+            or (isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name) and node.target.id == "TEETH")
+        )
+        if is_teeth:
             for kw in node.value.keywords:
                 if kw.arg == name:
                     return kw.value
