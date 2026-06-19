@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-test_stress_harness.py — Test suite for stress_harness.py
+test_stress_test_harness.py — Test suite for stress_test_harness.py
 ==========================================================
 Pure unittest (stdlib). Zero dependencies.
 
@@ -11,8 +11,8 @@ Covers:
   4. Integration — full engine run with mock server, metrics validation
 
 Run:
-  python test_stress_harness.py
-  python -m unittest test_stress_harness -v
+  python test_stress_test_harness.py
+  python -m unittest test_stress_test_harness -v
 """
 
 import asyncio
@@ -22,7 +22,7 @@ import unittest
 from unittest.mock import patch
 
 # Import the module under test
-from harnesses.core.stress_harness import (
+from harnesses.core.stress_test_harness import (
     SCENARIOS,
     HarnessConfig,
     MetricsCollector,

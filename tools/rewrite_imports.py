@@ -3,18 +3,15 @@
 rewrite_imports.py — Phase B helper: rewrite test imports for the new layout.
 
 Before reorg, tests import from the flat root:
-    from stress_harness import HarnessConfig
     from api_test_harness import ApiTestCase
 
 After reorg, tests live at ``tests/<cat>/`` and harnesses at
 ``harnesses/<cat>/``. Imports must become:
-    from harnesses.core.stress_harness import HarnessConfig
     from harnesses.core.api_test_harness import ApiTestCase
 
 This script scans every test file under ``tests/`` and rewrites
 ``from <name>_test_harness import ...`` and ``import <name>_test_harness``
-to the new categorized form. It also handles ``from stress_harness import ...``
-since that one harness is named without the ``_test_harness`` suffix.
+to the new categorized form.
 
 Idempotent: running again is a no-op once the rewrite has happened.
 """

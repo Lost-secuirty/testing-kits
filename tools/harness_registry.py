@@ -41,8 +41,6 @@ def short_name(path: Path) -> str:
     name = path.stem
     if name.endswith("_test_harness"):
         return name[: -len("_test_harness")]
-    if name == "stress_harness":
-        return "stress"
     if name.endswith("_harness"):
         return name[: -len("_harness")]
     return name

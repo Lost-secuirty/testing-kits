@@ -6,7 +6,7 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from harnesses.core import stress_harness as harness
+from harnesses.core import stress_test_harness as harness
 
 
 def _pick_free_port() -> int:
