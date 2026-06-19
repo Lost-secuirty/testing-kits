@@ -218,17 +218,17 @@ def _prove_anchors(tree: ast.Module, prove: ast.FunctionDef) -> set[str]:
             if isinstance(func, ast.Name) and func.id in module_fns and func.id not in seen:
                 seen.add(func.id)
                 queue.append(module_fns[func.id])
-    # expand anchors through local aliases (rpcs -> {RPCS, rpcs}); a couple of hops suffice
+    # expand anchors through local aliases (rpcs -> {RPCS, rpcs}) to a fixpoint — alias growth is
+    # monotonic over a finite name set, so this terminates regardless of chain length.
     resolved = set(raw)
-    for _ in range(3):
+    grew = True
+    while grew:
         grew = False
         for name in list(resolved):
             for alias in aliases.get(name, set()):
                 if alias not in resolved:
                     resolved.add(alias)
                     grew = True
-        if not grew:
-            break
     return resolved
 
 
