@@ -142,20 +142,19 @@ def check_harness(path: Path) -> dict:
 
     findings: list[str] = []
     seen: set[str] = set()
-    params: set[str] = set()
     queue: list[ast.AST] = [target]
     while queue:
         fn = queue.pop()
-        params |= _params(fn)  # a call to a prove/helper PARAMETER is the impl, not the oracle
-        collector = _Calls()
-        for stmt in (fn.body if isinstance(fn, ast.FunctionDef) else [fn.body]):
-            collector.visit(stmt)
+        fn_params = _params(fn)  # scoped to THIS function: a call to its own param is the impl,
+        collector = _Calls()     # not the oracle. NOT cumulative — one helper's param must not
+        for stmt in (fn.body if isinstance(fn, ast.FunctionDef) else [fn.body]):  # mask detection
+            collector.visit(stmt)                                                  # elsewhere.
         for func in collector.funcs:
             parts = _dotted(func)
             if kind == "attr":
                 hit = parts == ref                       # must call the exact Cls.method oracle
             else:  # ("name", ref): a bare call to the oracle fn, not a same-named parameter
-                hit = isinstance(func, ast.Name) and func.id == ref and ref not in params
+                hit = isinstance(func, ast.Name) and func.id == ref and ref not in fn_params
             if hit:
                 line = getattr(func, "lineno", "?")
                 where = fn.name if isinstance(fn, ast.FunctionDef) else "<lambda>"
@@ -195,9 +194,16 @@ def run_gate(as_json: bool = False) -> int:
               f"{len(buckets['UNANALYZABLE'])} unanalyzable, "
               f"{len(buckets['NO_NAMED_ORACLE'])} inline-lambda-oracle (advisory), "
               f"{len(buckets['NO_TEETH'])} no-teeth.")
-    if buckets["CIRCULAR"]:
-        print("FAIL: a prove() calls its oracle at runtime — that is a circular proof the "
-              "swap-check cannot catch.", file=sys.stderr)
+    if buckets["UNANALYZABLE"] and not as_json:
+        for rel in buckets["UNANALYZABLE"]:
+            print(f"  UNANALYZABLE  {rel}", file=sys.stderr)
+    if buckets["CIRCULAR"] or buckets["UNANALYZABLE"]:
+        # UNANALYZABLE blocks too: a prove that can't be statically analyzed (not a module-level
+        # def) could hide a circular call, so it must not silently pass the required gate. The
+        # fix is to keep prove a module-level function. (An inline-lambda ORACLE stays advisory —
+        # it has no name to call, so circularity-by-name is genuinely N/A, not an escape.)
+        print("FAIL: a prove() calls its oracle at runtime, or could not be analyzed — prove must "
+              "be a module-level function that compares against frozen literals.", file=sys.stderr)
         return 1
     return 0
 
