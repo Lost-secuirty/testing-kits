@@ -13,7 +13,11 @@ behaviour, it just sits there. This gate makes the dead line itself machine-visi
 It is **static** (AST only — no import, no execution). For each non-legacy harness it walks
 the whole module and flags any ``ast.Expr`` statement whose value is one of:
 
-    Name | Attribute | Compare | BinOp | BoolOp | UnaryOp | Subscript
+    Name | Attribute | Compare | BinOp | BoolOp | UnaryOp | Subscript | Tuple(*)
+
+A bare ``Tuple`` is flagged only when every element is itself side-effect-free by shape, which
+catches the assert-tuple / trailing-comma footgun (``x == 1, "msg"`` or ``foo,`` — a bare tuple
+is always truthy/discarded) while leaving an intentional ``(do_a(), do_b())`` alone.
 
 Deliberately **excluded** (never flagged), because they are either legitimate or may carry a
 side effect the AST cannot rule out: string/number/`...` constants (docstrings, ellipsis,
@@ -59,6 +63,19 @@ _DEAD_VALUE_TYPES = (
     ast.UnaryOp,
     ast.Subscript,
 )
+# A value is side-effect-free "by shape" if evaluating it runs no user code that could mutate
+# state: the dead kinds above plus any Constant. Used to judge a bare tuple — `x == 1, "msg"` and
+# `foo,` (the assert-tuple / trailing-comma footgun) are dead, but `(do_a(), do_b())` is not.
+_PURE_SHAPE = (*_DEAD_VALUE_TYPES, ast.Constant)
+
+
+def _dead_kind(value: ast.AST) -> str | None:
+    """Name the dead-expression kind for a bare statement value, or None if it may have an effect."""
+    if isinstance(value, _DEAD_VALUE_TYPES):
+        return type(value).__name__
+    if isinstance(value, ast.Tuple) and value.elts and all(isinstance(e, _PURE_SHAPE) for e in value.elts):
+        return "Tuple"
+    return None
 
 
 def _snippet(node: ast.AST) -> str:
@@ -76,8 +93,10 @@ def check_harness(path: Path) -> dict:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     flagged: list[tuple[int, int, str]] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Expr) and isinstance(node.value, _DEAD_VALUE_TYPES):
-            kind = type(node.value).__name__
+        if isinstance(node, ast.Expr):
+            kind = _dead_kind(node.value)
+            if kind is None:
+                continue
             flagged.append((
                 node.lineno,
                 node.col_offset,
@@ -139,7 +158,7 @@ def _run_self_test() -> int:
               "finding(s), expected OK / 0", file=sys.stderr)
 
     dead = check_harness(fx / "dead_harness.py")
-    expected = 7  # one per flagged value kind: Name/Attribute/Compare/BinOp/BoolOp/UnaryOp/Subscript
+    expected = 8  # one per flagged kind: Name/Attribute/Compare/BinOp/BoolOp/UnaryOp/Subscript/Tuple
     if dead["status"] != "DEAD_EXPR" or len(dead["findings"]) != expected:
         failures += 1
         print(f"FAIL: dead_harness.py read {dead['status']} with {len(dead['findings'])} "
@@ -151,7 +170,8 @@ def _run_self_test() -> int:
         print(f"self-test: {failures} failure(s)", file=sys.stderr)
         return 1
     print("self-test: OK (clean passes; each bare Name/Attr/Compare/BinOp/BoolOp/UnaryOp/"
-          "Subscript is caught; docstrings, `...`, and calls are not)")
+          "Subscript and a pure-element Tuple are caught; docstrings, `...`, calls, and a "
+          "tuple holding a call are not)")
     return 0
 
 

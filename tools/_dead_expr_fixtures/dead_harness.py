@@ -27,6 +27,7 @@ def prove(impl, flag, other):
     flag and other      # 5: BoolOp — dead
     not flag            # 6: UnaryOp — dead
     CONFIG["k"]         # 7: Subscript — dead (no-op lookup)
+    flag, other         # 8: Tuple of pure elements — dead (trailing-comma footgun)
     return impl(1) != CORPUS[0][1]
 
 
