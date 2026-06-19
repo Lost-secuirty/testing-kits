@@ -487,6 +487,11 @@ TEETH = Teeth(
     prove=prove,
     oracle=oracle_analyze,
     mutants=(
+        # fragility waiver (DP5): threshold_boundary is INHERENTLY single-load-bearing.
+        # A >= vs > boundary defect differs from the correct oracle ONLY on a series whose
+        # fitted slope lands EXACTLY on the threshold; every other series yields the same
+        # verdict in both. So a 2nd discriminating case cannot exist without a contrived
+        # second threshold — the single boundary_exact fixture is the honest, minimal catch.
         Mutant("threshold_boundary", threshold_boundary,
                "uses slope >= threshold instead of strict slope > threshold -> a "
                "series sitting exactly on the threshold is wrongly flagged as a leak"),

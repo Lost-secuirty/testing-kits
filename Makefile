@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-core test-security test-ai test-pharmacy selftest teeth proof canary guard guard-update vacuity purity circularity corpus_size dead_expr mutmut report lint clean help
+.PHONY: test test-fast test-core test-security test-ai test-pharmacy selftest teeth proof canary guard guard-update vacuity purity circularity corpus_size dead_expr fragility mutmut report lint clean help
 
 PY ?= python3
 
@@ -21,6 +21,7 @@ help:
 	@echo "  circularity    Prove no TEETH prove() calls its own oracle at runtime"
 	@echo "  corpus_size    Prove each corpus_size counts the collection prove() judges"
 	@echo "  dead_expr      Flag bare side-effect-free expression statements (advisory)"
+	@echo "  fragility      Enforce each judged corpus holds >=2 cases (advisory)"
 	@echo "  mutmut         Advisory mutation lane (Linux/WSL only; never blocks)"
 	@echo "  report         Regenerate STATUS.md"
 	@echo "  lint           py_compile + ruff if installed"
@@ -66,6 +67,9 @@ corpus_size:
 
 dead_expr:
 	$(PY) tools/dead_expr_checker.py
+
+fragility:
+	$(PY) tools/fragility_checker.py
 
 mutmut:
 	$(PY) tools/mutmut_lane.py

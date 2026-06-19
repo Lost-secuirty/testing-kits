@@ -48,6 +48,7 @@ PROTECTED_FILES = [
     "tools/corpus_size_checker.py",
     "tools/dead_expr_checker.py",
     "tools/file_guard.py",
+    "tools/fragility_checker.py",
     "tools/gate_canary.py",
     "tools/harness_registry.py",
     "tools/proof_audit.py",
