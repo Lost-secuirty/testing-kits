@@ -16,7 +16,8 @@ Allowed:
 - agent handoff guidance;
 - observability and reproducibility docs;
 - failure examples;
-- human-maintained snapshot references.
+- human-maintained snapshot references;
+- doc-size and connector-safety guidance.
 
 Not allowed in this pass:
 
@@ -33,11 +34,12 @@ Not allowed in this pass:
 
 - [x] Add `docs/GOLDEN_STATS.md`.
 - [x] Update README's stale Batch 5 proof snapshot.
+- [x] Add `docs/DOC_SIZE_POLICY.md` after connector truncation appeared on `HARNESS_INVENTORY.md`.
 - [ ] Add inventory-count versus proof-strength note to `HARNESS_INVENTORY.md`.
 
 Status:
 
-`HARNESS_INVENTORY.md` still needs a top-section note if a safe full-file edit path is available. Do not overwrite it from a truncated read.
+`HARNESS_INVENTORY.md` still needs a top-section note if a safe full-file edit path is available. Do not overwrite it from a truncated read. If no safe patch path is available, leave the large inventory untouched and keep the source-of-truth boundary in `README.md`, `docs/GOLDEN_STATS.md`, and `docs/DOC_SIZE_POLICY.md`.
 
 ## Batch 1 — Reader path
 
@@ -80,6 +82,7 @@ Status:
 - [ ] No generated `STATUS.md` or `STATUS.json` committed.
 - [ ] Every proof count names its source.
 - [ ] README links to the new reader path.
+- [ ] Large docs are not overwritten from truncated connector reads.
 - [ ] Commands run are listed exactly.
 - [ ] Commands not run are listed with reasons.
 - [ ] CI/proof result is not overclaimed.
