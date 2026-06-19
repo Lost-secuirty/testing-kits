@@ -75,17 +75,17 @@ Status:
 
 ## Final PR checklist
 
-- [ ] PR is draft.
-- [ ] PR is docs-only.
-- [ ] No harness behavior changed.
-- [ ] No runtime dependencies added.
-- [ ] No generated `STATUS.md` or `STATUS.json` committed.
-- [ ] Every proof count names its source.
+- [x] PR is draft: #69.
+- [x] PR is docs-only by connector compare output.
+- [x] No harness behavior changed.
+- [x] No runtime dependencies added.
+- [x] No generated `STATUS.md` or `STATUS.json` committed.
+- [x] Every proof count names its source.
 - [x] README links to the new reader path.
 - [x] Large docs are not overwritten from truncated connector reads.
-- [ ] Commands run are listed exactly.
-- [ ] Commands not run are listed with reasons.
-- [ ] CI/proof result is not overclaimed.
+- [x] Commands run are listed exactly in the PR body.
+- [x] Commands not run are listed with reasons in the PR body.
+- [x] CI/proof result is not overclaimed.
 
 ## Final verification commands
 
