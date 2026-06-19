@@ -44,26 +44,26 @@ Status:
 ## Batch 1 — Reader path
 
 - [x] Add `docs/START_HERE.md`.
-- [ ] Link reader-path docs from README.
+- [x] Link reader-path docs from README.
 
 ## Batch 2 — Proof language
 
 - [x] Add `docs/ANTI_VACUITY_MODEL.md`.
 - [x] Add `docs/PROOF_STRENGTH_LADDER.md`.
-- [ ] Link proof-language docs from README.
+- [x] Link proof-language docs from README.
 
 ## Batch 3 — Porting protocol
 
 - [x] Add `docs/PORTING_GUIDE.md`.
 - [x] Add `docs/PROPERTY_BASED_PORTING.md`.
 - [x] Add `docs/INTEGRATION_LAYER_GUIDE.md`.
-- [ ] Link porting docs from README.
+- [x] Link porting docs from README.
 
 ## Batch 4 — AI and agent guidance
 
 - [x] Add `docs/AI_CONSUMPTION_GUIDE.md`.
 - [x] Add `docs/AGENT_COMMUNICATION_GUIDE.md`.
-- [ ] Link AI docs from README.
+- [x] Link AI docs from README.
 
 ## Batch 5 — Observability, reproducibility, debt, and failure examples
 
@@ -71,7 +71,7 @@ Status:
 - [x] Add `docs/REPRODUCIBILITY.md`.
 - [x] Add `docs/TECHNICAL_DEBT_LEDGER.md`.
 - [x] Add at least three controlled failure examples.
-- [ ] Link these docs from README.
+- [x] Link these docs from README.
 
 ## Final PR checklist
 
@@ -81,8 +81,8 @@ Status:
 - [ ] No runtime dependencies added.
 - [ ] No generated `STATUS.md` or `STATUS.json` committed.
 - [ ] Every proof count names its source.
-- [ ] README links to the new reader path.
-- [ ] Large docs are not overwritten from truncated connector reads.
+- [x] README links to the new reader path.
+- [x] Large docs are not overwritten from truncated connector reads.
 - [ ] Commands run are listed exactly.
 - [ ] Commands not run are listed with reasons.
 - [ ] CI/proof result is not overclaimed.
