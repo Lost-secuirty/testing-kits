@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-core test-security test-ai test-pharmacy selftest teeth proof canary guard guard-update vacuity purity mutmut report lint clean help
+.PHONY: test test-fast test-core test-security test-ai test-pharmacy selftest teeth proof canary guard guard-update vacuity purity circularity mutmut report lint clean help
 
 PY ?= python3
 
@@ -18,6 +18,7 @@ help:
 	@echo "  guard-update   Re-baseline .fileguard.json (commit the bump in the diff)"
 	@echo "  vacuity        Vacuous-green meta-gate (neuter each mapped oracle, expect red)"
 	@echo "  purity         Prove every TEETH prove() is clock/RNG/filesystem/network-free"
+	@echo "  circularity    Prove no TEETH prove() calls its own oracle at runtime"
 	@echo "  mutmut         Advisory mutation lane (Linux/WSL only; never blocks)"
 	@echo "  report         Regenerate STATUS.md"
 	@echo "  lint           py_compile + ruff if installed"
@@ -54,6 +55,9 @@ vacuity:
 
 purity:
 	$(PY) tools/prove_purity_checker.py
+
+circularity:
+	$(PY) tools/prove_circularity_checker.py
 
 mutmut:
 	$(PY) tools/mutmut_lane.py
