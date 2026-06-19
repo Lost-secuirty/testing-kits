@@ -55,19 +55,27 @@ _RNG_GLOBAL = {                                # the module-level (unseeded) RNG
 }
 _NET_ROOTS = {"socket", "urllib", "http", "ssl", "ftplib", "smtplib", "requests", "httpx"}
 _NONDET_ROOTS = {"secrets"}                    # secrets.* — any
-_OS_IMPURE = {"urandom", "getpid", "getenv", "system", "popen", "times", "times_ns"}
+_OS_IMPURE = {
+    "urandom", "getpid", "getenv", "system", "popen", "times", "times_ns",
+    "listdir", "scandir", "walk", "stat", "lstat", "remove", "rename", "replace",
+    "makedirs", "removedirs", "access", "chmod", "chdir", "getcwd",
+    "exists", "isfile", "isdir", "getsize", "getmtime", "getctime",  # os.path.* reads
+}
 _UUID_IMPURE = {"uuid1", "uuid4"}
 _BUILTIN_IO = {"open", "input"}                # bare builtins that touch fs / stdin
-# Filesystem I/O methods (matched on the leaf attr regardless of receiver, since the
-# receiver is usually a pathlib.Path instance the AST can't type). Distinctive enough.
+_ESCAPE = {"eval", "exec", "compile", "__import__", "breakpoint"}  # dynamic-execution escapes
+# Filesystem I/O methods, matched on the LEAF attr regardless of receiver — the receiver is
+# usually a pathlib.Path instance (or a Path-returning call) the AST can't type. These names
+# are distinctive enough that a false positive is unlikely.
 _FS_METHODS = {
     "read_text", "write_text", "read_bytes", "write_bytes", "open",
     "unlink", "mkdir", "rmdir", "touch", "iterdir", "glob", "rglob",
+    "exists", "is_file", "is_dir", "is_symlink", "stat", "lstat", "samefile",
 }
 # Every builtin is deterministic and side-effect-free EXCEPT the two I/O ones, which are
 # flagged explicitly above. Deriving from `builtins` also whitelists every exception name
 # (ValueError, KeyError, StopIteration, ...) a pure prove legitimately constructs/raises.
-_SAFE_BUILTINS = frozenset(dir(builtins)) - _BUILTIN_IO
+_SAFE_BUILTINS = frozenset(dir(builtins)) - _BUILTIN_IO - _ESCAPE
 
 
 def _dotted(node: ast.AST) -> list[str] | None:
@@ -89,6 +97,11 @@ def _collect_imports(tree: ast.Module) -> dict[str, str]:
     `import os.path as p`    -> {'p': 'os.path'}
     `from time import monotonic`        -> {'monotonic': 'time.monotonic'}
     `from time import monotonic as mono`-> {'mono': 'time.monotonic'}
+
+    Collected module-wide (ast.walk), so a function-LOCAL impure import (e.g. a clock imported
+    inside prove itself) is still caught. The rare cost is that an alias bound only in another
+    scope is treated as global — an over-approximation that biases toward flagging, never toward
+    missing, which is the safe direction for a purity gate.
     """
     aliases: dict[str, str] = {}
     for node in ast.walk(tree):
@@ -212,32 +225,43 @@ def check_harness(path: Path) -> dict:
         for stmt in (fn.body if isinstance(fn, ast.FunctionDef) else [fn.body]):
             collector.visit(stmt)
         for func in collector.funcs:
-            parts = _dotted(func)
-            if parts is None:
-                continue  # a call on a call result, subscript, etc. — not a named target
-            resolved = _resolve(parts, aliases)
-            label = _classify(resolved)
-            if label is None and len(parts) >= 2 and parts[-1] in _FS_METHODS:
-                label = f"{'.'.join(parts)}() — filesystem I/O"
-            if label:
-                line = getattr(func, "lineno", "?")
-                where = fn.name if isinstance(fn, ast.FunctionDef) else "<lambda>"
-                findings.append(f"{path.name}:{line} in {where}(): {label}")
+            line = getattr(func, "lineno", "?")
+            where = fn.name if isinstance(fn, ast.FunctionDef) else "<lambda>"
+            label: str | None = None
+            if isinstance(func, ast.Attribute):
+                parts = _dotted(func)                       # None if receiver isn't a Name chain
+                if parts:
+                    label = _classify(_resolve(parts, aliases))
+                if label is None and func.attr in _FS_METHODS:
+                    label = f".{func.attr}() — filesystem I/O"  # catches Path(x).read_text()
+                # else a pure external/method (json.dumps, a method on a corpus object) — ok
+            elif isinstance(func, ast.Name):
+                name = func.id
+                resolved = _resolve([name], aliases)        # imported alias -> dotted origin
+                if len(resolved) > 1:
+                    label = _classify(resolved)             # e.g. `from time import monotonic`
+                if label is None:
+                    if name in _ESCAPE:
+                        label = f"{name}() — dynamic code execution (escapes static analysis)"
+                    elif name in _BUILTIN_IO:
+                        label = f"builtin {name}() — I/O"
+                    elif name in defs_map and name not in seen:
+                        seen.add(name)
+                        queue.append(defs_map[name])
+                        continue
+                    elif (name in defs_map or name in params or name in _SAFE_BUILTINS
+                          or name in module_classes or name in aliases):
+                        continue  # resolved-safe: local fn (queued), param, builtin, class ctor, import
+                    else:
+                        unresolved.add(name)
+                        continue
+            else:
+                # func is a Call/Subscript/etc. — a dynamic target AST can't name. Never silently
+                # pure: report it so the harness reads UNANALYZABLE, not OK.
+                unresolved.add(f"<dynamic call @ line {line}>")
                 continue
-            if len(parts) == 1:  # a bare name call — resolve it
-                name = parts[0]
-                if name in _BUILTIN_IO:
-                    findings.append(f"{path.name}:{getattr(func,'lineno','?')}: builtin {name}() — I/O")
-                elif name in defs_map and name not in seen:
-                    seen.add(name)
-                    queue.append(defs_map[name])
-                elif (name in defs_map or name in params or name in _SAFE_BUILTINS
-                      or name in module_classes or name in aliases):
-                    pass  # resolved-safe: a local fn (queued), callable param, builtin, class ctor, or import
-                else:
-                    unresolved.add(name)
-            # an Attribute call that resolved to a pure external (json.dumps, math.sqrt, a
-            # method on a corpus object) is fine — no finding, no unresolved.
+            if label:
+                findings.append(f"{path.name}:{line} in {where}(): {label}")
 
     if findings:
         return {"status": "IMPURE", "findings": sorted(set(findings))}
@@ -287,7 +311,7 @@ def _run_self_test() -> int:
     fx = ROOT / "tools" / "_purity_fixtures"
     failures = 0
     expect = {"pure_harness.py": "OK", "impure_harness.py": "IMPURE",
-              "aliased_harness.py": "IMPURE"}
+              "aliased_harness.py": "IMPURE", "escape_io_harness.py": "IMPURE"}
     for name, want in expect.items():
         got = check_harness(fx / name)["status"]
         if got != want:
@@ -296,7 +320,7 @@ def _run_self_test() -> int:
     if failures:
         print(f"self-test: {failures} failure(s)", file=sys.stderr)
         return 1
-    print("self-test: OK (pure passes; dotted-clock and imported-alias-clock both detected)")
+    print("self-test: OK (pure passes; dotted/aliased clock, eval-escape, and pathlib I/O all detected)")
     return 0
 
 

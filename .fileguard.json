@@ -9,7 +9,7 @@
     "tools/gate_canary.py": "ba03770ea10f2b9efb8970c5b7edfb73c679a589d4f359c55cdf23eb643c8a08",
     "tools/harness_registry.py": "ecf35748bb42d172d67eb2ea10a7e3360a5e381ee37285a0c676cb40862b2378",
     "tools/proof_audit.py": "16515c09bfe9b0515eaac3ae152b38e1b10e042b01f62ccf6cc2e699feb96efa",
-    "tools/prove_purity_checker.py": "5c1d290a3321cd6dfa28f6a7e3ba34830af9ff9a762dc30f7aad7e950dc2860c",
+    "tools/prove_purity_checker.py": "22845729e3858f916fce847d66e1793579c4211cf2b4ea6c72a3addb5607520c",
     "tools/scan_staged.py": "82f12f1d4b7018b6883b1fc23ad5e69b36bea54ae7910ba8ba96020fd7fb9987",
     "tools/teeth_check.py": "9f2b2550d2f400b31810887c8c3ff18eca89b45de98d7dfafa7a49659a4e6996",
     "tools/vacuity_gate.py": "40b76b5dd53dae878074566f8fbd7b511925c28b6498cb3f3d9005d1b4264c52"
