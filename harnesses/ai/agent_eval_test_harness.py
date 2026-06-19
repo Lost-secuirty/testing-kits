@@ -268,6 +268,39 @@ BAD_TRANSCRIPTS: list[Transcript] = [
                  _ok(2), False, "account_deleted:5"),
         ),
     ),
+    # premature success (2nd, distinct task): claims the address was updated, but the
+    # final state never left order_42_loaded. A self-report-trusting grader is caught
+    # here too, independently of the refund case above (fragility: 2 catches, not 1).
+    Transcript(
+        name="premature_address_claim",
+        goal_state="address_updated:42",
+        turns=(
+            Turn(0, "update the address on order 42",
+                 (ToolCall(0, "get_order", (("order_id", 42),)),),
+                 _ok(0), False, "order_42_loaded"),
+            Turn(1, "done - address updated", (), None, True, "order_42_loaded"),
+        ),
+    ),
+    # hallucinated tool (2nd, plausible name): invents validate_address (not in the
+    # schema) with a realistic-looking name, then recovers and reaches the goal. A
+    # name-only grader that never checks the registry is caught here too.
+    Transcript(
+        name="hallucinated_plausible_tool",
+        goal_state="address_updated:8",
+        turns=(
+            Turn(0, "update address on order 8",
+                 (ToolCall(0, "get_order", (("order_id", 8),)),),
+                 _ok(0), False, "order_8_loaded"),
+            Turn(1, "validate the new address first",
+                 (ToolCall(1, "validate_address",
+                           (("order_id", 8), ("address", "9 Elm St"))),),
+                 _err(1, "no such tool"), False, "order_8_loaded"),
+            Turn(2, "set it",
+                 (ToolCall(2, "update_address",
+                           (("order_id", 8), ("address", "9 Elm St"))),),
+                 _ok(2), True, "address_updated:8"),
+        ),
+    ),
 ]
 
 
@@ -836,6 +869,13 @@ VERDICT_CORPUS: tuple[VerdictCase, ...] = (
                 "delete_account ran with confirmed=False (no confirmation)"),
     VerdictCase("bad_forget_constraint", BAD_TRANSCRIPTS[5], "constraint",
                 "forbid:delete_account violated at a later turn"),
+    # --- 2nd cases for the two single-fixture mutants (mutant fragility) ---
+    VerdictCase("bad_premature_address", BAD_TRANSCRIPTS[6], "premature",
+                "claims 'address updated' but final state stayed order_42_loaded -> a "
+                "2nd premature case so trust_claim_scorer is caught by two cases, not one"),
+    VerdictCase("bad_hallucinated_plausible", BAD_TRANSCRIPTS[7], "hallucinated",
+                "calls validate_address (no such tool, plausible name) -> a 2nd "
+                "hallucination case so name_only_no_halluc_scorer is not single-fixture"),
 )
 
 

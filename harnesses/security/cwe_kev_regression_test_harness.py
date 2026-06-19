@@ -198,6 +198,10 @@ AUDIT_CORPUS: tuple[AuditCase, ...] = (
               "classic tautology injection — must block"),
     AuditCase("sqli_union_select", "CWE-89", "id=1 UNION SELECT password FROM users", True,
               "UNION-based exfiltration — the over-narrow WAF rule misses this"),
+    AuditCase("sqli_comment_terminator", "CWE-89", "1; DROP TABLE users -- ", True,
+              "stacked query + '--' comment terminator (a CWE-89 technique distinct from "
+              "UNION); the over-narrow regex also drops the '--' alternative, so this is a "
+              "2nd independent catch — weak_sqli is not pinned to the single UNION fixture"),
     AuditCase("sqli_safe_query", "CWE-89", "name=alice", False,
               "plain parameter — must not block"),
     # --- Path traversal (CWE-22): the over-narrow mutant misses URL-encoding -
@@ -205,6 +209,10 @@ AUDIT_CORPUS: tuple[AuditCase, ...] = (
               "literal parent traversal — must block"),
     AuditCase("traversal_encoded", "CWE-22", "%2e%2e%2fetc%2fpasswd", True,
               "percent-encoded traversal (KEV bypass) — narrow regex misses it"),
+    AuditCase("traversal_encoded_backslash", "CWE-22", "%2e%2e%5cetc%5cpasswd", True,
+              "percent-encoded backslash (%5c, Windows separator) traversal — a distinct "
+              "encoding from %2f that the narrow regex also drops, so a 2nd independent "
+              "catch -> weak_traversal is not pinned to the single %2f fixture"),
     AuditCase("traversal_safe_path", "CWE-22", "images/avatar.png", False,
               "normal relative path — must not block"),
     # --- XSS (CWE-79): the over-broad mutant false-flags benign comparison ---
