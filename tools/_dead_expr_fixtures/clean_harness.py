@@ -25,6 +25,7 @@ def prove(impl):
     """Docstring statements are constants, never flagged."""
     _noop()                      # bare Call — excluded (may have side effects)
     print("running")             # bare Call — excluded
+    print("pair"), _noop()       # bare tuple with call elements — excluded (elements may have effects)
     if (total := len(CORPUS)):   # walrus binds a name — excluded
         return total > 0
     return any(impl(x) != y for x, y in CORPUS)
