@@ -710,7 +710,7 @@
     "mutants_total": 4,
     "mutants_caught": 4,
     "mutants_uncaught": [],
-    "corpus_size": 19,
+    "corpus_size": 1,
     "paired_test": "tests/core/test_iot_telemetry_test_harness.py",
     "paired_test_exists": true,
     "proof_test": "tests/core/test_iot_telemetry_proof.py",

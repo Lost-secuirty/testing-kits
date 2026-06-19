@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-core test-security test-ai test-pharmacy selftest teeth proof canary guard guard-update vacuity purity circularity dead_expr mutmut report lint clean help
+.PHONY: test test-fast test-core test-security test-ai test-pharmacy selftest teeth proof canary guard guard-update vacuity purity circularity corpus_size dead_expr mutmut report lint clean help
 
 PY ?= python3
 
@@ -19,6 +19,7 @@ help:
 	@echo "  vacuity        Vacuous-green meta-gate (neuter each mapped oracle, expect red)"
 	@echo "  purity         Prove every TEETH prove() is clock/RNG/filesystem/network-free"
 	@echo "  circularity    Prove no TEETH prove() calls its own oracle at runtime"
+	@echo "  corpus_size    Prove each corpus_size counts the collection prove() judges"
 	@echo "  dead_expr      Flag bare side-effect-free expression statements (advisory)"
 	@echo "  mutmut         Advisory mutation lane (Linux/WSL only; never blocks)"
 	@echo "  report         Regenerate STATUS.md"
@@ -59,6 +60,9 @@ purity:
 
 circularity:
 	$(PY) tools/prove_circularity_checker.py
+
+corpus_size:
+	$(PY) tools/corpus_size_checker.py
 
 dead_expr:
 	$(PY) tools/dead_expr_checker.py

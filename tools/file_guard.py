@@ -45,6 +45,7 @@ PROTECTED_FILES = [
     ".githooks/pre-commit",
     "harnesses/_teeth.py",
     "tools/control_audit.py",
+    "tools/corpus_size_checker.py",
     "tools/dead_expr_checker.py",
     "tools/file_guard.py",
     "tools/gate_canary.py",
