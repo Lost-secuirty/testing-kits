@@ -9,17 +9,17 @@ returns a bool, so ``proof_audit`` stays green. That exact bug shipped once
 and was only caught by a human reviewer. This gate makes it machine-checkable.
 
 It is **static** (AST only — no import, no execution): for each non-legacy harness it
-finds the function bound to ``TEETH.prove``, walks that function's *within-module call
-graph* (so a clock used by an unrelated mock server is NOT flagged — only code reachable
-from ``prove``), and flags any reachable call into a clock / RNG / network / filesystem
-API. Scoping to the call graph is the whole point: it pinpoints impurity on the proof
-path without drowning in the harness's legitimate I/O elsewhere.
+finds the MODULE-LEVEL function bound to ``TEETH.prove``, walks that function's
+*within-module call graph* (so a clock used by an unrelated mock server is NOT flagged —
+only code reachable from ``prove``), and flags any reachable call into a clock / RNG /
+network / filesystem API. Both call forms are detected: attribute (``time.monotonic()``)
+AND imported aliases (``from time import monotonic; monotonic()``), via an import map.
 
-Known limits (documented, not hidden): AST cannot follow dynamic dispatch, so a helper
-reached only through an instance method (``self.f()``) or a passed-in callable is not
-traversed; such a ``prove`` is reported ``unanalyzable`` (advisory), never silently
-passed. Seeded ``random.Random(<seed>)`` is allowed; the bare global ``random.*`` API
-is not.
+Soundness over false-confidence: a reachable call that cannot be resolved to a module
+function, a known pure builtin, an import, or a callable parameter is treated as
+``unanalyzable`` (advisory) — never silently counted as pure. AST cannot follow dynamic
+dispatch, so a prove reachable only through an instance method is reported unanalyzable
+too. Seeded ``random.Random(<seed>)`` is allowed; the bare global ``random.*`` is not.
 
 Usage:
   python tools/prove_purity_checker.py            # gate every non-legacy harness
@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import builtins
 import json
 import sys
 from pathlib import Path
@@ -41,87 +42,129 @@ if str(ROOT) not in sys.path:
 FLAVORS = ("core", "security", "ai")  # pharmacy is legacy (older soft gate); excluded
 
 # --- what counts as impure on the proof path -------------------------------------------
-# A reachable call is impure if its dotted target matches one of these. Matching is on the
-# call's dotted form (e.g. "time.monotonic", "datetime.datetime.now"): the leftmost Name is
-# the root, the final attribute is the leaf.
-_CLOCK_ROOTS = {"time"}                       # any time.* — clock read or sleep
+# Matching is on a call's dotted form after the leftmost name is resolved through the
+# module's import map (so `t.monotonic` with `import time as t`, and the bare `monotonic`
+# from `from time import monotonic`, both normalize to "time.monotonic").
+_CLOCK_ROOTS = {"time"}                        # any time.* — clock read or sleep
 _CLOCK_LEAVES = {"now", "utcnow", "today", "monotonic", "time", "perf_counter"}
 _RNG_ROOT = "random"
-_RNG_GLOBAL = {                               # the module-level (unseeded) RNG surface
+_RNG_GLOBAL = {                                # the module-level (unseeded) RNG surface
     "random", "randint", "randrange", "choice", "choices", "shuffle",
     "uniform", "sample", "getrandbits", "betavariate", "gauss", "normalvariate",
     "seed",  # reseeding the global RNG is itself a shared-state side effect
 }
 _NET_ROOTS = {"socket", "urllib", "http", "ssl", "ftplib", "smtplib", "requests", "httpx"}
-_NONDET_ROOTS = {"secrets"}                   # secrets.* — any
+_NONDET_ROOTS = {"secrets"}                    # secrets.* — any
 _OS_IMPURE = {"urandom", "getpid", "getenv", "system", "popen", "times", "times_ns"}
 _UUID_IMPURE = {"uuid1", "uuid4"}
-_BUILTIN_IO = {"open", "input"}               # bare builtins that touch fs / stdin
+_BUILTIN_IO = {"open", "input"}                # bare builtins that touch fs / stdin
+# Filesystem I/O methods (matched on the leaf attr regardless of receiver, since the
+# receiver is usually a pathlib.Path instance the AST can't type). Distinctive enough.
+_FS_METHODS = {
+    "read_text", "write_text", "read_bytes", "write_bytes", "open",
+    "unlink", "mkdir", "rmdir", "touch", "iterdir", "glob", "rglob",
+}
+# Every builtin is deterministic and side-effect-free EXCEPT the two I/O ones, which are
+# flagged explicitly above. Deriving from `builtins` also whitelists every exception name
+# (ValueError, KeyError, StopIteration, ...) a pure prove legitimately constructs/raises.
+_SAFE_BUILTINS = frozenset(dir(builtins)) - _BUILTIN_IO
 
 
-def _dotted(node: ast.AST) -> str | None:
-    """Return 'a.b.c' for a Name/Attribute chain, else None."""
+def _dotted(node: ast.AST) -> list[str] | None:
+    """Return ['time','monotonic'] for a Name/Attribute chain, else None."""
     parts: list[str] = []
     while isinstance(node, ast.Attribute):
         parts.append(node.attr)
         node = node.value
     if isinstance(node, ast.Name):
         parts.append(node.id)
-        return ".".join(reversed(parts))
+        return list(reversed(parts))
     return None
 
 
-def _impurity(call: ast.Call) -> str | None:
-    """Classify a Call as impure on the proof path, or None if pure. Returns a label."""
-    func = call.func
-    if isinstance(func, ast.Name):
-        if func.id in _BUILTIN_IO:
-            return f"builtin {func.id}() — filesystem/stdin I/O"
-        return None
-    dotted = _dotted(func)
-    if not dotted:
-        return None
-    parts = dotted.split(".")
+def _collect_imports(tree: ast.Module) -> dict[str, str]:
+    """Map each locally-bound import name to its dotted origin.
+
+    `import time`           -> {'time': 'time'}
+    `import os.path as p`    -> {'p': 'os.path'}
+    `from time import monotonic`        -> {'monotonic': 'time.monotonic'}
+    `from time import monotonic as mono`-> {'mono': 'time.monotonic'}
+    """
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                aliases[a.asname or a.name.split(".")[0]] = a.name
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            for a in node.names:
+                if a.name != "*":
+                    aliases[a.asname or a.name] = f"{node.module}.{a.name}"
+    return aliases
+
+
+def _classify(parts: list[str]) -> str | None:
+    """Classify a resolved dotted call (e.g. ['time','monotonic']) as impure, else None."""
     root, leaf = parts[0], parts[-1]
     if root in _CLOCK_ROOTS:
-        return f"{dotted}() — clock/sleep"
+        return f"{'.'.join(parts)}() — clock/sleep"
     if leaf in _CLOCK_LEAVES and ("datetime" in parts or "date" in parts):
-        return f"{dotted}() — wall-clock datetime"
+        return f"{'.'.join(parts)}() — wall-clock datetime"
     if root == _RNG_ROOT and leaf in _RNG_GLOBAL:
-        return f"{dotted}() — unseeded global RNG (use random.Random(<seed>))"
+        return f"{'.'.join(parts)}() — unseeded global RNG (use random.Random(<seed>))"
     if root in _NET_ROOTS:
-        return f"{dotted}() — network I/O"
+        return f"{'.'.join(parts)}() — network I/O"
     if root in _NONDET_ROOTS:
-        return f"{dotted}() — nondeterministic ({root})"
+        return f"{'.'.join(parts)}() — nondeterministic ({root})"
     if root == "os" and leaf in _OS_IMPURE:
-        return f"{dotted}() — os nondeterminism/IO"
+        return f"{'.'.join(parts)}() — os nondeterminism/IO"
     if root == "uuid" and leaf in _UUID_IMPURE:
-        return f"{dotted}() — random UUID"
+        return f"{'.'.join(parts)}() — random UUID"
     return None
 
 
-class _CallCollector(ast.NodeVisitor):
-    """Collect Call nodes and the local-function names called, within one function body."""
+def _resolve(parts: list[str], aliases: dict[str, str]) -> list[str]:
+    """Rewrite the leftmost name through the import map: ['t','monotonic'] -> ['time','monotonic']
+    given `import time as t`, and ['monotonic'] -> ['time','monotonic'] given a from-import."""
+    head = aliases.get(parts[0])
+    if head is None:
+        return parts
+    return head.split(".") + parts[1:]
+
+
+class _Calls(ast.NodeVisitor):
+    """Collect every Call's func node within one function body (descends into comprehensions
+    and nested expressions, but not into nested def/lambda bodies — those have their own scope)."""
 
     def __init__(self) -> None:
-        self.calls: list[ast.Call] = []
-        self.local_calls: set[str] = set()
+        self.funcs: list[ast.AST] = []
 
     def visit_Call(self, node: ast.Call) -> None:
-        self.calls.append(node)
-        if isinstance(node.func, ast.Name):
-            self.local_calls.add(node.func.id)
+        self.funcs.append(node.func)
         self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        pass  # don't recurse into nested defs; the graph walk handles module-level ones
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        self.generic_visit(node)  # a lambda shares the enclosing scope's calls
+
+
+def _params(fn: ast.AST) -> set[str]:
+    if not isinstance(fn, (ast.FunctionDef, ast.Lambda)):
+        return set()
+    a = fn.args
+    names = {p.arg for p in (*a.posonlyargs, *a.args, *a.kwonlyargs)}
+    if a.vararg:
+        names.add(a.vararg.arg)
+    if a.kwarg:
+        names.add(a.kwarg.arg)
+    return names
 
 
 def _prove_target(tree: ast.Module) -> ast.AST | str | None:
-    """Find the function bound to module-level ``TEETH.prove``.
-
-    Returns the FunctionDef/Lambda to analyze, or a str name we could not resolve, or None
-    if no TEETH/prove is present.
-    """
+    """Find the MODULE-LEVEL function bound to ``TEETH.prove`` (or a lambda)."""
     prove_ref: ast.AST | None = None
-    for node in tree.body:
+    for node in tree.body:  # module scope only
         if isinstance(node, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id == "TEETH" for t in node.targets
         ) and isinstance(node.value, ast.Call):
@@ -133,42 +176,75 @@ def _prove_target(tree: ast.Module) -> ast.AST | str | None:
     if isinstance(prove_ref, ast.Lambda):
         return prove_ref
     if isinstance(prove_ref, ast.Name):
-        for node in ast.walk(tree):
+        for node in tree.body:  # resolve against module-level defs only
             if isinstance(node, ast.FunctionDef) and node.name == prove_ref.id:
                 return node
-        return prove_ref.id  # named but not a module-level def (e.g. a method) — unanalyzable
-    return "<expr>"  # an attribute/partial/etc. — unanalyzable
+        return prove_ref.id  # bound to a non-module-level name (e.g. a method) — unanalyzable
+    return "<expr>"          # an attribute/partial/etc. — unanalyzable
 
 
 def check_harness(path: Path) -> dict:
     """Return {'status': OK|IMPURE|UNANALYZABLE|NO_TEETH, 'findings':[...]} for one harness."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    defs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    aliases = _collect_imports(tree)
+    # Helper-resolution map: every FunctionDef (incl. nested closures like `inner`/`cents`),
+    # but a module-level def always wins a name collision so a same-named nested function in
+    # an unrelated mock server can never cause a false IMPURE on the proof path.
+    nested = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    module_fns = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    defs_map = {**nested, **module_fns}
+    module_classes = {n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
     target = _prove_target(tree)
     if target is None:
         return {"status": "NO_TEETH", "findings": []}
     if isinstance(target, str):
         return {"status": "UNANALYZABLE", "findings": [f"prove not a module-level def ({target})"]}
 
-    # BFS the within-module call graph from the prove function/lambda.
     findings: list[str] = []
+    unresolved: set[str] = set()
     seen: set[str] = set()
-    bodies: list[ast.AST] = [target]
-    while bodies:
-        node = bodies.pop()
-        collector = _CallCollector()
-        collector.visit(node)
-        for call in collector.calls:
-            label = _impurity(call)
+    params: set[str] = set()
+    queue: list[ast.AST] = [target]
+    while queue:
+        fn = queue.pop()
+        params |= _params(fn)
+        collector = _Calls()
+        for stmt in (fn.body if isinstance(fn, ast.FunctionDef) else [fn.body]):
+            collector.visit(stmt)
+        for func in collector.funcs:
+            parts = _dotted(func)
+            if parts is None:
+                continue  # a call on a call result, subscript, etc. — not a named target
+            resolved = _resolve(parts, aliases)
+            label = _classify(resolved)
+            if label is None and len(parts) >= 2 and parts[-1] in _FS_METHODS:
+                label = f"{'.'.join(parts)}() — filesystem I/O"
             if label:
-                where = getattr(call, "lineno", "?")
-                fn = node.name if isinstance(node, ast.FunctionDef) else "<lambda>"
-                findings.append(f"{path.name}:{where} in {fn}(): {label}")
-        for name in collector.local_calls:
-            if name in defs and name not in seen:
-                seen.add(name)
-                bodies.append(defs[name])
-    return {"status": "IMPURE" if findings else "OK", "findings": sorted(set(findings))}
+                line = getattr(func, "lineno", "?")
+                where = fn.name if isinstance(fn, ast.FunctionDef) else "<lambda>"
+                findings.append(f"{path.name}:{line} in {where}(): {label}")
+                continue
+            if len(parts) == 1:  # a bare name call — resolve it
+                name = parts[0]
+                if name in _BUILTIN_IO:
+                    findings.append(f"{path.name}:{getattr(func,'lineno','?')}: builtin {name}() — I/O")
+                elif name in defs_map and name not in seen:
+                    seen.add(name)
+                    queue.append(defs_map[name])
+                elif (name in defs_map or name in params or name in _SAFE_BUILTINS
+                      or name in module_classes or name in aliases):
+                    pass  # resolved-safe: a local fn (queued), callable param, builtin, class ctor, or import
+                else:
+                    unresolved.add(name)
+            # an Attribute call that resolved to a pure external (json.dumps, math.sqrt, a
+            # method on a corpus object) is fine — no finding, no unresolved.
+
+    if findings:
+        return {"status": "IMPURE", "findings": sorted(set(findings))}
+    if unresolved:
+        return {"status": "UNANALYZABLE",
+                "findings": [f"unresolved reachable call(s): {', '.join(sorted(unresolved))}"]}
+    return {"status": "OK", "findings": []}
 
 
 def _discover() -> list[Path]:
@@ -179,31 +255,26 @@ def _discover() -> list[Path]:
 
 
 def run_gate(as_json: bool = False) -> int:
-    impure, unanalyzable, ok, no_teeth = [], [], [], []
+    buckets: dict[str, list[str]] = {"OK": [], "IMPURE": [], "UNANALYZABLE": [], "NO_TEETH": []}
     records = []
     for path in _discover():
         res = check_harness(path)
         rel = path.relative_to(ROOT).as_posix()
         records.append({"harness": rel, **res})
-        {"IMPURE": impure, "UNANALYZABLE": unanalyzable, "OK": ok, "NO_TEETH": no_teeth}[
-            res["status"]
-        ].append(rel)
-        if not as_json:
-            if res["status"] == "IMPURE":
-                print(f"  IMPURE        {rel}")
-                for f in res["findings"]:
-                    print(f"      - {f}")
-            elif res["status"] == "UNANALYZABLE":
-                print(f"  UNANALYZABLE  {rel}  ({res['findings'][0]})")
+        buckets[res["status"]].append(rel)
+        if not as_json and res["status"] in ("IMPURE", "UNANALYZABLE"):
+            tag = "IMPURE      " if res["status"] == "IMPURE" else "UNANALYZABLE"
+            print(f"  {tag}  {rel}")
+            for f in res["findings"]:
+                print(f"      - {f}")
     if as_json:
         print(json.dumps({"records": records,
-                          "summary": {"ok": len(ok), "impure": len(impure),
-                                      "unanalyzable": len(unanalyzable),
-                                      "no_teeth": len(no_teeth)}}, indent=2))
+                          "summary": {k.lower(): len(v) for k, v in buckets.items()}}, indent=2))
     else:
-        print(f"\nprove-purity: {len(ok)} pure, {len(impure)} impure, "
-              f"{len(unanalyzable)} unanalyzable (advisory), {len(no_teeth)} no-teeth.")
-    if impure:
+        print(f"\nprove-purity: {len(buckets['OK'])} pure, {len(buckets['IMPURE'])} impure, "
+              f"{len(buckets['UNANALYZABLE'])} unanalyzable (advisory), "
+              f"{len(buckets['NO_TEETH'])} no-teeth.")
+    if buckets["IMPURE"]:
         print("FAIL: a prove() reaches a clock/RNG/network/filesystem call — "
               "prove must judge a frozen corpus deterministically.", file=sys.stderr)
         return 1
@@ -211,23 +282,21 @@ def run_gate(as_json: bool = False) -> int:
 
 
 def _run_self_test() -> int:
-    """Prove the checker bites: an impure fixture MUST read IMPURE, a pure one MUST read OK."""
+    """Prove the checker bites: pure -> OK; an impure prove (via a helper) and an impure prove
+    using an IMPORTED-ALIAS clock both -> IMPURE (so neither call form can slip past)."""
     fx = ROOT / "tools" / "_purity_fixtures"
     failures = 0
-    pure = check_harness(fx / "pure_harness.py")
-    if pure["status"] != "OK":
-        failures += 1
-        print(f"FAIL: pure fixture read {pure['status']} {pure['findings']}, expected OK",
-              file=sys.stderr)
-    impure = check_harness(fx / "impure_harness.py")
-    if impure["status"] != "IMPURE":
-        failures += 1
-        print(f"FAIL: impure fixture read {impure['status']}, expected IMPURE "
-              "(the checker did not detect a clock call reachable from prove)", file=sys.stderr)
+    expect = {"pure_harness.py": "OK", "impure_harness.py": "IMPURE",
+              "aliased_harness.py": "IMPURE"}
+    for name, want in expect.items():
+        got = check_harness(fx / name)["status"]
+        if got != want:
+            failures += 1
+            print(f"FAIL: {name} read {got}, expected {want}", file=sys.stderr)
     if failures:
         print(f"self-test: {failures} failure(s)", file=sys.stderr)
         return 1
-    print("self-test: OK (pure fixture passes; impure fixture is detected via the call graph)")
+    print("self-test: OK (pure passes; dotted-clock and imported-alias-clock both detected)")
     return 0
 
 
