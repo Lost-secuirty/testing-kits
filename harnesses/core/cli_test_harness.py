@@ -33,6 +33,7 @@ from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 SAMPLE_CLI_SCRIPT = textwrap.dedent("""
 import argparse
 import json
+import sys
 import time
 
 __version__ = "1.2.3"
