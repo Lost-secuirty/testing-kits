@@ -11,7 +11,6 @@ import json
 import sys
 
 # Make the shared teeth contract importable whether run as a module or a script.
-import sys as _sys
 import threading
 import urllib.error
 import urllib.request
@@ -21,8 +20,8 @@ from enum import IntEnum
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path as _Path
 
-if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
-    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------

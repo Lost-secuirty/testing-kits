@@ -31,15 +31,14 @@ import random
 import sys
 
 # Make the shared teeth contract importable whether run as a module or a script.
-import sys as _sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path as _Path
 from typing import Any
 
-if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
-    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
