@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-core test-security test-ai test-pharmacy selftest teeth proof canary guard guard-update vacuity mutmut report lint clean help
+.PHONY: test test-fast test-core test-security test-ai test-pharmacy selftest teeth proof canary guard guard-update vacuity purity mutmut report lint clean help
 
 PY ?= python3
 
@@ -17,6 +17,7 @@ help:
 	@echo "  guard          Verify the gate machinery matches .fileguard.json"
 	@echo "  guard-update   Re-baseline .fileguard.json (commit the bump in the diff)"
 	@echo "  vacuity        Vacuous-green meta-gate (neuter each mapped oracle, expect red)"
+	@echo "  purity         Prove every TEETH prove() is clock/RNG/filesystem/network-free"
 	@echo "  mutmut         Advisory mutation lane (Linux/WSL only; never blocks)"
 	@echo "  report         Regenerate STATUS.md"
 	@echo "  lint           py_compile + ruff if installed"
@@ -50,6 +51,9 @@ guard-update:
 
 vacuity:
 	$(PY) tools/vacuity_gate.py
+
+purity:
+	$(PY) tools/prove_purity_checker.py
 
 mutmut:
 	$(PY) tools/mutmut_lane.py
