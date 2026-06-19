@@ -49,6 +49,7 @@ PROTECTED_FILES = [
     "tools/gate_canary.py",
     "tools/harness_registry.py",
     "tools/proof_audit.py",
+    "tools/prove_purity_checker.py",
     "tools/scan_staged.py",
     "tools/teeth_check.py",
     "tools/vacuity_gate.py",
