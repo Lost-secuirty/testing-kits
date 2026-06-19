@@ -93,8 +93,8 @@ Stdlib-AST gates that catch structural failures the swap-check can't. Shared les
 ## CI and merge mechanics
 
 - `required_conversation_resolution` means ANY unresolved bot review thread BLOCKS merge — resolve
-  via the GraphQL `resolveReviewThread` mutation (REST can't). Codacy, SonarCloud, Conventional-
-  commits, and CodeRabbit are NON-required (their red doesn't block); CodeRabbit skips small PRs,
+  via the GraphQL `resolveReviewThread` mutation (REST can't). Codacy, SonarCloud, and Conventional Commits
+  are NON-required (their red doesn't block); CodeRabbit skips small PRs,
   reviews large ones, and auto-resolves once a comment is addressed. `UNSTABLE` (advisory red) is
   mergeable; `BLOCKED` is not. Linear history only (squash/rebase); enforce_admins on, no bypass.
 - Review bots post threads only AFTER `ready_for_review` (a draft gets no review). Don't mark a PR
