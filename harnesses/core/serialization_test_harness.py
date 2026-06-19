@@ -19,7 +19,7 @@ import pickle
 import struct
 
 # Make the shared teeth contract importable whether run as a module or a script.
-import sys as _sys
+import sys
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -31,8 +31,8 @@ from pathlib import Path as _Path
 from threading import Thread
 from typing import Any
 
-if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
-    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -984,4 +984,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    _sys.exit(main())
+    sys.exit(main())

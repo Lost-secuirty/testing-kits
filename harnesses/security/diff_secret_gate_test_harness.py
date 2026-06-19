@@ -39,12 +39,11 @@ import re
 import sys
 
 # Make the shared teeth contract importable whether run as a module or a script.
-import sys as _sys
 from dataclasses import dataclass
 from pathlib import Path as _Path
 
-if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
-    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Teeth  # noqa: E402
 
 # ----------------------------------------------------------------------------
