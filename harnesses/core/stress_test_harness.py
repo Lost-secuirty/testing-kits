@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-stress_harness.py — Code-Only Stress Test Harness (2026)
+stress_test_harness.py — Code-Only Stress Test Harness (2026)
 =========================================================
 Pure-Python (ZERO dependencies) stress testing engine implementing:
   - Open workload model (constant arrival rate) to prevent coordinated omission
@@ -15,10 +15,10 @@ Uses only stdlib: asyncio, http.server, urllib. No pip install needed.
 Based on research from: "Architecting High-Performance Code-Only Test Harnesses"
 
 Usage:
-  python stress_harness.py --url http://localhost:8080 --rate 100 --duration 30
-  python stress_harness.py --self-test
-  python stress_harness.py --list-scenarios
-  python stress_harness.py --help
+  python stress_test_harness.py --url http://localhost:8080 --rate 100 --duration 30
+  python stress_test_harness.py --self-test
+  python stress_test_harness.py --list-scenarios
+  python stress_test_harness.py --help
 
 Author: Scott (codeing testing harnesses project)
 """
@@ -810,26 +810,26 @@ def start_mock_server(port: int = 8080) -> ThreadingHTTPServer:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="stress_harness",
+        prog="stress_test_harness",
         description="Code-only Python stress test harness with open workload model",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Run against local server at 100 req/s for 30s
-  python stress_harness.py --url http://localhost:8080 --rate 100 --duration 30
+  python stress_test_harness.py --url http://localhost:8080 --rate 100 --duration 30
 
   # Read-heavy scenario with ramp-up
-  python stress_harness.py --url http://localhost:8080 --rate 500 --duration 60 \\
+  python stress_test_harness.py --url http://localhost:8080 --rate 500 --duration 60 \\
       --scenario read_heavy --ramp-up 10
 
   # Start the built-in mock server only
-  python stress_harness.py --mock-server
+  python stress_test_harness.py --mock-server
 
   # Run mock server + stress test together (self-test)
-  python stress_harness.py --self-test
+  python stress_test_harness.py --self-test
 
   # List available scenarios
-  python stress_harness.py --list-scenarios
+  python stress_test_harness.py --list-scenarios
         """,
     )
 

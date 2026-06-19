@@ -73,11 +73,12 @@ class ProofAuditToolTests(unittest.TestCase):
             root = Path(tmp)
             _write(root / "harnesses/core/__init__.py", "")
             _write(root / "harnesses/core/sample_test_harness.py", "# placeholder\n")
-            _write(root / "harnesses/core/stress_harness.py", "# placeholder\n")
+            # a bare *_harness.py (no _test_ infix) still short-names via the fallback
+            _write(root / "harnesses/core/widget_harness.py", "# placeholder\n")
 
             records = discover_harnesses(root)
 
-        self.assertEqual([record.name for record in records], ["sample", "stress"])
+        self.assertEqual([record.name for record in records], ["sample", "widget"])
 
     def test_non_legacy_without_teeth_is_pending_not_failing(self):
         with self._fixture_root() as tmp:

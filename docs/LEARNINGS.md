@@ -196,3 +196,9 @@ Append-only log of gotchas, fixes, API surprises, tool behavior, and verificatio
 - Flipped 5 more harnesses pending -> required (gate now **59 required / 10 pending / 8 legacy / 0 failing**): core/{stress,i18n,a11y,clock_skew}, ai/agentic.
 - Kept `core/stress` on its existing non-standard `stress_harness.py` filename for this PR. Renaming it would add import/path churn to a proof batch; the current TEETH work is already enough scope.
 - Useful corpus shapes: stress proves corrected latency/error/weight accounting; i18n uses frozen Unicode edge cases rather than locale claims; a11y summarizes issue buckets instead of brittle full messages; agentic adds a real `--self-test` because the prior script could exit 0 without exercising checks; clock-skew keeps the legacy scenario list intact and adds a separate TEETH scenario list.
+
+## 2026-06-18 - Phase 1.1: stress harness rename
+
+- Renamed `harnesses/core/stress_harness.py` -> `stress_test_harness.py` (and the paired test to `test_stress_test_harness.py`), closing the only non-standard harness filename. `tests/core/test_stress_proof.py` keeps its name (the short name stays `stress`, so the proof-test path is unchanged) and the ratchet/cards key stays `core/stress`.
+- The `if name == "stress_harness"` special-case in `tools/harness_registry.short_name()` was already redundant — the generic `_harness` suffix strip mapped it to `stress` anyway — so removing it changed no behavior; the proof-audit discovery test now exercises that fallback with a neutral `widget_harness.py` fixture instead.
+- Why it mattered beyond tidiness: `tools/vacuity_gate.py` discovers harnesses by the `*_test_harness.py` glob, so the old name was invisible to it (it enumerated 68 of 69 non-legacy harnesses). The standard name makes stress discoverable, so vacuity now reaches all 69 (stress shows as UNMAPPED until it gets `VACUITY_TARGETS` in the Phase 3 rollout).

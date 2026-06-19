@@ -163,5 +163,6 @@ diff_secret_gate, jwt, pii_redaction, security, supplychain, upload
 **ai (7):** R agent_eval, agent_memory_context, agentic, drift_detection, llm_eval,
 prompt_injection, rag_eval
 
-> `core/stress` still uses the non-standard `stress_harness.py` filename
-> (vs `*_test_harness.py`). Batch 7 promoted it without a rename to keep the proof diff scoped.
+> `core/stress` was renamed `stress_harness.py` -> `stress_test_harness.py` on 2026-06-18,
+> closing the last naming exception (it had been promoted under the old name in Batch 7 to
+> keep that proof diff scoped). The standard name also makes it discoverable to the vacuity gate.

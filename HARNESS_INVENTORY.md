@@ -51,8 +51,8 @@ Batch 7 adds a proof-test convention: new harnesses keep the paired unittest fil
 
 ## 1. Stress Test Harness
 
-**File:** `harnesses/core/stress_harness.py` (744 lines)
-**Tests:** `tests/core/test_stress_harness.py` — 52 tests
+**File:** `harnesses/core/stress_test_harness.py` (979 lines)
+**Tests:** `tests/core/test_stress_test_harness.py` — 53 tests
 **Port:** 8080 (default)
 
 Hammers an HTTP endpoint with concurrent requests to find performance limits. Measures throughput (req/sec), latency percentiles (p50/p95/p99), error rates, and connection failures under load. Supports configurable concurrency, duration, ramp-up, and request patterns. Uses asyncio for high-throughput load generation with live reporting.
