@@ -2,7 +2,7 @@
   "version": 1,
   "files": {
     ".githooks/pre-commit": "0510e24e672fadeca729c62dc9c2c96fff6550ee4cb67a399cadaacfe068b08d",
-    ".github/control-policy.json": "9ee70f25d29f821df0845b28b3327765d63d20d0bb42006936d4e8faded64cf7",
+    ".github/control-policy.json": "955d602355d093b9dad5f90e2d1b76c1a1369a9dbc73e7d1070f6677dc7dc384",
     "harnesses/_teeth.py": "9b76f721d58c276f6521da1468e1b747a93dfecd55e9f20abf25eae6694c92bd",
     "tools/control_audit.py": "168897185a74238bb422f11c566aada97c1f7421a1ea4d7739744bb3e6509dd8",
     "tools/corpus_size_checker.py": "ff17e8c2a81d339f0aee9e3fa16dadd27b74968229448274a61f426057223b39",
