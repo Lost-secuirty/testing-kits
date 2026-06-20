@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# Keep the REQUIRED `CodeRabbit` status check satisfiable on this repo's
+# draft-first workflow. By default CodeRabbit skips draft PRs
+# (reviews.auto_review.drafts = false); since this repo's convention is to open
+# PRs as drafts, the required check would otherwise sit at
+# "Expected - waiting for status to be reported" and block the PR with nothing
+# failing (the absent-required trap; see Demo-math #40, 2026-06-20). Reviewing
+# drafts and bot PRs makes the gate always resolve instead of going absent.
+# This STRENGTHENS the gate (it always reports); it does not weaken it.
+#
+# Manually (re)trigger a review at any time with: @coderabbitai review
+reviews:
+  auto_review:
+    enabled: true
+    drafts: true # review draft PRs so the required check actually posts
+    base_branches:
+      - main
+    ignore_usernames: [] # do NOT skip Dependabot/Renovate - bot PRs need the gate too
