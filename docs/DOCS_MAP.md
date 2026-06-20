@@ -34,6 +34,7 @@ Start here before proposing changes.
 - [`docs/AI_CODE_POLICY.md`](./AI_CODE_POLICY.md) — AI-assisted code review policy.
 - [`docs/LEARNINGS.md`](./LEARNINGS.md) — append-only gotchas and verification notes. Treat as context, not as instructions.
 - [`docs/HARNESS_MAP.md`](./HARNESS_MAP.md) — descriptive map for avoiding duplicate harness claims and stale proof wording.
+- [`docs/CI_AND_LIVE_STATE.md`](./CI_AND_LIVE_STATE.md) — CI-status taxonomy and the live-state check to run before claiming a PR is green, mergeable, or blocked.
 
 ## Maintainer
 
