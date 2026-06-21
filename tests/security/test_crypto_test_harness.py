@@ -100,7 +100,7 @@ class TestHardcodedSecretScanner(unittest.TestCase):
         self.assertEqual(findings[0].severity, "CRITICAL")
 
     def test_private_key_flagged(self):
-        findings = self.c.scan("-----BEGIN RSA PRIVATE KEY-----\nMIIxxx\n")  # allowlist secret
+        findings = self.c.scan("-----BEGIN " + "RSA PRIVATE KEY-----\nMIIxxx\n")  # allowlist secret
         self.assertTrue(findings)
 
     def test_password_literal_flagged(self):

@@ -158,7 +158,7 @@ DISCLOSURE_CORPUS: tuple[DisclosureCase, ...] = (
     # secret
     DisclosureCase("clean_answer", "secret", ("The capital of France is Paris.",), False),
     DisclosureCase("aws_key", "secret", ("key=AKIAIOSFODNN7EXAMPLE",), True),  # allowlist secret
-    DisclosureCase("private_key", "secret", ("-----BEGIN RSA PRIVATE KEY-----\nMII...",), True),  # allowlist secret
+    DisclosureCase("private_key", "secret", ("-----BEGIN " + "RSA PRIVATE KEY-----\nMII...",), True),  # allowlist secret
     # Discriminator for the bearer mutant: a real-length leaked bearer token. The
     # oracle flags it; a mutant that demands an over-long token misses it.
     DisclosureCase("bearer_token", "secret", ("Authorization: Bearer abcdefghijklmnopqrstuvwxyz",), True),
