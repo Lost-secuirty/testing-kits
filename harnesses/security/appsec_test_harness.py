@@ -922,6 +922,9 @@ def prove(impl: SsrfAuditor) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["ssrf_oracle"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=ssrf_oracle,

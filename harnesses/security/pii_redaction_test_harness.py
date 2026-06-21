@@ -354,6 +354,9 @@ def prove(impl: Callable[[PiiAuditCase], tuple[str, ...]]) -> bool:
     return any(impl(case) != case.expected_events for case in PII_AUDIT_CORPUS)
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_pii_audit"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_pii_audit,
@@ -524,18 +527,33 @@ def run_all_scenarios(verbose=False):
     return results
 
 
-def _emit_self_test_report(results):
+def _emit_self_test_report(results, as_json=False):
     report = Report("security/pii_redaction")
     for result in results:
         report.record(result.name, result.passed, detail=result.detail)
+    # The correct oracle, called BY ITS MODULE-GLOBAL NAME, must reproduce every
+    # frozen auditor literal exactly (the non-circular corpus teeth are judged
+    # against). The vacuity gate neuters oracle_pii_audit module-globally; this
+    # loop is what then goes red.
     for case in PII_AUDIT_CORPUS:
         report.add(
             f"oracle_pii_audit:{case.name}",
             list(case.expected_events),
             list(oracle_pii_audit(case)),
         )
+    # Teeth: prove(oracle) is False AND every planted mutant is caught.
     report.assert_teeth(TEETH)
-    return report.emit()
+    return report.emit(as_json=as_json)
+
+
+def _run_self_test(verbose=False, as_json=False):
+    """Gate-callable self-test: legacy scenarios + the frozen oracle corpus + teeth.
+
+    The vacuity gate calls this with no arguments. The oracle_pii_audit(case)
+    call above is module-global, so the gate's neuter mutates its return and the
+    report's expected/actual comparison fails loudly (non-vacuous).
+    """
+    return _emit_self_test_report(run_all_scenarios(verbose=verbose), as_json=as_json)
 
 
 # ============================================================
