@@ -95,12 +95,12 @@ class TestHardcodedSecretScanner(unittest.TestCase):
         self.c = HardcodedSecretScanner()
 
     def test_aws_key_flagged(self):
-        findings = self.c.scan('API_KEY = "AKIAIOSFODNN7EXAMPLE"')
+        findings = self.c.scan('API_KEY = "AKIAIOSFODNN7EXAMPLE"')  # allowlist secret
         self.assertTrue(findings)
         self.assertEqual(findings[0].severity, "CRITICAL")
 
     def test_private_key_flagged(self):
-        findings = self.c.scan("-----BEGIN RSA PRIVATE KEY-----\nMIIxxx\n")
+        findings = self.c.scan("-----BEGIN RSA PRIVATE KEY-----\nMIIxxx\n")  # allowlist secret
         self.assertTrue(findings)
 
     def test_password_literal_flagged(self):

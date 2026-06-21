@@ -19,7 +19,7 @@ class TestOutputSecretScanner(unittest.TestCase):
         self.assertFalse(self.c.check("Paris is the capital.")[0])
 
     def test_aws_key(self):
-        self.assertTrue(self.c.check("AKIAIOSFODNN7EXAMPLE")[0])
+        self.assertTrue(self.c.check("AKIAIOSFODNN7EXAMPLE")[0])  # allowlist secret
 
     def test_bearer(self):
         self.assertTrue(self.c.check("Bearer abcdefghijklmnopqrstuvwxyz")[0])
@@ -36,13 +36,13 @@ class TestPIIDisclosureChecker(unittest.TestCase):
         self.assertFalse(self.c.check("ships tomorrow")[0])
 
     def test_ssn(self):
-        self.assertTrue(self.c.check("123-45-6789")[0])
+        self.assertTrue(self.c.check("123-45-6789")[0])  # allowlist secret
 
     def test_email(self):
-        self.assertTrue(self.c.check("a@b.com")[0])
+        self.assertTrue(self.c.check("a@b.com")[0])  # allowlist secret
 
     def test_card(self):
-        self.assertTrue(self.c.check("4111 1111 1111 1111")[0])
+        self.assertTrue(self.c.check("4111 1111 1111 1111")[0])  # allowlist secret
 
 
 class TestSystemPromptLeakDetector(unittest.TestCase):

@@ -231,7 +231,7 @@ _scanner = HardcodedSecretScanner()
 _tls = TLSConfigChecker()
 
 _SAFE_SOURCE = 'API_KEY = os.environ["API_KEY"]\nDB_PASSWORD = get_secret("db")\n'
-_BAD_SOURCE = 'API_KEY = "AKIAIOSFODNN7EXAMPLE"\npassword = "hunter2hunter2"\n'
+_BAD_SOURCE = 'API_KEY = "AKIAIOSFODNN7EXAMPLE"\npassword = "hunter2hunter2"\n'  # allowlist secret
 
 
 # ---------------------------------------------------------------------------

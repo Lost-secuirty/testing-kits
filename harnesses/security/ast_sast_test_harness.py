@@ -237,7 +237,7 @@ _BAD_SNIPPETS = [
     ("md5", "CWE-327", "import hashlib\ndef h(p):\n    return hashlib.md5(p.encode()).hexdigest()\n"),
     ("random", "CWE-330", "import random\ndef tok():\n    return random.randint(0, 999999)\n"),
     ("verify_false", "CWE-295", "import requests\ndef f(u):\n    return requests.get(u, verify=False, timeout=5)\n"),
-    ("hardcoded", "CWE-798", 'API_KEY = "AKIAIOSFODNN7EXAMPLE"\n'),
+    ("hardcoded", "CWE-798", 'API_KEY = "AKIAIOSFODNN7EXAMPLE"\n'),  # allowlist secret
     ("mktemp", "CWE-377", "import tempfile\ndef t():\n    return tempfile.mktemp()\n"),
     ("assert_auth", "CWE-617", "def gate(u):\n    assert u.is_admin\n    return True\n"),
     ("debug_run", "CWE-489", "import flask\napp = flask.Flask(__name__)\napp.run(debug=True)\n"),
@@ -362,9 +362,9 @@ SAST_CORPUS: tuple[SastCase, ...] = (
     SastCase("sql_param_safe", "CWE-89", 'cur.execute("SELECT * FROM t WHERE id = ?", (uid,))\n', False,
              "parameterised query — must NOT flag"),
     # --- Hard-coded secret (CWE-798): the exact-name mutant misses api_key -----
-    SastCase("secret_password", "CWE-798", 'password = "hunter2-very-secret"\n', True,
+    SastCase("secret_password", "CWE-798", 'password = "hunter2-very-secret"\n', True,  # allowlist secret
              "literal password assignment — must flag"),
-    SastCase("secret_api_key", "CWE-798", 'api_key = "AKIAIOSFODNN7EXAMPLE"\n', True,
+    SastCase("secret_api_key", "CWE-798", 'api_key = "AKIAIOSFODNN7EXAMPLE"\n', True,  # allowlist secret
              "literal api_key assignment — the exact-'password' mutant misses this"),
     SastCase("secret_from_env", "CWE-798", 'api_key = os.environ["API_KEY"]\n', False,
              "secret read from env, not a literal — must NOT flag"),

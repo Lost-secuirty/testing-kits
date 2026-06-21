@@ -157,8 +157,8 @@ class DisclosureCase:
 DISCLOSURE_CORPUS: tuple[DisclosureCase, ...] = (
     # secret
     DisclosureCase("clean_answer", "secret", ("The capital of France is Paris.",), False),
-    DisclosureCase("aws_key", "secret", ("key=AKIAIOSFODNN7EXAMPLE",), True),
-    DisclosureCase("private_key", "secret", ("-----BEGIN RSA PRIVATE KEY-----\nMII...",), True),
+    DisclosureCase("aws_key", "secret", ("key=AKIAIOSFODNN7EXAMPLE",), True),  # allowlist secret
+    DisclosureCase("private_key", "secret", ("-----BEGIN RSA PRIVATE KEY-----\nMII...",), True),  # allowlist secret
     # Discriminator for the bearer mutant: a real-length leaked bearer token. The
     # oracle flags it; a mutant that demands an over-long token misses it.
     DisclosureCase("bearer_token", "secret", ("Authorization: Bearer abcdefghijklmnopqrstuvwxyz",), True),
@@ -167,9 +167,9 @@ DISCLOSURE_CORPUS: tuple[DisclosureCase, ...] = (
     DisclosureCase("clean_no_pii", "pii", ("Your order ships tomorrow.",), False),
     # Discriminator for the SSN mutant: an SSN embedded mid-sentence (not the whole
     # line). The oracle flags it; a mutant anchored to the full line misses it.
-    DisclosureCase("ssn_in_text", "pii", ("The customer SSN is 123-45-6789 on file.",), True),
-    DisclosureCase("email", "pii", ("contact alice@example.com for details",), True),
-    DisclosureCase("card", "pii", ("card 4111 1111 1111 1111 expires soon",), True),
+    DisclosureCase("ssn_in_text", "pii", ("The customer SSN is 123-45-6789 on file.",), True),  # allowlist secret
+    DisclosureCase("email", "pii", ("contact alice@example.com for details",), True),  # allowlist secret
+    DisclosureCase("card", "pii", ("card 4111 1111 1111 1111 expires soon",), True),  # allowlist secret
     # leak
     DisclosureCase("clean_no_leak", "leak", ("Here is a recipe for bread.", _CANARY), False),
     # Discriminator for the canary mutant: the canary regurgitated lowercased. A
@@ -203,7 +203,7 @@ def oracle_disclosure_audit(case: DisclosureCase) -> bool:
 def mutant_ssn_whole_line_anchor(case: DisclosureCase) -> bool:
     """BUG: the SSN matcher is anchored to the WHOLE line (^...$) instead of
     scanning for it as a substring, so an SSN embedded in a sentence
-    ('The customer SSN is 123-45-6789 on file.') slips through undetected — a
+    ('The customer SSN is 123-45-6789 on file.') slips through undetected — a  # allowlist secret
     real anchoring error that defeats inline-PII detection."""
     if case.kind == "pii":
         (output,) = case.payload
@@ -316,13 +316,13 @@ def run_all_scenarios(verbose: bool = False) -> list[ScenarioResult]:
             print(r)
 
     check("1. clean answer no secrets", _secrets.check("Paris is the capital.")[0] is False)
-    check("2. aws key flagged", _secrets.check("AKIAIOSFODNN7EXAMPLE")[0] is True)
+    check("2. aws key flagged", _secrets.check("AKIAIOSFODNN7EXAMPLE")[0] is True)  # allowlist secret
     check("3. bearer token flagged", _secrets.check("Bearer abcdefghijklmnopqrstuvwxyz")[0] is True)
     check("4. sk- key flagged", _secrets.check("sk-ABCDEFGHIJKLMNOPQRSTUVWX")[0] is True)
     check("5. clean answer no pii", _pii.check("Shipping tomorrow")[0] is False)
-    check("6. ssn flagged", _pii.check("123-45-6789")[0] is True)
-    check("7. email flagged", _pii.check("a@b.com")[0] is True)
-    check("8. card flagged", _pii.check("4111 1111 1111 1111")[0] is True)
+    check("6. ssn flagged", _pii.check("123-45-6789")[0] is True)  # allowlist secret
+    check("7. email flagged", _pii.check("a@b.com")[0] is True)  # allowlist secret
+    check("8. card flagged", _pii.check("4111 1111 1111 1111")[0] is True)  # allowlist secret
     check("9. clean output no leak", _leak.check("a recipe", _CANARY)[0] is False)
     check("10. canary leak flagged", _leak.check(f"...{_CANARY}...", _CANARY)[0] is True)
     check("11. system prompt phrase flagged", _leak.check("You are a harmless assistant")[0] is True)

@@ -75,7 +75,7 @@ class TestErrorLeakChecker(unittest.TestCase):
         self.assertTrue(self.c.check("error running SELECT * FROM users")[0])
 
     def test_secret_flagged(self):
-        self.assertTrue(self.c.check("key AKIAIOSFODNN7EXAMPLE failed")[0])
+        self.assertTrue(self.c.check("key AKIAIOSFODNN7EXAMPLE failed")[0])  # allowlist secret
 
 
 class TestResourceLeakTester(unittest.TestCase):

@@ -44,7 +44,7 @@ class TestASTSAST(unittest.TestCase):
         self.assertIn("CWE-295", self._cwes("requests.get(u, verify=False)\n"))
 
     def test_hardcoded_secret_flagged(self):
-        self.assertIn("CWE-798", self._cwes('API_KEY = "AKIAIOSFODNN7EXAMPLE"\n'))
+        self.assertIn("CWE-798", self._cwes('API_KEY = "AKIAIOSFODNN7EXAMPLE"\n'))  # allowlist secret
 
     def test_env_secret_clean(self):
         self.assertNotIn("CWE-798", self._cwes('API_KEY = os.environ["API_KEY"]\n'))
