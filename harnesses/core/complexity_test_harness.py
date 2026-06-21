@@ -726,6 +726,9 @@ def prove(impl: Callable[[ComplexityAuditCase], tuple[str, ...]]) -> bool:
     return any(impl(case) != case.expected_events for case in COMPLEXITY_AUDIT_CORPUS)
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_complexity_audit"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_complexity_audit,

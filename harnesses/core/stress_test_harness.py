@@ -497,6 +497,32 @@ TEETH = Teeth(
     notes="Frozen stress metric and workload-shape corpus.",
 )
 
+VACUITY_TARGETS = ["oracle_stress_audit"]
+
+
+def _run_self_test(verbose: bool = False, as_json: bool = False) -> int:
+    """Pure, gate-callable self-test — NO asyncio, NO server, NO engine.
+
+    The async ``--self-test`` CLI path (see ``async_main``) spins up a mock HTTP
+    server and the real engine; the vacuity gate must not pay that cost (and cannot
+    drive an event loop). This pure variant exercises the SAME oracle the gate
+    neuters: it calls ``oracle_stress_audit`` by its module-global name against the
+    frozen ``STRESS_METRIC_CORPUS`` and compares each result to the corpus's frozen
+    ``expected_events`` literal (non-circular — the expected side is never derived
+    from the oracle). When the gate mutates ``oracle_stress_audit``'s return to a
+    type-faithful wrong value, these checks go red. ``assert_teeth(TEETH)`` is kept
+    so the planted mutants are also verified.
+    """
+    report = Report("core/stress")
+    for case in STRESS_METRIC_CORPUS:
+        report.add(
+            f"oracle:{case.name}",
+            list(case.expected_events),
+            list(oracle_stress_audit(case)),
+        )
+    report.assert_teeth(TEETH)
+    return report.emit(as_json=as_json)
+
 
 # ============================================================
 # HTTP CLIENT — stdlib-based, runs in thread pool

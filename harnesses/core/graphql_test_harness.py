@@ -449,6 +449,10 @@ def _prove(impl: Callable[..., object]) -> bool:
     return False
 
 
+# Vacuity gate: intentionally UNMAPPED (advisory). This oracle's contract is
+# exception-raising (enforce_limits raises QueryTooDeep/QueryTooCostly),
+# which the gate's return-value neuter cannot model. Teeth are proof-verified
+# via TEETH + tools/proof_audit.py / teeth_check.py.
 TEETH = Teeth(
     prove=_prove,
     oracle=enforce_limits,

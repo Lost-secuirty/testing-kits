@@ -1390,6 +1390,10 @@ def prove(impl: Callable[[Any], Any]) -> bool:
     return report.crashed_runs >= 1
 
 
+# Vacuity gate: intentionally UNMAPPED (advisory). This oracle's contract is
+# crash-safety (the oracle's contract is 'never crashes', not a return value),
+# which the gate's return-value neuter cannot model. Teeth are proof-verified
+# via TEETH + tools/proof_audit.py / teeth_check.py.
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_target,

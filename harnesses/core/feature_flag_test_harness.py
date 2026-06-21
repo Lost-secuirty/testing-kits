@@ -37,7 +37,7 @@ from typing import Any
 
 if str(_Path(__file__).resolve().parents[2]) not in sys.path:
     sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
-from harnesses._teeth import Mutant, Teeth  # noqa: E402
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -270,6 +270,22 @@ _TEETH_CORPUS_SIZE = len(
 )
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["good_pricer"]
+
+# Frozen oracle corpus: (flags, expected_int) pairs computed BY HAND from
+# good_pricer's contract (base=100; new_pricing->90; loyalty_v2->base-=5; then
+# int(base*1.08) if tax_calc_v2 else int(base*1.05)). Each expected value is an
+# independent literal — NOT derived from good_pricer — so a neutered (off-by-one)
+# oracle disagrees with it and the self-test goes red.
+GOOD_PRICER_CORPUS: tuple[tuple[dict[str, bool], int], ...] = (
+    ({}, 105),                                            # int(100*1.05)=105
+    ({"new_pricing": True}, 94),                          # int(90*1.05)=94
+    ({"new_pricing": True, "loyalty_v2": True}, 89),      # int(85*1.05)=89
+    ({"tax_calc_v2": True}, 108),                         # int(100*1.08)=108
+    ({"loyalty_v2": True}, 99),                           # int(95*1.05)=99
+)
+
 TEETH = Teeth(
     prove=_prove,
     oracle=good_pricer,
@@ -310,59 +326,64 @@ def _scenario_stale_flag() -> tuple[str, bool]:
     return "stale_flag_default_mismatch", bool(fs.default_mismatches())
 
 
-def _run_self_test(config: FlagMatrixConfig, verbose: bool = False) -> int:
+def _run_self_test(config: FlagMatrixConfig | None = None, verbose: bool = False) -> int:
+    if config is None:  # gate-callable: vacuity_gate calls _run_self_test()
+        config = FlagMatrixConfig()
     runner = FlagMatrixRunner(config)
     fs = _make_flagset()
-    failures: list[str] = []
+    report = Report("core/feature_flag")
 
-    # good_pricer should have 0 crashes / 0 violations.
+    # ORACLE STRENGTH (vacuity gate): call good_pricer by its MODULE-GLOBAL name
+    # against the frozen corpus. The gate neuters good_pricer to an off-by-one int,
+    # which disagrees with these hand-computed literals -> these checks go red.
+    for flags, expected in GOOD_PRICER_CORPUS:
+        key = ",".join(sorted(k for k, v in flags.items() if v)) or "{}"
+        report.add(f"good_pricer:{key}", expected, good_pricer(flags))
+
+    # good_pricer should have 0 crashes / 0 violations across the frozen matrix.
     r = runner.run(good_pricer, fs)
     crashes = sum(1 for x in r if x.outcome == "crash")
-    if crashes:
-        failures.append(f"good_pricer had {crashes} crash(es)")
+    report.add("good_pricer:no_crashes", 0, crashes,
+               detail=f"{len(r)} combos enumerated")
     print(f"good_pricer:              {len(r)} combos, {crashes} crashes")
 
     # buggy_pricer_combo: expect at least one expectation_violation.
     r = runner.run(buggy_pricer_combo, fs)
     vios = sum(1 for x in r if x.outcome == "expectation_violation")
-    if vios == 0:
-        failures.append("buggy_pricer_combo: harness did not catch the expectation violation")
+    report.record("buggy_pricer_combo:caught", vios >= 1,
+                  detail="harness must catch the expectation violation")
     print(f"buggy_pricer_combo:       {len(r)} combos, {vios} expectation violations")
 
     # buggy_pricer_crash: expect at least one crash.
     r = runner.run(buggy_pricer_crash, fs)
     crashes = sum(1 for x in r if x.outcome == "crash")
-    if crashes == 0:
-        failures.append("buggy_pricer_crash: harness did not catch the dormant-path crash")
+    report.record("buggy_pricer_crash:caught", crashes >= 1,
+                  detail="harness must catch the dormant-path crash")
     print(f"buggy_pricer_crash:       {len(r)} combos, {crashes} crashes")
 
     # buggy_pricer_type_drift: expect at least one type_mismatch.
     r = runner.run(buggy_pricer_type_drift, fs)
     drifts = sum(1 for x in r if x.outcome == "type_mismatch")
-    if drifts == 0:
-        failures.append("buggy_pricer_type_drift: harness did not catch the type drift")
+    report.record("buggy_pricer_type_drift:caught", drifts >= 1,
+                  detail="harness must catch the type drift")
     print(f"buggy_pricer_type_drift:  {len(r)} combos, {drifts} type mismatches")
 
     # stale-flag detection
     name, found = _scenario_stale_flag()
-    if not found:
-        failures.append(f"{name}: harness did not detect default mismatch")
+    report.record(name, found, detail="harness must detect default mismatch")
     print(f"{name}:    detected={found}")
 
     # mid-call flip
     r = runner.flip_mid_call(good_pricer, fs)
     crashes = sum(1 for x in r if x.outcome == "crash")
+    report.add("flip_mid_call:good_deterministic", 0, crashes,
+               detail="good_pricer should be deterministic, not crash")
     print(f"flip_mid_call (good):     {len(r)} flips, {crashes} crashes")
-    if crashes:
-        failures.append("flip_mid_call: good_pricer should be deterministic but crashed")
 
-    if failures:
-        print("FAILED:", file=sys.stderr)
-        for f in failures:
-            print(f"  - {f}", file=sys.stderr)
-        return 1
-    print("OK: every scenario met its expectation.")
-    return 0
+    # Teeth: the correct oracle is clean and every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit()
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -413,6 +413,27 @@ TEETH = Teeth(
     notes="Frozen circuit-breaker event logs for threshold, reset, half-open, cap, and open-window behavior.",
 )
 
+VACUITY_TARGETS = ["oracle_circuitbreaker_audit"]
+
+
+def _run_self_test(verbose=False, as_json=False):
+    """Gate-callable self-test: assert the module-global oracle against the frozen corpus.
+
+    Calls ``oracle_circuitbreaker_audit`` BY ITS MODULE-GLOBAL NAME so the vacuity
+    gate's neuter (which mutates that symbol's return) turns this self-test red.
+    The expected side is ``case.expected_events`` (a frozen literal on the corpus),
+    so the comparison is non-circular.
+    """
+    report = Report("core/circuitbreaker")
+    for case in CIRCUIT_BREAKER_AUDIT_CORPUS:
+        report.add(
+            f"oracle:{case.name}",
+            list(case.expected_events),
+            list(oracle_circuitbreaker_audit(case)),
+        )
+    report.assert_teeth(TEETH)
+    return report.emit(as_json=as_json)
+
 
 # ============================================================
 # MOCK HTTP SERVER
