@@ -841,6 +841,9 @@ TEETH = Teeth(
     notes="Frozen Unicode normalization, grapheme, truncation, width, and bidi corpus.",
 )
 
+# Vacuity gate target: the module-global oracle whose return the gate neuters.
+VACUITY_TARGETS = ["oracle_i18n_audit"]
+
 
 def list_scenarios() -> list[str]:
     return [case.name for case in I18N_AUDIT_CORPUS]
@@ -1147,6 +1150,11 @@ def _self_test(as_json: bool = False) -> int:
         )
     report.assert_teeth(TEETH)
     return report.emit(as_json=as_json)
+
+
+def _run_self_test(verbose: bool = False, as_json: bool = False) -> int:
+    """Gate-callable alias for the self-test (all params default; no-arg invokable)."""
+    return _self_test(as_json=as_json)
 
 
 if __name__ == "__main__":

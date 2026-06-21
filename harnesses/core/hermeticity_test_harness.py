@@ -305,6 +305,9 @@ def prove(impl: Callable[[HermeticityAuditCase], tuple[str, ...]]) -> bool:
     return any(impl(case) != case.expected_contaminating for case in HERMETICITY_AUDIT_CORPUS)
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_hermeticity_audit"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_hermeticity_audit,
@@ -381,7 +384,9 @@ def list_scenarios() -> list[str]:
     return [fn.__name__ for fn in SELF_TEST_FUNCTIONS]
 
 
-def _run_self_test(config: AuditConfig, verbose: bool = False) -> int:
+def _run_self_test(config: AuditConfig | None = None, verbose: bool = False) -> int:
+    if config is None:  # gate-callable: vacuity_gate calls _run_self_test()
+        config = AuditConfig()
     failures: list[str] = []
     expected_hermetic = {
         "hermetic_passes": True,

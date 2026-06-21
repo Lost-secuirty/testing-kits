@@ -428,6 +428,27 @@ TEETH = Teeth(
     notes="Frozen JWT verifier corpus for alg handling, signatures, time claims, and required claims.",
 )
 
+VACUITY_TARGETS = ["oracle_jwt_audit"]
+
+
+def _run_self_test(verbose=False, as_json=False):
+    """Gate-callable self-test: assert the module-global oracle against the frozen corpus.
+
+    Calls ``oracle_jwt_audit`` BY ITS MODULE-GLOBAL NAME so the vacuity gate's
+    neuter (which mutates that symbol's return) turns this self-test red. The
+    expected side is ``case.expected_events`` (a frozen literal on the corpus),
+    so the comparison is non-circular.
+    """
+    report = Report("security/jwt")
+    for case in JWT_AUDIT_CORPUS:
+        report.add(
+            f"oracle:{case.name}",
+            list(case.expected_events),
+            list(oracle_jwt_audit(case)),
+        )
+    report.assert_teeth(TEETH)
+    return report.emit(as_json=as_json)
+
 
 class JwtTestResult:
     def __init__(self, name, passed, detail=""):

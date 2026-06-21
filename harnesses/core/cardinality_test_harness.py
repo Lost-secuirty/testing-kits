@@ -214,6 +214,9 @@ def prove(impl: Callable[[CardinalityAuditCase], tuple[tuple[str, int, int, bool
     return any(impl(case) != case.expected_reports for case in CARDINALITY_AUDIT_CORPUS)
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_cardinality_audit"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_cardinality_audit,
@@ -290,7 +293,9 @@ def list_scenarios() -> list[str]:
     return list(SCENARIOS.keys())
 
 
-def _run_self_test(config: CardinalityConfig, verbose: bool = False) -> int:
+def _run_self_test(config: CardinalityConfig | None = None, verbose: bool = False) -> int:
+    if config is None:  # gate-callable: vacuity_gate calls _run_self_test()
+        config = CardinalityConfig()
     failures: list[str] = []
     for name, (emit_fn, dim, expected_bounded) in SCENARIOS.items():
         probe = CardinalityProbe([dim])

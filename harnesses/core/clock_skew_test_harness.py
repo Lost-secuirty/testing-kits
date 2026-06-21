@@ -463,6 +463,9 @@ def prove(impl: Callable[[ClockSkewAuditCase], tuple[str, ...]]) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_clock_skew_audit"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_clock_skew_audit,

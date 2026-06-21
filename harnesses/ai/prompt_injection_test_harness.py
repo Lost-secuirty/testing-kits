@@ -316,6 +316,9 @@ def prove(impl: Callable[[PromptInjectionAuditCase], tuple[str, str]]) -> bool:
     return any(impl(case) != case.expected_verdict for case in PROMPT_INJECTION_AUDIT_CORPUS)
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_prompt_injection_audit"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_prompt_injection_audit,
