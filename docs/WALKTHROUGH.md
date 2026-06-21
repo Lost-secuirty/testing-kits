@@ -32,7 +32,7 @@ One honesty rule runs through everything, especially the pharmacy-domain harness
 
 **Technical:** Layout:
 
-- `harnesses/` holds the 77 harnesses across `core`, `security`, `ai`, and `pharmacy`.
+- `harnesses/` holds the 92 harnesses across `core`, `security`, `ai`, and `pharmacy`.
 - `tests/` mirrors `harnesses/<category>/` with paired `test_*.py` files.
 - `experiments/` is for in-progress harnesses and is excluded from `make test`.
 - `template/harness_template.py` scaffolds new harnesses.

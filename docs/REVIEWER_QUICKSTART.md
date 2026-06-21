@@ -7,7 +7,7 @@ case for a specific bug class?"
 
 ## What the repo proves
 
-- The current inventory contains **77 harnesses**.
+- The current inventory contains **92 harnesses**.
 - Each harness is intended to remain small, local, and inspectable enough for a reviewer to trace the safe fixture and the planted-bad fixture.
 - The current TEETH proof baseline distinguishes harnesses by status instead of treating all 77 as equivalent:
   - **required** — a non-legacy harness with `TEETH`; the swap-check verifies that the correct oracle is not flagged and every planted mutant is caught.

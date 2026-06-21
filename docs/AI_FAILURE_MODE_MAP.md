@@ -15,6 +15,10 @@ risk.
 | Game-loop regressions hidden by frame timing | `harnesses/core/game_loop_simulation_test_harness.py` | Deterministic tick-loop fixtures catch planted engine bugs without relying on real rendering. | It does not replace full browser, device, or gameplay QA. |
 | Clinical or pharmacy-looking code that overclaims safety | `harnesses/pharmacy/` | Pharmacy-domain harnesses prove fixture-defined software rules and planted-bad controls. | No clinical validation, medication-safety certification, or production pharmacy assurance is implied. |
 | Large AI-generated code that becomes hard to review | `harnesses/core/complexity_test_harness.py` | AST metrics flag complexity, nesting, long functions, and other bloat signals. | Complexity metrics indicate review risk; they do not prove code behavior. |
+| AI writes plausible-but-insecure code | `harnesses/ai/secure_codegen_eval` | Scores generated code on correctness AND security (AST-SAST oracle); `secure-pass@k`; a repair loop measures lift. | Detects known weakness classes, not novel logic flaws; green means "no detected planted-class CWE," not "secure." |
+| A prompting technique claimed to improve security | `harnesses/ai/prompt_ab` | A/Bs two prompt strategies over the OWASP set and reports the secure-pass@k delta. | Offline/canned generators by default; plug a real model via the adapter to measure live. |
+| AI emits unsafe crypto, config, or error handling | `harnesses/security/{crypto,misconfig,exceptional_conditions}` | Flags weak hashes/RNG/ciphers, debug/CORS/cookie misconfig, and fail-open / error leakage. | Checks values and snippets handed to it; not a live scanner of a running app. |
+| AI trusts model output downstream (LLM02/05/06/10) | `harnesses/ai/{insecure_output_handling,excessive_agency,sensitive_disclosure,unbounded_consumption}` | Output-sink/XSS, tool-allowlist and destructive-action gating, secret/PII/system-prompt leak, and token/loop/cost budgets. | Heuristic detectors; tune thresholds; not a substitute for live red-teaming. |
 
 ## High-risk review order
 
