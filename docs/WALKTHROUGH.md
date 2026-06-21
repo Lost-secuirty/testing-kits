@@ -1,12 +1,12 @@
 # Testing-Kits — Walk-Through
 
-*A portable library of 77 small, pure-Python test harnesses. Verification patterns are the product; the repo is not an application, framework, or certification suite.*
+*A portable library of 92 small, pure-Python test harnesses. Verification patterns are the product; the repo is not an application, framework, or certification suite.*
 
 ## Bottom line
 
-Testing-kits is a reference collection of **77 self-contained Python test harnesses**. Each harness demonstrates one failure mode with a known-good case and a planted-bad case. It is deliberately a library to read from, learn from, and port from, not a product to deploy.
+Testing-kits is a reference collection of **92 self-contained Python test harnesses**. Each harness demonstrates one failure mode with a known-good case and a planted-bad case. It is deliberately a library to read from, learn from, and port from, not a product to deploy.
 
-The current proof model is a ratchet, not a blanket claim that all 77 are proven in the same way. The TEETH campaign distinguishes **required**, **pending**, and **legacy** harnesses. As of the current Batch 9 teeth state, the snapshot is **69 required / 0 pending / 8 legacy / 0 failing**. Re-run `make proof` before treating that as a fresh release claim.
+The current proof model is a ratchet, not a blanket claim that all 92 are proven in the same way. The TEETH campaign distinguishes **required**, **pending**, and **legacy** harnesses. As of the current Batch 10 teeth state, the snapshot is **84 required / 0 pending / 8 legacy / 0 failing**. Re-run `make proof` before treating that as a fresh release claim.
 
 ## In plain terms
 
@@ -32,7 +32,7 @@ One honesty rule runs through everything, especially the pharmacy-domain harness
 
 **Technical:** Layout:
 
-- `harnesses/` holds the 77 harnesses across `core`, `security`, `ai`, and `pharmacy`.
+- `harnesses/` holds the 92 harnesses across `core`, `security`, `ai`, and `pharmacy`.
 - `tests/` mirrors `harnesses/<category>/` with paired `test_*.py` files.
 - `experiments/` is for in-progress harnesses and is excluded from `make test`.
 - `template/harness_template.py` scaffolds new harnesses.
@@ -57,7 +57,7 @@ The Makefile exposes the reviewer command surface: `make test`, focused category
   - `required` — TEETH declared and verified;
   - `pending` — counted but not yet ratcheted into TEETH;
   - `legacy` — pharmacy-domain soft-gate status.
-- **Current loaded proof snapshot:** Batch 9 records **69 required / 0 pending / 8 legacy / 0 failing**. This is a current proof baseline from loaded repo state, not a permanent claim.
+- **Current loaded proof snapshot:** Batch 10 records **84 required / 0 pending / 8 legacy / 0 failing**. This is a current proof baseline from loaded repo state, not a permanent claim.
 - **CI/governance:** `.github/control-policy.json` lists required files and workflows. `tools/control_audit.py` enforces the control-policy presence checks. `STATUS.md` and `STATUS.json` are generated artifacts, not canonical committed status.
 
 ### 5. What it proves — and what it does not
@@ -69,7 +69,7 @@ The Makefile exposes the reviewer command surface: `make test`, focused category
 ## Honest limits
 
 - **It does not prove any target application is correct, secure, or safe.** Proof is per-harness and fixture-defined.
-- **77 is inventory size, not a blanket proof status.** Current proof status must preserve the `required` / `pending` / `legacy` distinction.
+- **92 is inventory size, not a blanket proof status.** Current proof status must preserve the `required` / `pending` / `legacy` distinction.
 - **Green means the current gate accepted the fixture-defined evidence.** It does not mean bug-free.
 - **Pharmacy-domain harnesses carry zero real-world safety weight.** They are not clinical validation, medication-safety certification, production pharmacy assurance, or dosing authority.
 - **AI-authored tests are untrusted by authorship.** Trust comes from demonstrated safe/bad controls, not from who or what wrote the test.

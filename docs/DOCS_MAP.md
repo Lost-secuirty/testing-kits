@@ -8,7 +8,7 @@ Start here if you are trying to understand what the repo is.
 
 - [`README.md`](../README.md) — public landing page: repo identity, proof baseline, quick start, layout, limits, and security links.
 - [`docs/WALKTHROUGH.md`](./WALKTHROUGH.md) — plain-language and technical explanation of the repo.
-- [`HARNESS_INVENTORY.md`](../HARNESS_INVENTORY.md) — full catalog of the 77 harnesses.
+- [`HARNESS_INVENTORY.md`](../HARNESS_INVENTORY.md) — full catalog of the 92 harnesses.
 - [`HARNESS_ROADMAP.md`](../HARNESS_ROADMAP.md) — shipped batches, known gaps, and hygiene backlog.
 
 ## Reviewer
@@ -54,4 +54,4 @@ When sources disagree, prefer live repo state, passing tests, and CI output firs
 
 Do not treat generated `STATUS.md` or `STATUS.json` as committed canonical status. They are produced by `make report` and should remain CI/local artifacts unless the status convention is explicitly changed.
 
-Use **77 harnesses** as the inventory count. Use TEETH `required` / `pending` / `legacy` status for proof strength. Do not describe the repo as total correctness proof, clinical validation, medication-safety certification, or production assurance.
+Use **92 harnesses** as the inventory count. Use TEETH `required` / `pending` / `legacy` status for proof strength. Do not describe the repo as total correctness proof, clinical validation, medication-safety certification, or production assurance.

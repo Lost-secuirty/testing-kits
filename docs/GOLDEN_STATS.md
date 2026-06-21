@@ -16,6 +16,7 @@ The source of truth remains:
 | Date | Source | Total | Required | Pending | Legacy | Failing | Notes |
 |---|---|---:|---:|---:|---:|---:|---|
 | 2026-06-18 | `docs/UPGRADE_CAMPAIGN.md` Batch 9 | 77 | 69 | 0 | 8 | 0 | TEETH campaign complete for non-pharmacy harnesses. |
+| 2026-06-21 | `tools/proof_audit.py` Batch 10 | 92 | 84 | 0 | 8 | 0 | +15 OWASP Top 10:2025 web + LLM harnesses; `make proof` 92/92, `make test` 5100 tests OK. |
 
 ## Update rules
 
