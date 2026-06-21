@@ -86,10 +86,6 @@ class FailOpenTester:
 # SwallowedExceptionScanner (CWE-390/391)
 # ---------------------------------------------------------------------------
 
-_SECURITY_NAME_RE = re.compile(r"auth|verify|check|validat|permission|access|login|token",
-                               re.IGNORECASE)
-
-
 def _is_truthy_const(node) -> bool:
     return isinstance(node, ast.Constant) and bool(node.value) is True
 

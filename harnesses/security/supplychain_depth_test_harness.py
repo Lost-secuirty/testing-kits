@@ -98,13 +98,14 @@ class SBOMValidator:
     def validate(self, sbom: dict[str, Any]) -> list[str]:
         """Return human-readable findings for an SBOM document."""
         findings: list[str] = []
-        sbom = sbom or {}
+        sbom = sbom if isinstance(sbom, dict) else {}
         components = sbom.get("components")
+        components = components if isinstance(components, list) else []
         if not components:
             findings.append("SBOM declares no components (empty bill of materials) (CWE-1104)")
         else:
             for i, comp in enumerate(components):
-                comp = comp or {}
+                comp = comp if isinstance(comp, dict) else {}
                 if self._blank(comp.get("name")):
                     findings.append(f"component[{i}] missing name (CWE-1104)")
                 if self._blank(comp.get("version")):
@@ -124,13 +125,14 @@ class SBOMValidator:
         oracle/mutant comparison be an exact set match.
         """
         codes: set[str] = set()
-        sbom = sbom or {}
+        sbom = sbom if isinstance(sbom, dict) else {}
         components = sbom.get("components")
+        components = components if isinstance(components, list) else []
         if not components:
             codes.add("sbom-no-components")
         else:
             for comp in components:
-                comp = comp or {}
+                comp = comp if isinstance(comp, dict) else {}
                 if self._blank(comp.get("name")):
                     codes.add("sbom-missing-name")
                 if self._blank(comp.get("version")):

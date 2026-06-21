@@ -59,7 +59,7 @@ class OutputSinkPolicy:
     """Flag LLM output flowing into a dangerous sink without sanitization."""
 
     def check(self, sink: str, sanitized: bool = False) -> tuple[bool, str]:
-        s = (sink or "").strip().lower()
+        s = ("" if sink is None else str(sink)).strip().lower()
         if s in _DANGEROUS_SINKS and not sanitized:
             return True, f"LLM output reaches dangerous sink '{sink}' unsanitized (LLM05)"
         if s in _DANGEROUS_SINKS and sanitized:
@@ -80,7 +80,7 @@ class HtmlOutputChecker:
     """Detect XSS vectors in HTML produced from model output."""
 
     def check(self, html: str) -> tuple[bool, str]:
-        text = html or ""
+        text = "" if html is None else str(html)
         for pattern, label in _HTML_PATTERNS:
             if pattern.search(text):
                 return True, f"{label} (CWE-79)"
@@ -91,8 +91,9 @@ class StructuredOutputValidator:
     """Require model output to parse as a JSON object with the expected keys."""
 
     def validate(self, text: str, required_keys: Sequence[str] = ()) -> tuple[bool, str]:
+        s = "" if text is None else str(text)
         try:
-            obj = json.loads(text)
+            obj = json.loads(s)
         except Exception:  # noqa: BLE001 — any parse failure is unstructured output
             return True, "Model output is not valid JSON — unstructured output trusted (CWE-20)"
         if not isinstance(obj, dict):

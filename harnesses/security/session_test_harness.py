@@ -53,7 +53,9 @@ class SessionFixationChecker:
     """Session id must change when privilege level changes (login/elevation)."""
 
     def check(self, old_id: str, new_id: str, privilege_changed: bool) -> tuple[bool, str]:
-        if privilege_changed and old_id == new_id:
+        old = "" if old_id is None else str(old_id)
+        new = "" if new_id is None else str(new_id)
+        if privilege_changed and old == new:
             return True, "Session id not rotated on privilege change (fixation, CWE-384)"
         return False, "Session id handling acceptable"
 
@@ -62,11 +64,13 @@ class CSRFTokenValidator:
     """Constant-time CSRF token comparison; missing token is rejected."""
 
     def validate(self, submitted: str, expected: str) -> tuple[bool, str]:
-        if not submitted:
+        sub = "" if submitted is None else str(submitted)
+        exp = "" if expected is None else str(expected)
+        if not sub:
             return True, "Missing CSRF token on state-changing request (CWE-352)"
-        if not expected:
+        if not exp:
             return True, "No expected CSRF token bound to session (CWE-352)"
-        if not hmac.compare_digest(str(submitted), str(expected)):
+        if not hmac.compare_digest(sub, exp):
             return True, "CSRF token mismatch (CWE-352)"
         return False, "CSRF token valid"
 
@@ -78,7 +82,7 @@ class SessionIdEntropyChecker:
         self.min_chars = min_chars
 
     def check(self, session_id: str) -> tuple[bool, str]:
-        sid = session_id or ""
+        sid = "" if session_id is None else str(session_id)
         if len(sid) < self.min_chars:
             return True, f"Session id length {len(sid)} < {self.min_chars} (CWE-331)"
         if len(set(sid)) <= 2:
@@ -90,8 +94,14 @@ class SessionTimeoutChecker:
     """Enforce an absolute/idle session lifetime (injected clock)."""
 
     def check(self, issued_at: float, now: float, max_age_s: float) -> tuple[bool, str]:
-        if now - issued_at > max_age_s:
-            return True, f"Session age {now - issued_at:.0f}s exceeds max {max_age_s:.0f}s (CWE-613)"
+        try:
+            issued = float(issued_at)
+            current = float(now)
+            max_age = float(max_age_s)
+        except (TypeError, ValueError):
+            return True, "Non-numeric session timestamp/lifetime; cannot verify timeout (CWE-613)"
+        if current - issued > max_age:
+            return True, f"Session age {current - issued:.0f}s exceeds max {max_age:.0f}s (CWE-613)"
         return False, "Session within lifetime"
 
 

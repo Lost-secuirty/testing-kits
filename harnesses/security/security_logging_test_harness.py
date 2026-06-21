@@ -87,7 +87,12 @@ class AuditCoverageChecker:
 # LogInjectionChecker (CWE-117)
 # ---------------------------------------------------------------------------
 
-_FAKE_LEVEL_RE = re.compile(r"(?i)\b(?:DEBUG|INFO|WARN(?:ING)?|ERROR|CRITICAL|ADMIN)\s*:")
+# Matches a forged log-level prefix (DEBUG:/ADMIN:/etc.) only at the START of a
+# line (multiline ^). Anchoring to a line start is what keeps this safe: attacker
+# content can only forge a record by sitting at a line boundary, so a level token
+# buried mid-line (e.g. in an already-escaped, single-physical-line message where
+# the newline is now the literal text "\n") is NOT a forged prefix and stays clean.
+_FAKE_LEVEL_RE = re.compile(r"(?im)^\s*(?:DEBUG|INFO|WARN(?:ING)?|ERROR|CRITICAL|ADMIN)\s*:")
 
 
 class LogInjectionChecker:
@@ -99,6 +104,8 @@ class LogInjectionChecker:
             return True, "ANSI escape sequence in log message (CWE-117)"
         if any(ord(ch) < 32 and ch not in "\t" for ch in msg):
             return True, "Control character in log message (CWE-117)"
+        if _FAKE_LEVEL_RE.search(msg):
+            return True, "Forged log-level prefix at line start spoofs a real record (CWE-117)"
         return False, "Log message has no injectable control characters"
 
     def escape(self, raw_message: str) -> str:
@@ -223,6 +230,9 @@ LOGGING_CORPUS: tuple[LoggingCase, ...] = (
     LoggingCase("clean_message", "inject", ("user alice logged in",), False),
     LoggingCase("crlf_newline_injection", "inject", ("ok\nADMIN: deleted all",), True),
     LoggingCase("bare_cr_injection", "inject", ("ok\rADMIN: deleted all",), True),
+    # forged log-level prefix at line start with NO newline/CR/control char: only
+    # the _FAKE_LEVEL_RE level-prefix check catches it (the byte-level checks miss it).
+    LoggingCase("forged_level_prefix", "inject", ("ADMIN: deleted all users",), True),
     LoggingCase("escaped_message_clean", "inject", (_inject.escape("ok\nADMIN: x"),), False),
     # alert threshold: flag (alert) when >= threshold failures fall in the window
     LoggingCase("below_threshold", "alert", ((1000, 1001, 1002), 1003, 60, 5), False),

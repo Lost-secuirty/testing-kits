@@ -144,9 +144,52 @@ class ASTSAST:
 # in a fresh namespace and exercises the required function with safe fakes.
 # ---------------------------------------------------------------------------
 
+# SECURITY: candidate source is model-generated and therefore untrusted. _exec
+# never runs it with the real builtins. It is compiled and executed in a
+# constrained namespace whose __builtins__ is stripped to a small safe subset
+# (no __import__/open/eval/exec/compile/input/etc.), and `import` is routed
+# through a narrow allowlist of pure, side-effect-free stdlib modules that the
+# behavior fixtures legitimately need (hashlib, random). Anything outside the
+# allowlist raises ImportError, so a hostile candidate cannot reach the
+# filesystem, network, subprocess, or arbitrary imports — a functional-test
+# probe must not become an RCE primitive. This only hardens execution; it does
+# not change the verdict for any well-typed corpus candidate.
+
+# Pure, deterministic, side-effect-free stdlib modules the fixtures may import.
+_SAFE_IMPORT_ALLOWLIST = frozenset({"hashlib", "random"})
+
+# Builtins deliberately withheld: __import__ (routed via _safe_import instead),
+# open, eval, exec, compile, input, breakpoint, help, vars, globals, locals.
+_UNSAFE_BUILTIN_NAMES = frozenset({
+    "__import__", "open", "eval", "exec", "compile", "input",
+    "breakpoint", "help", "vars", "globals", "locals", "memoryview",
+})
+
+
+def _safe_import(name: str, globals_=None, locals_=None, fromlist=(), level=0):
+    """Restricted __import__: only allowlisted, top-level, absolute imports."""
+    if level != 0 or name not in _SAFE_IMPORT_ALLOWLIST:
+        raise ImportError(f"import of {name!r} is not permitted in the sandbox")
+    return __import__(name, globals_, locals_, fromlist, level)
+
+
+def _safe_builtins() -> dict:
+    import builtins as _b
+
+    safe = {
+        n: getattr(_b, n)
+        for n in dir(_b)
+        if not n.startswith("_") and n not in _UNSAFE_BUILTIN_NAMES
+    }
+    safe["__import__"] = _safe_import
+    return safe
+
+
 def _exec(src: str) -> dict:
-    ns: dict = {}
-    exec(compile(src, "<candidate>", "exec"), ns)  # noqa: S102 — controlled fixtures
+    # SECURITY: see module note above — untrusted candidate runs with stripped
+    # builtins and an allowlisted importer, never the host's real builtins.
+    ns: dict = {"__builtins__": _safe_builtins()}
+    exec(compile(src, "<candidate>", "exec"), ns)  # noqa: S102 — sandboxed namespace
     return ns
 
 

@@ -49,7 +49,10 @@ class ToolAllowlist:
     """Permit only explicitly allowed tools/capabilities."""
 
     def check(self, tool: str, allowed: Sequence[str]) -> tuple[bool, str]:
-        if tool not in set(allowed or ()):
+        # Coerce hostile input: allowed may be a non-Sequence (None, int, dict)
+        # and may hold non-str entries; never raise on it.
+        allowed_seq = allowed if isinstance(allowed, Sequence) else ()
+        if tool not in tuple(str(x) for x in allowed_seq):
             return True, f"Tool '{tool}' is not in the allowlist (excessive agency, LLM06)"
         return False, f"Tool '{tool}' is permitted"
 
@@ -64,7 +67,8 @@ class DestructiveActionGuard:
     """Require explicit confirmation before a destructive action."""
 
     def check(self, action: str, confirmed: bool = False) -> tuple[bool, str]:
-        a = (action or "").lower()
+        # Coerce hostile input: action may be a non-str (None, int, dict); never raise.
+        a = str(action or "").lower()
         hit = next((d for d in _DESTRUCTIVE if d in a), None)
         if hit and not confirmed:
             return True, f"Destructive action '{action}' ('{hit}') requires confirmation (LLM06)"
@@ -75,6 +79,13 @@ class BlastRadiusLimiter:
     """Cap how many objects a single action may affect."""
 
     def check(self, action: str, affected_count: int, max_count: int) -> tuple[bool, str]:
+        # Guard hostile input: a non-numeric count must not raise on comparison.
+        # An uncountable blast radius is conservatively treated as a finding.
+        if isinstance(affected_count, bool) or isinstance(max_count, bool) \
+                or not isinstance(affected_count, (int, float)) \
+                or not isinstance(max_count, (int, float)):
+            return True, (f"Action '{action}' has a non-numeric blast radius "
+                          f"({affected_count!r}/{max_count!r}); cannot bound it (LLM06)")
         if affected_count > max_count:
             return True, (f"Action '{action}' affects {affected_count} objects, "
                           f"over the limit of {max_count} (blast radius, LLM06)")

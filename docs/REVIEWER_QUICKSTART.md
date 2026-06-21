@@ -9,11 +9,11 @@ case for a specific bug class?"
 
 - The current inventory contains **92 harnesses**.
 - Each harness is intended to remain small, local, and inspectable enough for a reviewer to trace the safe fixture and the planted-bad fixture.
-- The current TEETH proof baseline distinguishes harnesses by status instead of treating all 77 as equivalent:
+- The current TEETH proof baseline distinguishes harnesses by status instead of treating all 92 as equivalent:
   - **required** — a non-legacy harness with `TEETH`; the swap-check verifies that the correct oracle is not flagged and every planted mutant is caught.
   - **pending** — a non-legacy harness that is counted in the inventory but has not yet been ratcheted into the required TEETH contract.
   - **legacy** — pharmacy-domain harnesses still tracked under the older soft gate.
-- As of the current Batch 9 teeth state, the proof-ratchet snapshot is **69 required / 0 pending / 8 legacy / 0 failing** (the TEETH campaign is complete for all non-pharmacy harnesses). Re-run `make proof` before treating that as a fresh release claim.
+- As of the current Batch 10 teeth state, the proof-ratchet snapshot is **84 required / 0 pending / 8 legacy / 0 failing** (the TEETH campaign is complete for all non-pharmacy harnesses). Re-run `make proof` before treating that as a fresh release claim.
 - The proof baseline is fixture-defined. It shows known-good cases pass and planted-bad cases fail under the repo's current tooling; it is not total correctness proof.
 
 ## What the repo does not prove

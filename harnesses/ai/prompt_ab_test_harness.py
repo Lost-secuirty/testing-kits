@@ -41,6 +41,8 @@ from __future__ import annotations
 
 import argparse
 import ast
+import builtins as _builtins
+import importlib
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -118,9 +120,81 @@ class ASTSAST:
 # Behavior tests (functional-correctness oracles).
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# SECURITY: candidate execution sandbox.
+#
+# ``_exec`` runs candidate *source* so the functional-correctness behaviour
+# tests can call the generated functions. Running attacker-influenced source is
+# inherently dangerous (RCE). The frozen fixtures here are trusted literals, but
+# we still strip the namespace down to a least-privilege subset so a malformed or
+# hostile candidate cannot reach the filesystem, network, or process table:
+#   - ``__builtins__`` is rebuilt from an explicit ALLOWLIST. The classic RCE
+#     primitives are EXCLUDED: ``open``, ``exec``, ``compile``, ``eval`` of the
+#     real builtin, ``input``, ``exit``/``quit``, ``globals``/``vars``, and the
+#     raw ``__import__``. (A scoped ``eval`` and ``__import__`` shim are injected
+#     below — see notes.)
+#   - ``__import__`` is replaced by a shim that allowlists only a handful of pure,
+#     side-effect-free stdlib modules (hashlib, hmac, secrets, re, json, base64,
+#     math) and hard-blocks os/sys/subprocess/socket/pathlib and everything else.
+#
+# This is defence-in-depth for an OFFLINE eval over trusted literals — it is NOT a
+# substitute for true isolation. Any LIVE ``ModelAdapter`` that feeds REAL model
+# output into the scorer MUST execute candidates in an external, resource-limited
+# subprocess (or container), never in this in-process sandbox.
+# ---------------------------------------------------------------------------
+
+# Pure, side-effect-free stdlib modules the frozen fixtures legitimately import
+# (hashlib/secrets/random for the crypto + token cases). Extra safe modules are
+# allowlisted for forward-compatibility; os/sys/subprocess/socket/pathlib and any
+# unlisted module are refused.
+_SAFE_IMPORT_ALLOWLIST: frozenset[str] = frozenset(
+    {"hashlib", "hmac", "secrets", "random", "re", "json", "base64", "math"}
+)
+
+# Builtins the fixtures actually use, plus a minimal safe core. The dangerous
+# primitives (open/exec/compile/input/exit/quit/globals/vars and the real
+# __import__) are deliberately absent. ``eval`` is included ONLY because the
+# CWE-95 "bad" fixture (``return eval(s)``) must stay functionally correct so the
+# corpus verdict is unchanged; the import shim below still walls it off from any
+# dangerous module.
+_SAFE_BUILTIN_NAMES: tuple[str, ...] = (
+    "int", "float", "str", "bytes", "bool", "len", "format", "range",
+    "list", "dict", "tuple", "set", "isinstance", "enumerate", "abs",
+    "min", "max", "sum", "sorted", "repr", "hex", "oct", "bin", "ord",
+    "chr", "eval",
+)
+
+
+def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):  # noqa: A002
+    """Import shim: only modules on the allowlist may be imported.
+
+    Blocks os/sys/subprocess/socket/pathlib and everything else not explicitly
+    allowed, so neither an ``import`` statement nor an ``eval``'d expression in a
+    candidate can reach the filesystem, network, or process table.
+    """
+    root = name.split(".", 1)[0]
+    if root not in _SAFE_IMPORT_ALLOWLIST:
+        raise ImportError(f"import of {name!r} blocked by candidate sandbox")
+    return importlib.import_module(name)
+
+
+def _safe_builtins() -> dict:
+    """A restricted ``__builtins__`` mapping with only the allowlisted names."""
+    safe = {n: getattr(_builtins, n) for n in _SAFE_BUILTIN_NAMES if hasattr(_builtins, n)}
+    safe["__import__"] = _guarded_import
+    return safe
+
+
 def _exec(src: str) -> dict:
-    ns: dict = {}
-    exec(compile(src, "<candidate>", "exec"), ns)  # noqa: S102 (controlled fixtures)
+    """Execute candidate source in a constrained namespace.
+
+    The namespace exposes only the restricted builtins from ``_safe_builtins()``
+    and the guarded import shim — no open/exec/compile/raw-__import__ — so a
+    hostile candidate cannot escalate to filesystem/network/process access.
+    """
+    ns: dict = {"__builtins__": _safe_builtins()}
+    # exec of TRUSTED frozen fixtures only; the namespace above is the sandbox.
+    exec(compile(src, "<candidate>", "exec"), ns)  # noqa: S102
     return ns
 
 
