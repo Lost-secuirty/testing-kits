@@ -60,6 +60,14 @@ class TestSarif(unittest.TestCase):
         self.assertFalse(is_valid_sarif({"version": "1.0"}))
         self.assertFalse(is_valid_sarif({"version": "2.1.0", "runs": []}))
 
+    def test_malformed_sarif_no_crash(self):
+        # A validator must return False on junk, never raise (CodeRabbit #85).
+        self.assertFalse(is_valid_sarif("not a dict"))
+        self.assertFalse(is_valid_sarif({"version": "2.1.0", "runs": [None]}))
+        self.assertFalse(is_valid_sarif({"version": "2.1.0", "runs": [{"tool": None}]}))
+        self.assertFalse(is_valid_sarif(
+            {"version": "2.1.0", "runs": [{"tool": {"driver": {}}, "results": [None]}]}))
+
 
 class TestJson(unittest.TestCase):
     def test_round_trip(self):

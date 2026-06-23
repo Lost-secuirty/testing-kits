@@ -109,18 +109,27 @@ def to_sarif(findings: list[Any], tool_name: str = "testing-kits",
 
 
 def is_valid_sarif(doc: dict[str, Any]) -> bool:
-    """Minimal structural validity check for SARIF 2.1.0."""
-    if doc.get("version") != "2.1.0":
+    """Minimal structural validity check for SARIF 2.1.0.
+
+    A validator must never crash on malformed input, so every nested field is
+    type-checked before use (a non-dict where a dict is expected -> invalid).
+    """
+    if not isinstance(doc, dict) or doc.get("version") != "2.1.0":
         return False
     runs = doc.get("runs")
     if not isinstance(runs, list) or not runs:
         return False
     run = runs[0]
-    if "tool" not in run or "driver" not in run["tool"]:
+    if not isinstance(run, dict) or not isinstance(run.get("tool"), dict):
         return False
-    if not isinstance(run.get("results"), list):
+    if not isinstance(run["tool"].get("driver"), dict):
         return False
-    for res in run["results"]:
+    results = run.get("results")
+    if not isinstance(results, list):
+        return False
+    for res in results:
+        if not isinstance(res, dict):
+            return False
         if "ruleId" not in res or "message" not in res or "level" not in res:
             return False
     return True
@@ -182,6 +191,9 @@ def run_all_scenarios(verbose: bool = False) -> list[ScenarioResult]:
                     {"rule_id": "R", "cwe": "CWE-2", "message": "b"}])
     tags = agg["runs"][0]["tool"]["driver"]["rules"][0].get("properties", {}).get("tags", [])
     check("13. cwe aggregated across same rule_id", "CWE-1" in tags and "CWE-2" in tags)
+    check("14. malformed sarif rejected without crashing",
+          is_valid_sarif({"version": "2.1.0", "runs": [None]}) is False
+          and is_valid_sarif({"version": "2.1.0", "runs": [{"tool": None}]}) is False)
 
     return run.results
 
