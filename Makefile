@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-core test-security test-ai test-pharmacy selftest teeth proof canary guard guard-update vacuity purity circularity corpus_size dead_expr fragility mutmut report lint clean help
+.PHONY: test test-fast test-core test-security test-ai test-pharmacy selftest teeth proof canary guard guard-update vacuity purity circularity corpus_size dead_expr fragility mutmut report coverage sarif lint clean help
 
 PY ?= python3
 
@@ -24,6 +24,8 @@ help:
 	@echo "  fragility      Enforce each judged corpus holds >=2 cases (advisory)"
 	@echo "  mutmut         Advisory mutation lane (Linux/WSL only; never blocks)"
 	@echo "  report         Regenerate STATUS.md"
+	@echo "  coverage       OWASP 2025 coverage matrix self-test (registry/tree sync)"
+	@echo "  sarif          Findings SARIF/JSON export self-test"
 	@echo "  lint           py_compile + ruff if installed"
 	@echo "  clean          Remove __pycache__ and *.pyc"
 
@@ -76,6 +78,12 @@ mutmut:
 
 report:
 	$(PY) tools/generate_report.py
+
+coverage:
+	$(PY) tools/owasp_coverage.py --self-test
+
+sarif:
+	$(PY) tools/findings_export.py --self-test
 
 lint:
 	$(PY) -m compileall -q harnesses tests tools

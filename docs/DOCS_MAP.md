@@ -21,6 +21,7 @@ Start here if you are checking whether the repo's claims match its evidence.
 - [`docs/PROOF_TEST_STANDARD.md`](./PROOF_TEST_STANDARD.md) — safe fixture plus planted-bad proof rule, including TEETH `required` / `pending` / `legacy` scopes.
 - [`docs/AI_AUTHORED_TEST_AUDIT.md`](./AI_AUTHORED_TEST_AUDIT.md) — checklist for reviewing AI-assisted tests.
 - [`docs/AI_FAILURE_MODE_MAP.md`](./AI_FAILURE_MODE_MAP.md) — maps common AI coding risks to existing harness areas and explicitly states limits.
+- [`docs/OWASP_COVERAGE.md`](./OWASP_COVERAGE.md) — OWASP 2025 (A01–A10) / LLM 2025 coverage matrix generated from the harness tree (`tools/owasp_coverage.py`), plus the SARIF/JSON findings exporter.
 - [`HARNESS_INVENTORY.md`](../HARNESS_INVENTORY.md) — harness catalog for sampling and trace-through review.
 
 ## Contributor or agent

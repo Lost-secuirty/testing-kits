@@ -113,6 +113,12 @@ Stdlib-AST gates that catch structural failures the swap-check can't. Shared les
   Pharmacy docs stay limited to fixture-defined behavior — never clinical or medication-safety claims.
 - Windows self-test/report needs explicit UTF-8 subprocess decoding; the console code page can crash
   report generation on Unicode harness output.
+- A generated map drifts unless its self-test cross-checks the live tree. `tools/owasp_coverage.py`
+  binds its curated OWASP/LLM `REGISTRY` to `harness_registry.discover_harnesses()` and fails on a
+  stale entry (maps to a harness that no longer exists) or an unmapped `security/`/`ai/` harness —
+  the same discovery-is-truth discipline as the harness count. Category tags follow each harness's
+  own 2025 self-declaration; the OWASP LLM Top 10 renumbered, so `insecure_output_handling` is
+  LLM05 and `sensitive_disclosure` is LLM02 (a unittest pins both against regressing to old codes).
 
 ## Docs and tone
 

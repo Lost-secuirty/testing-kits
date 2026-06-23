@@ -119,6 +119,7 @@ dashboard/    optional Streamlit viewer; separate dependency surface
 - [`docs/DOCS_MAP.md`](./docs/DOCS_MAP.md) — reading paths for new visitors, reviewers, contributors/agents, and maintainers.
 - [`docs/HARNESS_READING_GUIDE.md`](./docs/HARNESS_READING_GUIDE.md) — human/AI reading path and harness dossier shape for future mapping batches.
 - [`docs/HARNESS_MAP.md`](./docs/HARNESS_MAP.md) — current-state harness dossiers with failure class, logic shape, outside testing pattern, proof status, and known limits. Entries are subject to change as the repo grows.
+- [`docs/OWASP_COVERAGE.md`](./docs/OWASP_COVERAGE.md) — OWASP 2025 (A01–A10) / LLM 2025 coverage matrix generated from the harness tree, plus the SARIF/JSON findings exporter (`tools/owasp_coverage.py`, `tools/findings_export.py`).
 - [`docs/WALKTHROUGH.md`](./docs/WALKTHROUGH.md) — plain-language and technical explanation.
 - [`docs/REVIEWER_QUICKSTART.md`](./docs/REVIEWER_QUICKSTART.md) — review path, proof baseline, and sample harness inspection.
 - [`HARNESS_INVENTORY.md`](./HARNESS_INVENTORY.md) — full harness catalog.
