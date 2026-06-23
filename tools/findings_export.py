@@ -19,11 +19,18 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+try:  # dual-context: imported as tools.findings_export (tests) or run as a script
+    from tools._scenario import ScenarioRun, selftest_cli
+except ImportError:
+    from _scenario import ScenarioRun, selftest_cli
+
+if TYPE_CHECKING:
+    from tools._scenario import ScenarioResult
 
 _LEVEL = {"CRITICAL": "error", "HIGH": "error", "MEDIUM": "warning", "LOW": "note"}
 
@@ -40,6 +47,15 @@ def _field(finding: Any, *names: str, default: Any = None) -> Any:
     return default
 
 
+def _coerce_line(value: Any) -> int:
+    """A non-numeric or negative line means 'unknown' -> 0 (never crash on bad input)."""
+    try:
+        line = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return line if line > 0 else 0
+
+
 def normalize(finding: Any) -> dict[str, Any]:
     return {
         "rule_id": _field(finding, "rule_id", "check_name", default="GENERIC"),
@@ -47,7 +63,7 @@ def normalize(finding: Any) -> dict[str, Any]:
         "severity": (_field(finding, "severity", default="MEDIUM") or "MEDIUM").upper(),
         "message": _field(finding, "message", "description", default=""),
         "file": _field(finding, "file", "path", default=""),
-        "line": int(_field(finding, "line", default=0) or 0),
+        "line": _coerce_line(_field(finding, "line", default=0)),
     }
 
 
@@ -62,23 +78,24 @@ def to_sarif(findings: list[Any], tool_name: str = "testing-kits",
     for f in findings:
         n = normalize(f)
         rid = n["rule_id"]
-        if rid not in rules:
-            rule: dict[str, Any] = {"id": rid, "name": rid}
-            if n["cwe"]:
-                rule["properties"] = {"cwe": n["cwe"], "tags": [n["cwe"]]}
-            rules[rid] = rule
+        rule = rules.setdefault(rid, {"id": rid, "name": rid})
+        if n["cwe"]:
+            # Aggregate every distinct CWE seen for this rule_id, even when the
+            # first finding for the rule carried none.
+            props = rule.setdefault("properties", {"cwe": n["cwe"], "tags": []})
+            props.setdefault("cwe", n["cwe"])
+            if n["cwe"] not in props["tags"]:
+                props["tags"].append(n["cwe"])
         result: dict[str, Any] = {
             "ruleId": rid,
             "level": _LEVEL.get(n["severity"], "warning"),
             "message": {"text": n["message"]},
         }
         if n["file"]:
-            result["locations"] = [{
-                "physicalLocation": {
-                    "artifactLocation": {"uri": n["file"]},
-                    "region": {"startLine": max(1, n["line"])},
-                }
-            }]
+            physical: dict[str, Any] = {"artifactLocation": {"uri": n["file"]}}
+            if n["line"] > 0:  # omit the region rather than fake line 1 for unknowns
+                physical["region"] = {"startLine": n["line"]}
+            result["locations"] = [{"physicalLocation": physical}]
         results.append(result)
     return {
         "version": "2.1.0",
@@ -129,31 +146,12 @@ SAMPLE_FINDINGS: list[Any] = [
 
 
 # ---------------------------------------------------------------------------
-# Scenario results + self-test
+# Scenarios + self-test
 # ---------------------------------------------------------------------------
 
-@dataclass
-class ScenarioResult:
-    name: str
-    passed: bool
-    detail: str = ""
-
-    def __str__(self) -> str:
-        status = "PASS" if self.passed else "FAIL"
-        msg = f"  [{status}] {self.name}"
-        if not self.passed and self.detail:
-            msg += f"\n      {self.detail}"
-        return msg
-
-
 def run_all_scenarios(verbose: bool = False) -> list[ScenarioResult]:
-    results: list[ScenarioResult] = []
-
-    def check(name: str, cond: bool, detail: str = "") -> None:
-        r = ScenarioResult(name, bool(cond), detail)
-        results.append(r)
-        if verbose:
-            print(r)
+    run = ScenarioRun(verbose)
+    check = run.check
 
     sarif = to_sarif(SAMPLE_FINDINGS)
     check("1. sarif version 2.1.0", sarif["version"] == "2.1.0")
@@ -174,55 +172,37 @@ def run_all_scenarios(verbose: bool = False) -> list[ScenarioResult]:
           parsed[0]["rule_id"] == "CryptoChecker")
     check("9. invalid sarif rejected", is_valid_sarif({"version": "1.0"}) is False)
     check("10. object findings supported", parsed[2]["rule_id"] == "PY-WEAK-RANDOM")
+    # robustness fixes
+    check("11. non-numeric line coerced to 0",
+          normalize({"rule_id": "x", "line": "N/A"})["line"] == 0)
+    no_line = to_sarif([{"rule_id": "x", "severity": "HIGH", "message": "m", "file": "f.py"}])
+    loc = no_line["runs"][0]["results"][0]["locations"][0]["physicalLocation"]
+    check("12. region omitted when line unknown", "region" not in loc)
+    agg = to_sarif([{"rule_id": "R", "cwe": "CWE-1", "message": "a"},
+                    {"rule_id": "R", "cwe": "CWE-2", "message": "b"}])
+    tags = agg["runs"][0]["tool"]["driver"]["rules"][0].get("properties", {}).get("tags", [])
+    check("13. cwe aggregated across same rule_id", "CWE-1" in tags and "CWE-2" in tags)
 
-    return results
+    return run.results
 
 
 def list_scenarios() -> list[str]:
     return [r.name for r in run_all_scenarios(verbose=False)]
 
 
-def _run_self_test(verbose: bool = False) -> int:
-    print("\n  FINDINGS EXPORT (SARIF/JSON) — self-test mode")
-    print("  " + "=" * 52)
-    results = run_all_scenarios(verbose=verbose)
-    passed = sum(1 for r in results if r.passed)
-    failed = sum(1 for r in results if not r.passed)
-    if not verbose:
-        for r in results:
-            print(r)
-    print()
-    print(f"  Results: {passed} passed, {failed} failed out of {len(results)}")
-    print()
-    return 0 if failed == 0 else 1
-
-
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        prog="findings_export",
-        description="Export harness findings as SARIF 2.1.0 or JSON",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    p.add_argument("--self-test", action="store_true", help="Run all scenarios; exit 0 if all pass")
-    p.add_argument("--list-scenarios", action="store_true", help="List built-in scenarios")
-    p.add_argument("--demo", action="store_true", help="Print sample SARIF and exit")
-    p.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
-    return p
+def _print_demo() -> int:
+    print(json.dumps(to_sarif(SAMPLE_FINDINGS), indent=2))
+    return 0
 
 
 def main() -> int:
-    args = build_parser().parse_args()
-    if args.list_scenarios:
-        for name in list_scenarios():
-            print(name)
-        return 0
-    if args.demo:
-        print(json.dumps(to_sarif(SAMPLE_FINDINGS), indent=2))
-        return 0
-    if args.self_test:
-        return _run_self_test(verbose=args.verbose)
-    build_parser().print_help()
-    return 0
+    return selftest_cli(
+        "findings_export",
+        "Export harness findings as SARIF 2.1.0 or JSON",
+        "FINDINGS EXPORT (SARIF/JSON) — self-test mode",
+        run_all_scenarios,
+        extra={"demo": ("Print sample SARIF and exit", _print_demo)},
+    )
 
 
 if __name__ == "__main__":

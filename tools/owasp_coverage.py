@@ -23,14 +23,19 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import sys
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 try:  # dual-context: imported as tools.owasp_coverage (tests) or run as a script
+    from tools._scenario import ScenarioRun, selftest_cli
     from tools.harness_registry import REPO_ROOT, discover_harnesses
 except ImportError:
+    from _scenario import ScenarioRun, selftest_cli
     from harness_registry import REPO_ROOT, discover_harnesses
+
+if TYPE_CHECKING:
+    from tools._scenario import ScenarioResult
 
 OWASP_2025_WEB = {
     "A01": "Broken Access Control",
@@ -174,29 +179,9 @@ def render_markdown() -> str:
 # Scenario results + self-test
 # ---------------------------------------------------------------------------
 
-@dataclass
-class ScenarioResult:
-    name: str
-    passed: bool
-    detail: str = ""
-
-    def __str__(self) -> str:
-        status = "PASS" if self.passed else "FAIL"
-        msg = f"  [{status}] {self.name}"
-        if not self.passed and self.detail:
-            msg += f"\n      {self.detail}"
-        return msg
-
-
 def run_all_scenarios(verbose: bool = False) -> list[ScenarioResult]:
-    results: list[ScenarioResult] = []
-
-    def check(name: str, cond: bool, detail: str = "") -> None:
-        r = ScenarioResult(name, bool(cond), detail)
-        results.append(r)
-        if verbose:
-            print(r)
-
+    run = ScenarioRun(verbose)
+    check = run.check
     matrix = build_matrix()
     check("1. registry non-empty", len(REGISTRY) >= 10)
     check("2. all A01-A10 covered", missing_categories() == [], f"missing={missing_categories()}")
@@ -212,51 +197,26 @@ def run_all_scenarios(verbose: bool = False) -> list[ScenarioResult]:
     unmapped = unmapped_harnesses()
     check("8. every security/ai harness mapped", unmapped == [], f"unmapped={unmapped}")
 
-    return results
+    return run.results
 
 
 def list_scenarios() -> list[str]:
     return [r.name for r in run_all_scenarios(verbose=False)]
 
 
-def _run_self_test(verbose: bool = False) -> int:
-    print("\n  OWASP COVERAGE MATRIX — self-test mode")
-    print("  " + "=" * 52)
-    results = run_all_scenarios(verbose=verbose)
-    passed = sum(1 for r in results if r.passed)
-    failed = sum(1 for r in results if not r.passed)
-    if not verbose:
-        for r in results:
-            print(r)
-    print()
-    print(f"  Results: {passed} passed, {failed} failed out of {len(results)}")
-    print()
-    return 0 if failed == 0 else 1
-
-
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        prog="owasp_coverage",
-        description="Map harnesses to OWASP 2025 / CWE and emit a coverage matrix",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    p.add_argument("--self-test", action="store_true",
-                   help="Verify A01-A10 coverage + registry/tree sync")
-    p.add_argument("--list-scenarios", action="store_true", help="List built-in scenarios")
-    p.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
-    return p
+def _print_matrix() -> int:
+    print(render_markdown())
+    return 0
 
 
 def main() -> int:
-    args = build_parser().parse_args()
-    if args.list_scenarios:
-        for name in list_scenarios():
-            print(name)
-        return 0
-    if args.self_test:
-        return _run_self_test(verbose=args.verbose)
-    print(render_markdown())
-    return 0
+    return selftest_cli(
+        "owasp_coverage",
+        "Map harnesses to OWASP 2025 / CWE and emit a coverage matrix",
+        "OWASP COVERAGE MATRIX — self-test mode",
+        run_all_scenarios,
+        default_action=_print_matrix,
+    )
 
 
 if __name__ == "__main__":

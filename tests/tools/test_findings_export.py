@@ -68,6 +68,32 @@ class TestJson(unittest.TestCase):
         self.assertEqual(parsed[0]["rule_id"], "CryptoChecker")
 
 
+class TestRobustness(unittest.TestCase):
+    def test_non_numeric_line_coerced(self):
+        self.assertEqual(normalize({"rule_id": "x", "line": "N/A"})["line"], 0)
+        self.assertEqual(normalize({"rule_id": "x", "line": -4})["line"], 0)
+        self.assertEqual(normalize({"rule_id": "x", "line": "7"})["line"], 7)
+
+    def test_region_omitted_when_line_unknown(self):
+        doc = to_sarif([{"rule_id": "x", "severity": "HIGH", "message": "m", "file": "f.py"}])
+        phys = doc["runs"][0]["results"][0]["locations"][0]["physicalLocation"]
+        self.assertNotIn("region", phys)
+        self.assertEqual(phys["artifactLocation"]["uri"], "f.py")
+
+    def test_cwe_aggregated_across_rule(self):
+        doc = to_sarif([{"rule_id": "R", "cwe": "CWE-1", "message": "a"},
+                        {"rule_id": "R", "cwe": "CWE-2", "message": "b"}])
+        rule = doc["runs"][0]["tool"]["driver"]["rules"][0]
+        self.assertIn("CWE-1", rule["properties"]["tags"])
+        self.assertIn("CWE-2", rule["properties"]["tags"])
+
+    def test_cwe_captured_when_first_finding_has_none(self):
+        doc = to_sarif([{"rule_id": "R", "message": "a"},
+                        {"rule_id": "R", "cwe": "CWE-9", "message": "b"}])
+        rule = doc["runs"][0]["tool"]["driver"]["rules"][0]
+        self.assertIn("CWE-9", rule["properties"]["tags"])
+
+
 class TestSelfTest(unittest.TestCase):
     def test_all_scenarios_pass(self):
         failed = [r for r in run_all_scenarios() if not r.passed]
