@@ -16,7 +16,7 @@ Current public shape:
 
 ## Why it exists
 
-AI-assisted and fast-moving code often fails in predictable ways: happy-path-only tests, weak fixtures, missed negative controls, fake confidence from coverage, and broad claims unsupported by the actual test. This repo collects compact patterns for testing those failure modes.
+AI-assisted and fast-moving code often fails in predictable ways: happy-path-only tests, weak fixtures, missed negative controls, fake confidence from coverage, and broad claims unsupported by the actual test. This repo collects compact proof-shaped patterns for testing those failure modes.
 
 The useful reviewer question is not "does this prove everything is correct?" It does not. The useful question is: "can this harness show a safe case passing and a planted-bad case failing for a specific bug class?"
 
@@ -86,6 +86,7 @@ dashboard/    optional Streamlit viewer; separate dependency surface
 ### Start here
 
 - [`docs/START_HERE.md`](./docs/START_HERE.md) — shortest safe entry point for humans and AI assistants.
+- [`docs/READER_LEVELS.md`](./docs/READER_LEVELS.md) — beginner, junior reviewer, and senior auditor reading paths.
 - [`docs/GOLDEN_STATS.md`](./docs/GOLDEN_STATS.md) — human-maintained snapshot index for quickly checking the current documented count baseline.
 - [`docs/DOCS_STABILIZATION_PLAN.md`](./docs/DOCS_STABILIZATION_PLAN.md) — current docs-only stabilization checklist.
 - [`docs/DOC_SIZE_POLICY.md`](./docs/DOC_SIZE_POLICY.md) — connector-safe doc-size and large-file editing policy.
@@ -97,6 +98,7 @@ dashboard/    optional Streamlit viewer; separate dependency surface
 - [`docs/PROOF_TEST_STANDARD.md`](./docs/PROOF_TEST_STANDARD.md) — safe fixture plus planted-bad proof rule and TEETH scopes.
 - [`docs/TEST_OBSERVABILITY.md`](./docs/TEST_OBSERVABILITY.md) — signals for observing the test system itself.
 - [`docs/REPRODUCIBILITY.md`](./docs/REPRODUCIBILITY.md) — how to replay proof and report exact commands.
+- [`docs/DOC_STYLE_GUIDE.md`](./docs/DOC_STYLE_GUIDE.md) — controlled wording, count/status language, and claim-boundary guidance for docs changes.
 
 ### Porting and next layers
 
