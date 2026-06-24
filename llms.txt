@@ -5,12 +5,14 @@ Compact public navigation map. This file is descriptive only; operating rules li
 ## Start here
 
 - [README.md](./README.md): public landing page and proof baseline.
+- [docs/READER_LEVELS.md](./docs/READER_LEVELS.md): beginner, junior reviewer, and senior auditor paths.
 - [docs/DOCS_MAP.md](./docs/DOCS_MAP.md): documentation reading paths.
 - [docs/HARNESS_READING_GUIDE.md](./docs/HARNESS_READING_GUIDE.md): harness reading and dossier shape.
+- [docs/DOC_STYLE_GUIDE.md](./docs/DOC_STYLE_GUIDE.md): controlled vocabulary and claim-boundary wording.
 - [docs/HARNESS_MAP.md](./docs/HARNESS_MAP.md): current-state harness map with failure classes, logic shapes, outside testing patterns, proof status, and limits.
 - [HARNESS_INVENTORY.md](./HARNESS_INVENTORY.md): harness catalog.
 - [HARNESS_ROADMAP.md](./HARNESS_ROADMAP.md): shipped batches and next safe work.
 
 ## Proof language
 
-Use `77 harnesses` for inventory size. Use TEETH `required` / `pending` / `legacy` status for proof strength. Re-run gates before using loaded counts as fresh claims. Harness-map entries are subject to change as the repo grows.
+Use `92 harnesses` for inventory size. Use TEETH `required` / `pending` / `legacy` status for proof strength. Re-run gates before using loaded counts as fresh claims. Harness-map entries are subject to change as the repo grows.
