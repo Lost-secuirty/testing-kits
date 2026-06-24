@@ -2,11 +2,13 @@
 
 *A portable library of 92 small, pure-Python test harnesses. Verification patterns are the product; the repo is not an application, framework, or certification suite.*
 
+If you are choosing what to read first, start with `docs/READER_LEVELS.md`. This walkthrough explains the repo in plain and technical terms after that initial role split.
+
 ## Bottom line
 
 Testing-kits is a reference collection of **92 self-contained Python test harnesses**. Each harness demonstrates one failure mode with a known-good case and a planted-bad case. It is deliberately a library to read from, learn from, and port from, not a product to deploy.
 
-The current proof model is a ratchet, not a blanket claim that all 92 are proven in the same way. The TEETH campaign distinguishes **required**, **pending**, and **legacy** harnesses. As of the current Batch 10 teeth state, the snapshot is **84 required / 0 pending / 8 legacy / 0 failing**. Re-run `make proof` before treating that as a fresh release claim.
+The current proof model is a ratchet, not a blanket claim that all 92 are proven in the same way. The TEETH campaign distinguishes **required**, **pending**, and **legacy** harnesses. As of the documented Batch 10 teeth state, the snapshot is **84 required / 0 pending / 8 legacy / 0 failing**. Re-run `make proof` before treating that as a fresh release claim.
 
 ## In plain terms
 
@@ -57,7 +59,7 @@ The Makefile exposes the reviewer command surface: `make test`, focused category
   - `required` — TEETH declared and verified;
   - `pending` — counted but not yet ratcheted into TEETH;
   - `legacy` — pharmacy-domain soft-gate status.
-- **Current loaded proof snapshot:** Batch 10 records **84 required / 0 pending / 8 legacy / 0 failing**. This is a current proof baseline from loaded repo state, not a permanent claim.
+- **Documented proof snapshot:** Batch 10 records **84 required / 0 pending / 8 legacy / 0 failing**. This is a documented proof baseline from loaded repo state, not a permanent claim.
 - **CI/governance:** `.github/control-policy.json` lists required files and workflows. `tools/control_audit.py` enforces the control-policy presence checks. `STATUS.md` and `STATUS.json` are generated artifacts, not canonical committed status.
 
 ### 5. What it proves — and what it does not
