@@ -25,15 +25,15 @@ git diff --check
 
 ## Expected documented snapshot
 
-As of `docs/UPGRADE_CAMPAIGN.md` Batch 9, dated 2026-06-18:
+As of the documented Batch 10 snapshot, dated 2026-06-21:
 
-- 77 total harnesses;
-- 69 required;
+- 92 total harnesses;
+- 84 required;
 - 0 pending;
 - 8 legacy;
 - 0 failing.
 
-This is a documented snapshot, not a fresh proof claim. Rerun proof before using it as release evidence.
+This is a documented snapshot, not a fresh proof claim. Rerun proof before using it as release evidence. See `docs/GOLDEN_STATS.md` and `docs/UPGRADE_CAMPAIGN.md` for the source trail.
 
 ## Reproducing a single harness
 

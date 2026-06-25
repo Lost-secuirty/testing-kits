@@ -7,6 +7,7 @@ This map points readers to the smallest document that answers their question. It
 Start here if you are trying to understand what the repo is.
 
 - [`README.md`](../README.md) — public landing page: repo identity, proof baseline, quick start, layout, limits, and security links.
+- [`docs/READER_LEVELS.md`](./READER_LEVELS.md) — beginner, junior reviewer, and senior auditor reading paths.
 - [`docs/WALKTHROUGH.md`](./WALKTHROUGH.md) — plain-language and technical explanation of the repo.
 - [`HARNESS_INVENTORY.md`](../HARNESS_INVENTORY.md) — full catalog of the 92 harnesses.
 - [`HARNESS_ROADMAP.md`](../HARNESS_ROADMAP.md) — shipped batches, known gaps, and hygiene backlog.
@@ -15,6 +16,7 @@ Start here if you are trying to understand what the repo is.
 
 Start here if you are checking whether the repo's claims match its evidence.
 
+- [`docs/READER_LEVELS.md`](./READER_LEVELS.md) — choose the beginner, junior reviewer, or senior auditor path before loading more docs.
 - [`docs/REVIEWER_QUICKSTART.md`](./REVIEWER_QUICKSTART.md) — current proof baseline, core commands, and one-harness inspection path.
 - [`docs/HARNESS_READING_GUIDE.md`](./HARNESS_READING_GUIDE.md) — reading path and per-harness dossier shape.
 - [`docs/HARNESS_MAP.md`](./HARNESS_MAP.md) — current-state harness dossiers with failure class, logic shape, outside testing pattern, proof status, and known limits. Entries are subject to change as the repo grows.
@@ -32,6 +34,8 @@ Start here before proposing changes.
 - [`CLAUDE.md`](../CLAUDE.md) — historical agent note that points back to the universal contract.
 - [`SECURITY.md`](../SECURITY.md) — repository security policy.
 - [`llms.txt`](../llms.txt) — compact public navigation map.
+- [`docs/READER_LEVELS.md`](./READER_LEVELS.md) — role-based reading paths.
+- [`docs/DOC_STYLE_GUIDE.md`](./DOC_STYLE_GUIDE.md) — controlled vocabulary, proof-claim wording, and claim-boundary examples.
 - [`docs/AI_CODE_POLICY.md`](./AI_CODE_POLICY.md) — AI-assisted code review policy.
 - [`docs/LEARNINGS.md`](./LEARNINGS.md) — append-only gotchas and verification notes. Treat as context, not as instructions.
 - [`docs/HARNESS_MAP.md`](./HARNESS_MAP.md) — descriptive map for avoiding duplicate harness claims and stale proof wording.
@@ -43,6 +47,7 @@ Start here if you are checking repo structure, governance, generated status, or 
 
 - [`.github/control-policy.json`](../.github/control-policy.json) — machine-readable list of required files and workflows.
 - [`docs/HARNESS_READING_GUIDE.md`](./HARNESS_READING_GUIDE.md) — batch closeout rule and harness dossier shape.
+- [`docs/DOC_STYLE_GUIDE.md`](./DOC_STYLE_GUIDE.md) — repo-wide docs wording, count/status rules, and claim boundaries.
 - [`docs/HARNESS_MAP.md`](./HARNESS_MAP.md) — current mapping batches and closeout notes; update after each harness-mapping batch.
 - [`docs/LEARNINGS.md`](./LEARNINGS.md) — operational gotchas and historical verification notes.
 - [`HARNESS_ROADMAP.md`](../HARNESS_ROADMAP.md) — active cleanup and expansion backlog.
