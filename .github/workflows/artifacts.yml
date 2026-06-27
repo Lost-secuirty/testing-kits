@@ -31,7 +31,9 @@ jobs:
       - run: ruff check harnesses tests tools
       - run: python -m unittest discover -s tests -t . -p "test_*.py"
       - run: python tools/proof_audit.py --run-selftests
-      - run: python tools/generate_report.py --check
+      # Write mode (not --check): same gate, but also emits STATUS.md / STATUS.json
+      # so the packaging step below can include them in the tarball.
+      - run: python tools/generate_report.py
       - run: python tools/scan_staged.py --self-test
       - name: Build and install wheel smoke
         shell: bash

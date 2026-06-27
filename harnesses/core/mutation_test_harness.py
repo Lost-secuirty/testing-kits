@@ -24,7 +24,8 @@ from urllib.parse import urlparse
 # Make the shared teeth contract importable whether run as a module or a script.
 if str(_Path(__file__).resolve().parents[2]) not in sys.path:
     sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
-from harnesses._teeth import Mutant as TeethMutant, Report, Teeth  # noqa: E402
+from harnesses._teeth import Mutant as TeethMutant  # noqa: E402
+from harnesses._teeth import Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # MutationResult enum

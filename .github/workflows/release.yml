@@ -39,7 +39,9 @@ jobs:
       - run: ruff check harnesses tests tools
       - run: python -m unittest discover -s tests -t . -p "test_*.py"
       - run: python tools/proof_audit.py --run-selftests
-      - run: python tools/generate_report.py --check
+      # Write mode (not --check): same self-test + proof gate, but also emits
+      # STATUS.md / STATUS.json so the Package step can include them in the tarball.
+      - run: python tools/generate_report.py
       - run: python tools/scan_staged.py --self-test
       - name: Package release
         shell: bash

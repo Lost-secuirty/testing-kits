@@ -10,8 +10,8 @@ from harnesses.core.clock_skew_test_harness import (
     FakeClock,
     TTLCache,
     WriteOp,
-    build_parser,
     _run_self_test,
+    build_parser,
     last_write_wins,
     list_scenarios,
 )
