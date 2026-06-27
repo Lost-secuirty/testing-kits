@@ -318,7 +318,8 @@ def _run_self_test(as_json: bool = False) -> int:
         actual = oracle_leakage_audit(case)
         report.add(f"scan:{case.name}", list(case.expected), list(actual),
                    detail=f"{case.kind}: {len(case.expected)} flag(s) expected")
-        print(f"scan:{case.name:<30} {list(actual)}")
+        if not as_json:
+            print(f"scan:{case.name:<30} {list(actual)}")
 
     # Independent inline witness for a subset (not read back from case.expected).
     for name, expected in FROZEN_EXPECTED.items():
