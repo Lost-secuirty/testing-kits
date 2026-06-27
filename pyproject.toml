@@ -60,13 +60,17 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+# Gate-checker fixtures hold deliberately "bad" code (dead expressions, eval, a
+# raw for-loop, etc.) that the dead_expr / purity / corpus_size gates are built to
+# detect. They are not real source and must not be linted.
+extend-exclude = ["tools/_*_fixtures"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "S"]
 ignore = ["E501", "S603", "S607"]  # S603/S607: safe list-form subprocess, no signal
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["B011", "S"]  # tests assert + open local fixture URLs
+"tests/**/*.py" = ["B011", "S", "SIM117"]  # tests assert + open local fixture URLs; nested with (patch + redirect + assertRaises) reads clearer than combined
 "harnesses/**/*.py" = ["S"]  # harnesses intentionally demonstrate insecure patterns
 "experiments/**/*.py" = ["F401", "F841"]
 

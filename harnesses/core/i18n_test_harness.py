@@ -36,7 +36,7 @@ from harnesses._teeth import Mutant, Report, Teeth
 
 DEFAULT_PORT = 19160
 FAMILY_ZWJ = "👨‍👩‍👧"
-MOJIBAKE_CAFE = "café".encode("utf-8").decode("latin-1")
+MOJIBAKE_CAFE = "café".encode().decode("latin-1")
 
 # BOM byte sequences
 BOM_UTF8 = b"\xef\xbb\xbf"

@@ -34,7 +34,8 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path, Path as _Path
+from pathlib import Path
+from pathlib import Path as _Path
 from typing import Any
 
 if __package__ in {None, ""}:
