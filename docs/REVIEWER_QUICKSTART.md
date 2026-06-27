@@ -11,7 +11,7 @@ loading the whole documentation set.
 
 ## What the repo proves
 
-- The current inventory contains **92 harnesses**.
+- The current inventory contains **100 harnesses**.
 - Each harness is intended to remain small, local, and inspectable enough for a
   reviewer to trace the safe fixture and the planted-bad fixture.
 - The documented Batch 10 TEETH snapshot distinguishes harnesses by status instead
@@ -21,7 +21,7 @@ loading the whole documentation set.
   - **pending** — a non-legacy harness that is counted in the inventory but has
     not yet been ratcheted into the required TEETH contract.
   - **legacy** — pharmacy-domain harnesses still tracked under the older soft gate.
-- The documented Batch 10 proof-ratchet snapshot is **84 required / 0 pending / 8
+- The documented Batch 11 proof-ratchet snapshot is **92 required / 0 pending / 8
   legacy / 0 failing**. Re-run `make proof` before treating that as a fresh
   release claim.
 - The proof baseline is fixture-defined. It shows known-good cases pass and

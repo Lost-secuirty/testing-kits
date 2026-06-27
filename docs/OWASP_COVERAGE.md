@@ -20,11 +20,11 @@ This document uses the category labels declared by the harness registry and test
 | A05 | Injection | appsec, security, upload, advanced_injection | 4 |
 | A06 | Insecure Design | rate_limit | 1 |
 | A07 | Authentication Failures | appsec, authz, jwt, security, session | 5 |
-| A08 | Software or Data Integrity Failures | appsec, upload, ci_workflow_hardening, cwe_kev_regression | 4 |
+| A08 | Software or Data Integrity Failures | appsec, upload, ci_workflow_hardening, cwe_kev_regression, data_integrity | 5 |
 | A09 | Security Logging and Alerting Failures | pii_redaction, security_logging | 2 |
 | A10 | Mishandling of Exceptional Conditions | exceptional_conditions | 1 |
 
-LLM Top 10 (2025) categories covered: LLM01, LLM02, LLM05, LLM06, LLM08, LLM09, LLM10
+LLM Top 10 (2025) categories covered: LLM01, LLM02, LLM04, LLM05, LLM06, LLM07, LLM08, LLM09, LLM10
 
 (`cross` entries — `ast_sast`, `secure_codegen_eval`, `prompt_ab`, `agent_eval`, `agent_memory_context`, `agentic`, `drift_detection` — are cross-cutting eval/oracle tooling and intentionally not pinned to a single category.)
 

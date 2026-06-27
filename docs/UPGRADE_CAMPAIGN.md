@@ -13,7 +13,7 @@ proof commands.
 ## Scope & rules
 
 - **Original campaign scope: 69 harnesses** — core (52), security (10), ai (7).
-- **Current documented non-pharmacy TEETH scope after Batch 10: 84 required harnesses** — the original 69 plus 15 OWASP web/LLM harnesses.
+- **Current documented non-pharmacy TEETH scope after Batch 11: 92 required harnesses** — the original 69 plus 15 OWASP web/LLM harnesses (Batch 10) plus 8 Exploratory Proof Layer + deferred-OWASP harnesses (Batch 11).
 - **Out of scope: pharmacy (8)** — kept on the legacy soft gate; the operator will
   do that category later.
 - Batch size: **≤10 when upgrading**, 6 for brand-new harnesses.
@@ -34,6 +34,9 @@ proof commands.
 | Batch 10, 2026-06-21 | required (teeth verified) | 84 | Batch 10 added 15 OWASP web/LLM harnesses as required TEETH harnesses. |
 | Batch 10, 2026-06-21 | pending | 0 | No pending harnesses in the documented Batch 10 snapshot. |
 | Batch 10, 2026-06-21 | legacy (pharmacy) | 8 | Pharmacy-domain harnesses remain separately labelled legacy. |
+| Batch 11, 2026-06-27 | required (teeth verified) | 92 | Batch 11 added 8 harnesses (4 core Exploratory Proof Layer + 4 deferred-OWASP). Total inventory 100 (core 56, security 20, ai 16, pharmacy 8). |
+| Batch 11, 2026-06-27 | pending | 0 | No pending harnesses in the documented Batch 11 snapshot. |
+| Batch 11, 2026-06-27 | legacy (pharmacy) | 8 | Pharmacy-domain harnesses remain separately labelled legacy. |
 
 Do not treat this table as fresh proof output. Re-run `make proof` before release claims.
 
@@ -55,6 +58,11 @@ core/{cardinality,dormant_code,hermeticity,search_relevance}, ai/prompt_injectio
 security_logging,rate_limit,session,exceptional_conditions,ast_sast} and
 ai/{excessive_agency,insecure_output_handling,sensitive_disclosure,unbounded_consumption,
 secure_codegen_eval,prompt_ab}.
+
+**Batch 11 additions (8):** the Exploratory Proof Layer + deferred-OWASP closeout —
+core/{combinatorial_coverage,counterexample_replay,stateful_sequence_budget,boundary_corpus_expander}
+and security/data_integrity (OWASP A08:2025), ai/data_poisoning (LLM04:2025),
+ai/system_prompt_leakage (LLM07:2025), ai/misinformation (LLM09:2025).
 
 ## Batch roadmap (provisional; exact membership ranked at each batch start)
 
@@ -119,7 +127,12 @@ secure_codegen_eval,prompt_ab}.
   0 pending / 8 legacy / 0 failing.
 - **Batch 10 — DONE (2026-06-21):** 15 OWASP Top 10:2025 web + LLM harnesses added as required
   TEETH harnesses. Documented snapshot: 84 required / 0 pending / 8 legacy / 0 failing.
-- **Post-Batch 10:** docs consistency, mapping freshness, proof-claim hygiene, and legacy/pharmacy
+- **Batch 11 — DONE (2026-06-27):** 8 harnesses added as required TEETH harnesses — 4 Exploratory
+  Proof Layer (combinatorial_coverage, counterexample_replay, stateful_sequence_budget,
+  boundary_corpus_expander) + 4 deferred-OWASP (data_integrity A08, data_poisoning LLM04,
+  system_prompt_leakage LLM07, misinformation LLM09). Documented snapshot: 92 required /
+  0 pending / 8 legacy / 0 failing; inventory 100.
+- **Post-Batch 11:** docs consistency, mapping freshness, proof-claim hygiene, and legacy/pharmacy
   boundary language take priority over new harness inventory.
 - **Historical candidate backlog (not approved by this file):**
   1. **gherkin_spec_determinism** — enforce constrained-Gherkin rules (declarative-not-
