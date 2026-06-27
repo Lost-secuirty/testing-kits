@@ -37,8 +37,9 @@ python tools/generate_report.py --check
 ```
 
 Optional developer tooling (ruff, pytest, mutmut, etc.) is declared as a PEP 735
-`dev` dependency group in `pyproject.toml`; install it with `uv sync` or `pip install`
-from that group. It is never required for the core, pure-stdlib path.
+`dev` dependency group in `pyproject.toml`. Install it with `uv sync` (uv supports
+PEP 735 dependency groups natively); standalone `pip` supports it from version 25.1 via
+`pip install --group dev`. It is never required for the core, pure-stdlib path.
 
 ## The harness contract
 
@@ -55,6 +56,22 @@ Every new **required** harness must:
   ```bash
   make test && make proof && make vacuity && make purity && make circularity \
     && make corpus_size && make fragility && make dead_expr && make guard && make canary && make lint
+  ```
+
+  On Windows without `make`, each target maps to a direct command:
+
+  ```bash
+  python -m unittest discover -s tests -t . -p "test_*.py"   # test
+  python tools/proof_audit.py --run-selftests                # proof
+  python tools/vacuity_gate.py                               # vacuity
+  python tools/prove_purity_checker.py                       # purity
+  python tools/prove_circularity_checker.py                  # circularity
+  python tools/corpus_size_checker.py                        # corpus_size
+  python tools/fragility_checker.py                          # fragility
+  python tools/dead_expr_checker.py                          # dead_expr
+  python tools/file_guard.py                                 # guard
+  python tools/gate_canary.py                                # canary
+  python -m compileall -q harnesses tests tools              # lint (+ ruff if installed)
   ```
 
 - Regenerate harness cards with `python cards/harness_card.py --write --update-ratchet`
