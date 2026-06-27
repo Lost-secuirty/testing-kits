@@ -14,8 +14,8 @@ loading the whole documentation set.
 - The current inventory contains **100 harnesses**.
 - Each harness is intended to remain small, local, and inspectable enough for a
   reviewer to trace the safe fixture and the planted-bad fixture.
-- The documented Batch 10 TEETH snapshot distinguishes harnesses by status instead
-  of treating all 92 as equivalent:
+- The documented Batch 11 TEETH snapshot distinguishes harnesses by status instead
+  of treating all 100 as equivalent:
   - **required** — a non-legacy harness with `TEETH`; the swap-check verifies that
     the correct oracle is not flagged and every planted mutant is caught.
   - **pending** — a non-legacy harness that is counted in the inventory but has

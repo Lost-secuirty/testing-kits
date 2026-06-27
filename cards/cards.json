@@ -502,7 +502,7 @@
   {
     "key": "core/circuitbreaker",
     "category": "core",
-    "purpose": "circuitbreaker_test_harness.py \u00e2\u20ac\u201d Circuit Breaker Resilience Harness (2026)",
+    "purpose": "circuitbreaker_test_harness.py \u2014 Circuit Breaker Resilience Harness (2026)",
     "harness_path": "harnesses/core/circuitbreaker_test_harness.py",
     "teeth_status": "required",
     "teeth_verified": true,
@@ -1802,7 +1802,7 @@
   {
     "key": "security/jwt",
     "category": "security",
-    "purpose": "jwt_test_harness.py \u00e2\u20ac\u201d JWT (HS256) Verification Harness (2026)",
+    "purpose": "jwt_test_harness.py \u2014 JWT (HS256) Verification Harness (2026)",
     "harness_path": "harnesses/security/jwt_test_harness.py",
     "teeth_status": "required",
     "teeth_verified": true,
@@ -1842,7 +1842,7 @@
   {
     "key": "security/pii_redaction",
     "category": "security",
-    "purpose": "pii_redaction_test_harness.py \u00e2\u20ac\u201d PII / PHI Redaction Harness (2026)",
+    "purpose": "pii_redaction_test_harness.py \u2014 PII / PHI Redaction Harness (2026)",
     "harness_path": "harnesses/security/pii_redaction_test_harness.py",
     "teeth_status": "required",
     "teeth_verified": true,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pii_redaction_test_harness.py â€” PII / PHI Redaction Harness (2026)
+"""pii_redaction_test_harness.py — PII / PHI Redaction Harness (2026)
 ================================================================================
 Pure-Python (ZERO dependencies) harness for testing detection and redaction of
 personally identifiable information (PII) and protected health information
