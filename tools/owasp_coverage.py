@@ -109,6 +109,9 @@ REGISTRY: list[HarnessCoverage] = [
                     ["CWE-1336", "CWE-943", "CWE-90"], "SSTI/NoSQL/LDAP"),
     HarnessCoverage("security/session", ["A07", "A01"],
                     ["CWE-384", "CWE-352", "CWE-613"], "fixation/CSRF/entropy/timeout"),
+    HarnessCoverage("security/data_integrity", ["A08"],
+                    ["CWE-494", "CWE-502", "CWE-829"],
+                    "update/artifact/deserialization integrity policy (A08:2025)"),
     # --- ai (OWASP LLM Top 10 2025 codes; "cross" = eval/methodology tooling) ---
     HarnessCoverage("ai/prompt_injection", ["LLM01"], [], "prompt injection"),
     HarnessCoverage("ai/sensitive_disclosure", ["LLM02"],
