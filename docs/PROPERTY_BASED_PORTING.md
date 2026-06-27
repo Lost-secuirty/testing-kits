@@ -8,6 +8,8 @@ Property-based testing searches around a behavior space for unknown edge cases.
 
 They are complementary. Property-based testing should not replace planted-bad proof.
 
+See [`docs/EXPLORATORY_PROOF_LAYER.md`](./EXPLORATORY_PROOF_LAYER.md) for the current rollout plan that connects property-style checks with boundary sweeps, combinatorial/t-way coverage, stateful sequence exploration, and deterministic counterexample freezing.
+
 ## Core repo boundary
 
 The core `testing-kits` repo stays pure Python standard library.
@@ -37,11 +39,30 @@ Use property-based testing for:
 - boundary exploration;
 - regression discovery after new bugs are found.
 
+Use combinatorial/t-way testing for:
+
+- finite parameter models;
+- pairwise or small t-way interaction coverage;
+- checking that coverage accounting fails when a required interaction is missing;
+- reducing the size of a modeled interaction suite without claiming exhaustive coverage.
+
+Use stateful sequence exploration for:
+
+- action-order bugs;
+- transition guards;
+- terminal-state handling;
+- bounded sequence budgets;
+- visited path/state tracking.
+
+Freeze new findings into deterministic fixtures before making them required proof claims.
+
 ## Do not replace planted bads
 
 Generated inputs can miss the exact known-bad behavior unless the generator is designed to include it.
 
 A property test that never generates the dangerous case can pass forever while the known bug remains exploitable.
+
+Generated-input tests can also create a different failure: the suite may find interesting cases but fail to preserve them. When a generated case matters, minimize or freeze it into a replayable fixture and keep the planted-bad anchor.
 
 ## Example: JWT port
 
@@ -91,6 +112,9 @@ The planted-bad leak remains required.
 - [ ] Is the oracle independent enough to avoid echoing implementation logic?
 - [ ] Are generated requirements traceable to the target contract?
 - [ ] Are slow or flaky generated tests separated from the fast proof kernel?
+- [ ] If combinatorial coverage is claimed, is the parameter model finite and explicit?
+- [ ] If stateful exploration is claimed, are sequence length, terminal states, and visited paths bounded?
+- [ ] Did any new counterexample become a deterministic fixture before the proof claim changed?
 
 ## Failure mode
 
