@@ -17,6 +17,7 @@ The source of truth remains:
 |---|---|---:|---:|---:|---:|---:|---|
 | 2026-06-18 | `docs/UPGRADE_CAMPAIGN.md` Batch 9 | 77 | 69 | 0 | 8 | 0 | TEETH campaign complete for non-pharmacy harnesses. |
 | 2026-06-21 | `tools/proof_audit.py` Batch 10 | 92 | 84 | 0 | 8 | 0 | +15 OWASP Top 10:2025 web + LLM harnesses; `make proof` 92/92, `make test` 5100 tests OK. |
+| 2026-06-27 | `tools/proof_audit.py` Batch 11 | 100 | 92 | 0 | 8 | 0 | +8 exploratory + deferred-OWASP harnesses (combinatorial_coverage, counterexample_replay, stateful_sequence_budget, boundary_corpus_expander; data_integrity A08; data_poisoning LLM04; system_prompt_leakage LLM07; misinformation LLM09); `make proof` 92/92. |
 
 ## Update rules
 

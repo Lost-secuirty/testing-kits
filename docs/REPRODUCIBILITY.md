@@ -25,10 +25,18 @@ git diff --check
 
 ## Expected documented snapshot
 
-As of the documented Batch 10 snapshot, dated 2026-06-21:
+As of the documented Batch 11 snapshot, dated 2026-06-27:
 
-- 92 total harnesses;
-- 84 required;
+- 100 total harnesses;
+- 92 required;
+- 0 pending;
+- 8 legacy;
+- 0 failing.
+
+As of the documented Batch 11 snapshot, dated 2026-06-27:
+
+- 100 total harnesses;
+- 92 required;
 - 0 pending;
 - 8 legacy;
 - 0 failing.

@@ -30,6 +30,8 @@ This table is a human-readable index. Proof output wins if this table becomes st
 | Date | Source | Total | Required | Pending | Legacy | Failing | Proof result | Notes |
 |---|---|---:|---:|---:|---:|---:|---|---|
 | 2026-06-18 | `docs/UPGRADE_CAMPAIGN.md` Batch 9 | 77 | 69 | 0 | 8 | 0 | documented green | final pending TEETH campaign completed for non-pharmacy harnesses |
+| 2026-06-21 | `docs/UPGRADE_CAMPAIGN.md` Batch 10 | 92 | 84 | 0 | 8 | 0 | documented green | pharmacy lane and OWASP/LLM expansion harnesses added |
+| 2026-06-27 | `docs/UPGRADE_CAMPAIGN.md` Batch 11 | 100 | 92 | 0 | 8 | 0 | documented green | Exploratory Proof Layer and deferred-OWASP closeout merged |
 
 ## Docs sync checks
 

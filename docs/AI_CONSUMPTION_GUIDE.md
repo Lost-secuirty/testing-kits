@@ -89,7 +89,7 @@ This harness is TEETH-proven for the declared contract when the current proof au
 Acceptable wording:
 
 ```text
-The documented Batch 10 snapshot lists 84 required, 0 pending, and 8 legacy harnesses; rerun proof before treating this as a fresh release claim.
+The documented Batch 11 snapshot lists 92 required, 0 pending, and 8 legacy harnesses; rerun proof before treating this as a fresh release claim.
 ```
 
 Not acceptable:
