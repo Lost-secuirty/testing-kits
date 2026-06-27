@@ -55,7 +55,7 @@ class TestOracle(unittest.TestCase):
 
     def test_covered_pairs_subset_of_required(self):
         complete = next(ts for name, ts, _e in CORPUS if name == "complete")
-        self.assertTrue(covered_pairs(complete) <= required_pairs(MODEL))
+        self.assertLessEqual(covered_pairs(complete), required_pairs(MODEL))
 
 
 class TestGenerator(unittest.TestCase):
