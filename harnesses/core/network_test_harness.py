@@ -279,6 +279,14 @@ class MockNetworkHandler(BaseHTTPRequestHandler):
     def _handle(self):
         cfg = getattr(self.server, "config", {})
 
+        # Drain any request body before responding. A short/early response that
+        # leaves the client's POST payload unread races the socket close into a
+        # connection reset (Windows WinError 10053) — the flaky-test source. No-op
+        # when there is no body.
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length:
+            self.rfile.read(length)
+
         # Record request
         log: list | None = cfg.get("request_log")
         if log is not None:
