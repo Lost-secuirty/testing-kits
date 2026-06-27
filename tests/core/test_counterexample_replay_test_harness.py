@@ -1,5 +1,8 @@
 """Test suite for counterexample_replay_test_harness."""
 
+import contextlib
+import io
+import json
 import unittest
 
 from harnesses.core.counterexample_replay_test_harness import (
@@ -17,6 +20,7 @@ from harnesses.core.counterexample_replay_test_harness import (
     _run_self_test,
     canonical_record,
     list_scenarios,
+    main,
     prove,
     replay_key,
 )
@@ -37,6 +41,12 @@ class TestCanonicalRecord(unittest.TestCase):
     def test_rejects_missing_seed(self):
         with self.assertRaises(ValueError):
             canonical_record({"input": [1], "failure_class": "X", "expected_verdict": "fail"})
+
+    def test_accepts_empty_input(self):
+        # An empty input is a legitimate minimal reproducer and must stay replayable.
+        record = {"input": [], "seed": 0, "failure_class": "X", "expected_verdict": "fail"}
+        self.assertIn("input", canonical_record(record))
+        self.assertIsInstance(replay_key(record), str)
 
 
 class TestReplayKey(unittest.TestCase):
@@ -84,6 +94,16 @@ class TestSelfTest(unittest.TestCase):
 
     def test_self_test_passes(self):
         self.assertEqual(_run_self_test(), 0)
+
+    def test_json_mode_is_machine_readable(self):
+        for run in (lambda: _run_self_test(as_json=True), lambda: main(["--json"])):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = run()
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["harness"], "core/counterexample_replay")
+            self.assertTrue(payload["passed"])
 
 
 if __name__ == "__main__":

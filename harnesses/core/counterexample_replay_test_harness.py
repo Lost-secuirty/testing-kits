@@ -58,12 +58,17 @@ def _canonicalize(mapping: Record) -> str:
 def canonical_record(record: Record) -> dict[str, Any]:
     """Validate required fields and drop volatile ones, leaving the replay-salient core.
 
-    Raises ``ValueError`` if a required field is absent or empty — such a record could
-    never be deterministically replayed, so freezing it would be a silent lie.
+    Raises ``ValueError`` if a required field is absent/``None``, or if the *content*
+    fields (``failure_class``, ``expected_verdict``) are an empty string. An empty
+    ``input`` (e.g. ``[]`` or ``""``) is a legitimate minimal reproducer and is kept —
+    only fields that must carry content are rejected when empty.
     """
     for field in REQUIRED_FIELDS:
-        if field not in record or record[field] in (None, "", [], {}):
-            raise ValueError(f"counterexample missing/empty required field: {field}")
+        if field not in record or record[field] is None:
+            raise ValueError(f"counterexample missing required field: {field}")
+    for field in ("failure_class", "expected_verdict"):
+        if record[field] == "":
+            raise ValueError(f"counterexample has empty required field: {field}")
     return {k: v for k, v in record.items() if k not in VOLATILE_FIELDS}
 
 
@@ -238,7 +243,8 @@ def _run_self_test(as_json: bool = False) -> int:
     # hand-written frozen keys. A neutered replay_key disagrees with these literals.
     for name, record, expected in FROZEN_KEYS:
         report.add(f"replay_key:{name}", expected, replay_key(record))
-        print(f"replay_key:{name:<22} {replay_key(record)}")
+        if not as_json:
+            print(f"replay_key:{name:<22} {replay_key(record)}")
 
     # Relational discipline (stability / distinctness / rejection of unreplayable records).
     for name, a, b, relation in CORPUS:
@@ -249,7 +255,8 @@ def _run_self_test(as_json: bool = False) -> int:
         else:  # reject
             ok = _raises_value_error(replay_key, a)
         report.record(f"{relation}:{name}", ok, detail=f"freezer must honour: {relation}")
-        print(f"{relation:<7} {name:<26} ok={ok}")
+        if not as_json:
+            print(f"{relation:<7} {name:<26} ok={ok}")
 
     # Teeth: the correct oracle is clean and every planted mutant is caught.
     report.assert_teeth(TEETH)
