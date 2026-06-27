@@ -21,3 +21,15 @@ updates:
     groups:
       dashboard-pip:
         patterns: ["*"]
+  # Root dev/tooling stack (PEP 735 `dev` group in pyproject.toml + uv.lock).
+  # These are local-dev/advisory-CI tools only; the required CI path stays
+  # pure-stdlib, so a lag here never blocks a merge.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    groups:
+      root-dev:
+        patterns: ["*"]

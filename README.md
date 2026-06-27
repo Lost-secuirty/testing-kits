@@ -171,4 +171,4 @@ See [`dashboard/README.md`](./dashboard/README.md) for details.
 
 ## Contributing and security
 
-Read [`AGENTS.md`](./AGENTS.md), [`CLAUDE.md`](./CLAUDE.md), and [`SECURITY.md`](./SECURITY.md) before proposing changes. This is a public repository: no secrets, tokens, credentials, private data, real PHI, or sensitive examples belong in commits, fixtures, generated artifacts, issues, or PRs.
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for local setup, the harness contract, and the PR workflow, and [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md) for community expectations. Read [`AGENTS.md`](./AGENTS.md), [`CLAUDE.md`](./CLAUDE.md), and [`SECURITY.md`](./SECURITY.md) before proposing changes. This is a public repository: no secrets, tokens, credentials, private data, real PHI, or sensitive examples belong in commits, fixtures, generated artifacts, issues, or PRs.
