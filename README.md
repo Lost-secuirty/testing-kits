@@ -8,7 +8,7 @@ Portable pure-Python testing harnesses for reliability, security, AI, and pharma
 
 Current public shape:
 
-- **92 harnesses** across `core`, `security`, `ai`, and `pharmacy`.
+- **93 harnesses** across `core`, `security`, `ai`, and `pharmacy`.
 - One self-contained harness file per pattern.
 - Paired `unittest` coverage for each harness.
 - Built-in `--self-test` mode where applicable.
@@ -24,8 +24,8 @@ The useful reviewer question is not "does this prove everything is correct?" It 
 
 The current proof language is a ratchet, not a blanket proof claim.
 
-- **Inventory:** 92 harnesses.
-- **Latest documented campaign snapshot:** Batch 10, dated 2026-06-21: 84 `required`, 0 `pending`, 8 `legacy`, 0 failing. See [`docs/GOLDEN_STATS.md`](./docs/GOLDEN_STATS.md) and [`docs/UPGRADE_CAMPAIGN.md`](./docs/UPGRADE_CAMPAIGN.md).
+- **Inventory:** 93 harnesses.
+- **Latest documented campaign snapshot:** Batch 10, dated 2026-06-21: 84 `required`, 0 `pending`, 8 `legacy`, 0 failing. See [`docs/GOLDEN_STATS.md`](./docs/GOLDEN_STATS.md) and [`docs/UPGRADE_CAMPAIGN.md`](./docs/UPGRADE_CAMPAIGN.md). That snapshot predates the exploratory combinatorial-coverage harness.
 - **required:** the harness declares `TEETH`; the gate verifies the correct oracle is not flagged and planted mutants are caught.
 - **pending:** the harness is counted but has not yet been ratcheted into the required TEETH contract.
 - **legacy:** pharmacy-domain harnesses tracked under the older soft gate.
@@ -104,6 +104,7 @@ dashboard/    optional Streamlit viewer; separate dependency surface
 
 - [`docs/PORTING_GUIDE.md`](./docs/PORTING_GUIDE.md) — how to copy the proof shape, not just the code.
 - [`docs/PROPERTY_BASED_PORTING.md`](./docs/PROPERTY_BASED_PORTING.md) — how generated-input testing complements TEETH without replacing planted bads.
+- [`docs/EXPLORATORY_PROOF_LAYER.md`](./docs/EXPLORATORY_PROOF_LAYER.md) — boundary sweeps, t-way coverage, stateful exploration, and counterexample-freezing plan.
 - [`docs/INTEGRATION_LAYER_GUIDE.md`](./docs/INTEGRATION_LAYER_GUIDE.md) — boundary between portable proof kernels and real dependency tests.
 - [`docs/TECHNICAL_DEBT_LEDGER.md`](./docs/TECHNICAL_DEBT_LEDGER.md) — accepted incompleteness and review triggers.
 
