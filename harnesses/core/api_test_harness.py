@@ -433,9 +433,12 @@ class MockApiHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         path, _ = self._parse_path()
         global _next_id
+        # Always drain the request body before responding. An early/error response
+        # that leaves the client's upload unread races the socket close into a
+        # connection reset (Windows WinError 10053), which is the flaky-test source.
+        raw = self._read_body()
 
         if path == "/items":
-            raw = self._read_body()
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:
@@ -457,13 +460,15 @@ class MockApiHandler(http.server.BaseHTTPRequestHandler):
 
     def do_PUT(self):
         path, _ = self._parse_path()
+        # Drain the request body first (see do_POST): a 404 for a missing item must
+        # not leave the PUT payload unread, or the close races it into a reset.
+        raw = self._read_body()
         m = re.match(r"^/items/(\d+)$", path)
         if m:
             item_id = int(m.group(1))
             if item_id not in _items:
                 self._send_json(404, {"error": "not found"})
                 return
-            raw = self._read_body()
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:
