@@ -57,3 +57,7 @@ heading becomes `## [1.0.0] - <date>` and the version is bumped in `pyproject.to
 ### Governance
 
 - MIT `LICENSE`, `SECURITY.md`, a pull-request template, a deep `docs/` set, and `llms.txt`.
+
+<!-- On the 1.0.0 release this becomes a compare link (v1.0.0...HEAD) plus a
+     [1.0.0] release-tag link. -->
+[Unreleased]: https://github.com/Lost-secuirty/testing-kits/commits/main
