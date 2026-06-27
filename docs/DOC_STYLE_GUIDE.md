@@ -63,19 +63,19 @@ Inventory count, proof status, and campaign status are different claims.
 Acceptable:
 
 ```text
-The current documented inventory lists 92 harnesses. Re-run `make proof` before treating the proof snapshot as fresh evidence.
+The current documented inventory lists 100 harnesses. Re-run `make proof` before treating the proof snapshot as fresh evidence.
 ```
 
 Acceptable:
 
 ```text
-The documented Batch 10 snapshot lists 84 `required`, 0 `pending`, and 8 `legacy` harnesses. This is a documented snapshot, not fresh command output.
+The documented Batch 11 snapshot lists 92 `required`, 0 `pending`, and 8 `legacy` harnesses. This is a documented snapshot, not fresh command output.
 ```
 
 Not acceptable:
 
 ```text
-All 92 harnesses are fully proven.
+All 100 harnesses are fully proven.
 ```
 
 Not acceptable:

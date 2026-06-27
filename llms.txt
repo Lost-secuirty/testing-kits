@@ -15,4 +15,4 @@ Compact public navigation map. This file is descriptive only; operating rules li
 
 ## Proof language
 
-Use `92 harnesses` for inventory size. Use TEETH `required` / `pending` / `legacy` status for proof strength. Re-run gates before using loaded counts as fresh claims. Harness-map entries are subject to change as the repo grows.
+Use `100 harnesses` for inventory size. Use TEETH `required` / `pending` / `legacy` status for proof strength. Re-run gates before using loaded counts as fresh claims. Harness-map entries are subject to change as the repo grows.

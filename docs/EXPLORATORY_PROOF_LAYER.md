@@ -3,6 +3,8 @@
 Status: planning document.
 Scope: docs-only plan for future pure-stdlib harness upgrades.
 
+Update (2026-06-27, Batch 11): the PR 88-91 candidate harnesses below have SHIPPED and are now required. The four harnesses (`core/combinatorial_coverage`, `core/counterexample_replay`, `core/stateful_sequence_budget`, `core/boundary_corpus_expander`) are merged and part of the proof snapshot. The planning content is retained as the realized design record.
+
 This document explains how exploratory testing can extend the repo's proof surface without weakening the existing TEETH model.
 
 ## Purpose
@@ -177,6 +179,8 @@ Generated cases alone are not proof. The test must show that an intentionally ba
 
 ### PR 88 - combinatorial/t-way coverage harness
 
+Status: shipped 2026-06-27 (merged, required).
+
 Candidate files:
 
 - `harnesses/core/combinatorial_coverage_test_harness.py`
@@ -188,6 +192,8 @@ Proof target:
 - planted mutants omit pairs, collapse distinct values, ignore parameters, or report coverage without checking all required pairs.
 
 ### PR 89 - counterexample replay harness
+
+Status: shipped 2026-06-27 (merged, required).
 
 Candidate files:
 
@@ -201,6 +207,8 @@ Proof target:
 
 ### PR 90 - stateful sequence budget harness
 
+Status: shipped 2026-06-27 (merged, required).
+
 Candidate files:
 
 - `harnesses/core/stateful_sequence_budget_test_harness.py`
@@ -212,6 +220,8 @@ Proof target:
 - planted mutants loop forever, ignore terminal states, skip visited tracking, or treat action names as proof.
 
 ### PR 91 - boundary corpus expander harness
+
+Status: shipped 2026-06-27 (merged, required).
 
 Candidate files:
 
