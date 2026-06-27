@@ -24,7 +24,7 @@ from harnesses.ai.system_prompt_leakage_test_harness import (
 
 class TestDetectors(unittest.TestCase):
     def test_secret_in_prose(self):
-        self.assertTrue(_has_secret("use the key AKIAIOSFODNN7EXAMPLE now"))
+        self.assertTrue(_has_secret("use the key AKIAIOSFODNN7EXAMPLE now"))  # allowlist secret (synthetic fixture)
         self.assertTrue(_has_secret("postgres://u:p@host:5432/db"))
         self.assertFalse(_has_secret("a perfectly benign sentence"))
 

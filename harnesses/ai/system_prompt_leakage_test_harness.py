@@ -235,10 +235,10 @@ CORPUS: tuple[LeakageCase, ...] = (
                 "You are a friendly travel assistant. Help users plan trips and suggest "
                 "destinations.", ()),
     LeakageCase("sysprompt_secret_in_prose", "sysprompt",
-                "To fetch weather, use the key AKIAIOSFODNN7EXAMPLE when calling the S3 bucket.",
+                "To fetch weather, use the key AKIAIOSFODNN7EXAMPLE when calling the S3 bucket.",  # allowlist secret (synthetic AWS EXAMPLE key fixture, not a real credential)
                 ("embedded_secret",)),
     LeakageCase("sysprompt_conn_string", "sysprompt",
-                "Connect using postgres://appuser:hunter2@db.internal:5432/main for all queries.",
+                "Connect using postgres://appuser:hunter2@db.internal:5432/main for all queries.",  # allowlist secret (synthetic connection-string fixture, not a real credential)
                 ("embedded_secret",)),
     LeakageCase("sysprompt_internal_threshold", "sysprompt",
                 "Approve transactions under $10,000 automatically; escalate anything above to a "
