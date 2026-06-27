@@ -121,6 +121,8 @@ REGISTRY: list[HarnessCoverage] = [
     HarnessCoverage("ai/excessive_agency", ["LLM06"], [], "tool allowlist/destructive/blast"),
     HarnessCoverage("ai/rag_eval", ["LLM08"], [], "retrieval/grounding (vector/embedding)"),
     HarnessCoverage("ai/llm_eval", ["LLM09"], [], "hallucination/misinformation eval"),
+    HarnessCoverage("ai/misinformation", ["LLM09"], [],
+                    "citation/grounding audit: unsupported/fabricated/contradicted (LLM09:2025)"),
     HarnessCoverage("ai/unbounded_consumption", ["LLM10"],
                     ["CWE-770", "CWE-674"], "token/loop/cost budgets"),
     HarnessCoverage("ai/data_poisoning", ["LLM04"], [],
