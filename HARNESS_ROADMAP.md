@@ -128,6 +128,25 @@ Deferred OWASP coverage (specific, reproducible gaps surfaced while shipping Bat
 
 Add candidates here only after a gap is specific, reproducible, and not already covered by an existing harness.
 
+### Exploratory proof-layer candidates — planned 2026-06-27
+
+`docs/EXPLORATORY_PROOF_LAYER.md` defines a proposed upgrade track for generated-input and sequence-oriented checks. This track is not a claim that all combinations can be tested. It is a plan for adding compact, pure-stdlib harnesses that complement TEETH.
+
+Candidate sequence:
+
+1. `core/combinatorial_coverage_test_harness.py` — finite pairwise/t-way coverage accounting with planted coverage mutants.
+2. `core/counterexample_replay_test_harness.py` — deterministic counterexample canonicalization and replay metadata.
+3. `core/stateful_sequence_budget_test_harness.py` — bounded action-sequence exploration over tiny frozen state machines.
+4. `core/boundary_corpus_expander_test_harness.py` — deterministic boundary expansion that preserves known-bad anchors.
+
+Rules for this track:
+
+- TEETH remains the proof anchor.
+- Generated-input checks do not replace planted-bad fixtures.
+- Any new counterexample must be frozen into deterministic evidence before it becomes a required proof claim.
+- No runtime dependency is approved by this planning note.
+- Do not mix exploratory harnesses with workflow, dashboard, dependency, branch-protection, or generated-status changes.
+
 ## Per-harness internal gaps
 
 Known thinness that can be filled without creating another harness:
