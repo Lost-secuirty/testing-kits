@@ -47,7 +47,7 @@ include = ["harnesses*"]
 # own pinned `pip install` steps, so this group does not gate the required path.
 [dependency-groups]
 dev = [
-    "ruff==0.15.17",
+    "ruff==0.15.18",
     "pytest>=9.1",
     "pytest-cov",
     "pytest-xdist",
