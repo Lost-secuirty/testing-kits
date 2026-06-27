@@ -253,14 +253,16 @@ def _run_self_test(as_json: bool = False) -> int:
         report.add(f"missing_pairs:{name}", sorted(map(sorted, expected)),
                    sorted(map(sorted, missing_pairs(test_set, MODEL))),
                    detail=f"{len(expected)} pair(s) expected missing")
-        print(f"missing_pairs:{name:<14} {len(missing_pairs(test_set, MODEL))} missing")
+        if not as_json:
+            print(f"missing_pairs:{name:<14} {len(missing_pairs(test_set, MODEL))} missing")
 
     # A real greedy generator must produce a set the oracle confirms is complete.
     generated = pairwise(MODEL)
     gen_missing = missing_pairs(generated, MODEL)
     report.add("pairwise_generator_full_coverage", frozenset(), gen_missing,
                detail=f"{len(generated)} rows generated for {len(required_pairs(MODEL))} pairs")
-    print(f"pairwise generator:        {len(generated)} rows, {len(gen_missing)} missing")
+    if not as_json:
+        print(f"pairwise generator:        {len(generated)} rows, {len(gen_missing)} missing")
 
     # Teeth: the correct oracle is clean and every planted mutant is caught.
     report.assert_teeth(TEETH)

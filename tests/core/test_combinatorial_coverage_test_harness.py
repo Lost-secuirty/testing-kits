@@ -1,5 +1,8 @@
 """Test suite for combinatorial_coverage_test_harness."""
 
+import contextlib
+import io
+import json
 import unittest
 
 from harnesses.core.combinatorial_coverage_test_harness import (
@@ -13,6 +16,7 @@ from harnesses.core.combinatorial_coverage_test_harness import (
     _run_self_test,
     covered_pairs,
     list_scenarios,
+    main,
     missing_pairs,
     pairwise,
     prove,
@@ -96,6 +100,17 @@ class TestSelfTest(unittest.TestCase):
 
     def test_self_test_passes(self):
         self.assertEqual(_run_self_test(), 0)
+
+    def test_json_mode_is_machine_readable(self):
+        # --json stdout must be parseable JSON with no human-readable prefix lines.
+        for run in (lambda: _run_self_test(as_json=True), lambda: main(["--json"])):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = run()
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["harness"], "core/combinatorial_coverage")
+            self.assertTrue(payload["passed"])
 
 
 if __name__ == "__main__":
