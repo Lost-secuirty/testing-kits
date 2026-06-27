@@ -273,8 +273,9 @@ def _run_self_test(as_json: bool = False) -> int:
         actual = _as_tuple(explore(MACHINE, budget))
         report.add(f"explore:budget_{budget}", expected, actual,
                    detail=f"{expected[1]} steps, stop={expected[0]}")
-        print(f"explore budget={budget:<3} stop={actual[0]:<9} steps={actual[1]} "
-              f"edges={len(actual[2])}")
+        if not as_json:
+            print(f"explore budget={budget:<3} stop={actual[0]:<9} steps={actual[1]} "
+                  f"edges={len(actual[2])}")
 
     # Bounded: the recorded step count never exceeds the budget.
     for budget, _exp in CORPUS:
