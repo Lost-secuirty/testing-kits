@@ -1,5 +1,8 @@
 """Test suite for boundary_corpus_expander_test_harness."""
 
+import contextlib
+import io
+import json
 import unittest
 
 from harnesses.core.boundary_corpus_expander_test_harness import (
@@ -15,6 +18,7 @@ from harnesses.core.boundary_corpus_expander_test_harness import (
     _run_self_test,
     expand,
     list_scenarios,
+    main,
     prove,
 )
 
@@ -87,6 +91,16 @@ class TestSelfTest(unittest.TestCase):
 
     def test_self_test_passes(self):
         self.assertEqual(_run_self_test(), 0)
+
+    def test_json_mode_is_machine_readable(self):
+        for run in (lambda: _run_self_test(as_json=True), lambda: main(["--json"])):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = run()
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["harness"], "core/boundary_corpus_expander")
+            self.assertTrue(payload["passed"])
 
 
 if __name__ == "__main__":

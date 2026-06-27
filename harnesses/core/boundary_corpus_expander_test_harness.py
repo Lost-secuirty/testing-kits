@@ -182,7 +182,8 @@ def _run_self_test(as_json: bool = False) -> int:
         actual = expand(base, _BOUNDARY_VALUES)
         report.add(f"expand:{name}", list(expected), list(actual),
                    detail=f"{len(base)} base -> {len(expected)} expanded")
-        print(f"expand:{name:<14} {len(base)} base -> {len(actual)} expanded")
+        if not as_json:
+            print(f"expand:{name:<14} {len(base)} base -> {len(actual)} expanded")
 
     # Anchor preservation: every required anchor survives expansion of a base holding it.
     expanded_basic = expand(_BASE_BASIC, _BOUNDARY_VALUES)
