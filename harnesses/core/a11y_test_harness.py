@@ -6,12 +6,23 @@ Pure stdlib, zero external dependencies.
 from __future__ import annotations
 
 import re
+import sys
 import threading
+from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path as _Path
 from urllib.parse import urlparse
+
+if __package__ in {None, ""}:
+    _ROOT = _Path(__file__).resolve().parents[2]
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+
+from harnesses._teeth import Mutant, Report, Teeth
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -673,6 +684,146 @@ def run_checks(html_content: str, checkers=None) -> A11yReport:
 
 
 # ---------------------------------------------------------------------------
+# TEETH: frozen a11y audit corpus + planted analyzer defects
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class A11yAuditCase:
+    """One frozen HTML sample with literal expected accessibility issue buckets."""
+
+    name: str
+    html: str
+    expected_events: tuple[str, ...]
+
+
+def _summarize_issues(issues: list[A11yIssue]) -> tuple[str, ...]:
+    counts = Counter(
+        f"{issue.checker_name}:{issue.severity}:{issue.wcag_criterion}"
+        for issue in issues
+    )
+    return tuple(f"{key}:{counts[key]}" for key in sorted(counts))
+
+
+A11Y_AUDIT_CORPUS: tuple[A11yAuditCase, ...] = (
+    A11yAuditCase(
+        name="accessible_sample",
+        html=(
+            '<!doctype html><html lang="en"><body><h1>Welcome</h1>'
+            '<img src="logo.png" alt="Company logo"><a href="/about">About us</a>'
+            '<label for="name">Name</label><input id="name" type="text">'
+            '<table><tr><th scope="col">Name</th></tr><tr><td>Alice</td></tr></table>'
+            "</body></html>"
+        ),
+        expected_events=(),
+    ),
+    A11yAuditCase(
+        name="missing_alt",
+        html='<!doctype html><html lang="en"><body><img src="x.png"></body></html>',
+        expected_events=("AltTextChecker:ERROR:1.1.1:1",),
+    ),
+    A11yAuditCase(
+        name="unlabeled_input",
+        html='<!doctype html><html lang="en"><body><input type="text"></body></html>',
+        expected_events=("LabelChecker:ERROR:1.3.1:1",),
+    ),
+    A11yAuditCase(
+        name="skipped_heading",
+        html='<!doctype html><html lang="en"><body><h1>Title</h1><h3>Sub</h3></body></html>',
+        expected_events=("HeadingOrderChecker:ERROR:1.3.1:1",),
+    ),
+    A11yAuditCase(
+        name="invalid_aria_and_hidden_focus",
+        html=(
+            '<!doctype html><html lang="en"><body>'
+            '<button aria-hidden="true">Go</button><div role="notarole"></div>'
+            "</body></html>"
+        ),
+        expected_events=("AriaChecker:ERROR:4.1.2:2",),
+    ),
+    A11yAuditCase(
+        name="low_contrast",
+        html=(
+            '<!doctype html><html lang="en"><body>'
+            '<p style="color: #aaaaaa; background-color: #ffffff;">Low contrast</p>'
+            "</body></html>"
+        ),
+        expected_events=("ContrastChecker:ERROR:1.4.3:1",),
+    ),
+    A11yAuditCase(
+        name="missing_lang",
+        html="<!doctype html><html><body><p>Hello</p></body></html>",
+        expected_events=("LangChecker:ERROR:3.1.1:1",),
+    ),
+)
+
+
+def oracle_a11y_audit(case: A11yAuditCase) -> tuple[str, ...]:
+    """Correct pure analyzer over frozen HTML accessibility cases."""
+    return _summarize_issues(run_checks(case.html).issues)
+
+
+def alt_blind_auditor(case: A11yAuditCase) -> tuple[str, ...]:
+    """BUG: filters out image text-alternative findings."""
+    issues = [i for i in run_checks(case.html).issues if i.checker_name != "AltTextChecker"]
+    return _summarize_issues(issues)
+
+
+def label_blind_auditor(case: A11yAuditCase) -> tuple[str, ...]:
+    """BUG: misses accessible-label failures on interactive controls."""
+    issues = [i for i in run_checks(case.html).issues if i.checker_name != "LabelChecker"]
+    return _summarize_issues(issues)
+
+
+def contrast_blind_auditor(case: A11yAuditCase) -> tuple[str, ...]:
+    """BUG: suppresses contrast failures."""
+    issues = [i for i in run_checks(case.html).issues if i.checker_name != "ContrastChecker"]
+    return _summarize_issues(issues)
+
+
+def aria_blind_auditor(case: A11yAuditCase) -> tuple[str, ...]:
+    """BUG: suppresses ARIA role/state failures."""
+    issues = [i for i in run_checks(case.html).issues if i.checker_name != "AriaChecker"]
+    return _summarize_issues(issues)
+
+
+def prove(impl: Callable[[A11yAuditCase], tuple[str, ...]]) -> bool:
+    """True iff the analyzer diverges from any frozen a11y expectation."""
+    for case in A11Y_AUDIT_CORPUS:
+        try:
+            if tuple(impl(case)) != case.expected_events:
+                return True
+        except Exception:
+            return True
+    return False
+
+
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_a11y_audit"]
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_a11y_audit,
+    mutants=(
+        Mutant("alt_blind_auditor", alt_blind_auditor,
+               "misses WCAG text-alternative failures"),
+        Mutant("label_blind_auditor", label_blind_auditor,
+               "misses unlabeled interactive controls"),
+        Mutant("contrast_blind_auditor", contrast_blind_auditor,
+               "misses low-contrast text"),
+        Mutant("aria_blind_auditor", aria_blind_auditor,
+               "misses invalid ARIA and focus-hidden controls"),
+    ),
+    corpus_size=len(A11Y_AUDIT_CORPUS),
+    kind="oracle_swap",
+    notes="Frozen WCAG-flavored static HTML issue corpus.",
+)
+
+
+def list_scenarios() -> list[str]:
+    return [case.name for case in A11Y_AUDIT_CORPUS]
+
+
+# ---------------------------------------------------------------------------
 # Mock HTTP server
 # ---------------------------------------------------------------------------
 
@@ -825,7 +976,7 @@ def find_free_port() -> int:
         return s.getsockname()[1]
 
 
-def _run_self_test(verbose: bool = False) -> int:
+def _run_self_test(verbose: bool = False, as_json: bool = False) -> int:
     """Smoke self-test: deliberately inaccessible HTML must surface more
     ERROR-level issues than the bundled accessible sample. Exercises every
     checker through run_checks()."""
@@ -834,17 +985,20 @@ def _run_self_test(verbose: bool = False) -> int:
     bad_rep = run_checks(bad)
     good_rep = run_checks(SAMPLE_PAGES["/"])
     bad_err, good_err = len(bad_rep.errors()), len(good_rep.errors())
-    checks = [
-        ("inaccessible HTML surfaces >=1 ERROR", bad_err >= 1, f"errors={bad_err}"),
-        ("accessible sample has fewer ERRORs", good_err < bad_err, f"good={good_err} bad={bad_err}"),
-    ]
-    failures = [name for name, ok, _ in checks if not ok]
-    for name, ok, detail in checks:
-        print(f"  [{'PASS' if ok else 'FAIL'}] {name}  ({detail})")
-    if verbose:
+    report = Report("core/a11y")
+    report.record("inaccessible_html_surfaces_errors", bad_err >= 1, detail=f"errors={bad_err}")
+    report.record("accessible_sample_has_fewer_errors", good_err < bad_err,
+                  detail=f"good={good_err} bad={bad_err}")
+    if verbose and not as_json:
         print(f"  bad issues: {[(i.severity, i.checker_name) for i in bad_rep.issues]}")
-    print(f"\n  {len(checks) - len(failures)}/{len(checks)} checks passed")
-    return 0 if not failures else 1
+    for case in A11Y_AUDIT_CORPUS:
+        report.add(
+            f"oracle_a11y_audit:{case.name}",
+            list(case.expected_events),
+            list(oracle_a11y_audit(case)),
+        )
+    report.assert_teeth(TEETH)
+    return report.emit(as_json=as_json)
 
 
 def main() -> int:
@@ -852,10 +1006,16 @@ def main() -> int:
     p = argparse.ArgumentParser(description="Accessibility (a11y) static-check harness")
     p.add_argument("file", nargs="?", help="HTML file to check")
     p.add_argument("--self-test", action="store_true", help="Run built-in scenarios and exit")
+    p.add_argument("--list-scenarios", action="store_true",
+                   help="List frozen TEETH scenario names and exit")
+    p.add_argument("--json", action="store_true", help="Output self-test report as JSON")
     p.add_argument("--verbose", action="store_true")
     args = p.parse_args()
-    if args.self_test:
-        return _run_self_test(verbose=args.verbose)
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return 0
+    if args.self_test or args.json:
+        return _run_self_test(verbose=args.verbose, as_json=args.json)
     if args.file:
         with open(args.file, encoding="utf-8") as f:
             content = f.read()

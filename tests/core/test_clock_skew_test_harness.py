@@ -1,5 +1,8 @@
 """Test suite for clock_skew_test_harness."""
 
+import contextlib
+import io
+import json
 import unittest
 
 from harnesses.core.clock_skew_test_harness import (
@@ -7,6 +10,7 @@ from harnesses.core.clock_skew_test_harness import (
     FakeClock,
     TTLCache,
     WriteOp,
+    build_parser,
     _run_self_test,
     last_write_wins,
     list_scenarios,
@@ -139,6 +143,19 @@ class TestScenarios(unittest.TestCase):
 
     def test_self_test_passes(self):
         self.assertEqual(_run_self_test(), 0)
+
+    def test_json_flag_parses(self):
+        args = build_parser().parse_args(["--json"])
+        self.assertTrue(args.json)
+
+    def test_json_self_test_emits_report(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = _run_self_test(as_json=True)
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["harness"], "core/clock_skew")
+        self.assertTrue(payload["passed"])
 
 
 if __name__ == "__main__":

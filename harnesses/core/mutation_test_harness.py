@@ -9,6 +9,7 @@ test suite catches them. Provides a mock HTTP server on a dynamic port
 import enum
 import json
 import re
+import sys
 import threading
 import time
 import traceback
@@ -16,8 +17,14 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path as _Path
 from typing import Any
 from urllib.parse import urlparse
+
+# Make the shared teeth contract importable whether run as a module or a script.
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant as TeethMutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # MutationResult enum
@@ -930,6 +937,177 @@ def sandbox_exec(source: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# TEETH: frozen mutation-analysis corpus + planted analyzer defects
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class MutationAnalysisCase:
+    """One frozen source/assertion fixture with literal mutation expectations."""
+
+    name: str
+    source: str
+    assertions: str
+    operators: tuple[MutationOperator, ...]
+    expected_total: int
+    expected_killed: int
+    expected_survived: int
+    expected_score: float
+    expected_descriptions: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class MutationAnalysisResult:
+    total: int
+    killed: int
+    survived: int
+    errors: int
+    timeouts: int
+    mutation_score: float
+    descriptions: tuple[str, ...]
+
+
+MUTATION_ANALYSIS_CORPUS: tuple[MutationAnalysisCase, ...] = (
+    MutationAnalysisCase(
+        "arithmetic_addition",
+        "def add(a, b):\n    return a + b\n",
+        "assert add(1, 2) == 3\nassert add(-1, 4) == 3",
+        (MutationOperator.ARITHMETIC_SWAP,),
+        1,
+        1,
+        0,
+        1.0,
+        ("arithmetic_swap: '+' -> '-' on line 2",),
+    ),
+    MutationAnalysisCase(
+        "comparison_boundary",
+        "def allowed(n):\n    return n >= 10\n",
+        "assert allowed(10) is True\nassert allowed(9) is False",
+        (MutationOperator.COMPARISON_SWAP,),
+        1,
+        1,
+        0,
+        1.0,
+        ("comparison_swap: '>=' -> '<=' on line 2",),
+    ),
+    MutationAnalysisCase(
+        "constant_and_return_literals",
+        "def flag():\n    return True\ndef zero():\n    return 0\n",
+        "assert flag() is True\nassert zero() == 0",
+        (MutationOperator.CONSTANT_SWAP, MutationOperator.RETURN_SWAP),
+        4,
+        4,
+        0,
+        1.0,
+        (
+            "constant_swap: 'True' -> 'False' on line 2",
+            "constant_swap: '0' -> '1' on line 4",
+            "return_swap: 'return True' -> 'return False' on line 2",
+            "return_swap: 'return 0' -> 'return 1' on line 4",
+        ),
+    ),
+    MutationAnalysisCase(
+        "survivor_from_untested_function",
+        "def add(a, b):\n    return a + b\ndef sub(a, b):\n    return a - b\n",
+        "assert add(1, 2) == 3\n",
+        (MutationOperator.ARITHMETIC_SWAP,),
+        2,
+        1,
+        1,
+        0.5,
+        (
+            "arithmetic_swap: '+' -> '-' on line 2",
+            "arithmetic_swap: '-' -> '+' on line 4",
+        ),
+    ),
+)
+
+
+def oracle_mutation_analyze(case: MutationAnalysisCase) -> MutationAnalysisResult:
+    """Correct mutation analyzer over the frozen source/assertion fixture."""
+    test = make_exec_test(case.assertions)
+    report = MutationRunner(test, timeout=2.0).run(case.source, list(case.operators))
+    return MutationAnalysisResult(
+        total=report.total,
+        killed=report.killed,
+        survived=report.survived,
+        errors=report.errors,
+        timeouts=report.timeouts,
+        mutation_score=round(report.mutation_score, 3),
+        descriptions=tuple(m.description for m in report.mutants),
+    )
+
+
+def no_mutants_analyzer(case: MutationAnalysisCase) -> MutationAnalysisResult:
+    """BUG: reports a clean run without generating any mutants."""
+    return MutationAnalysisResult(0, 0, 0, 0, 0, 0.0, ())
+
+
+def comparison_disabled_analyzer(case: MutationAnalysisCase) -> MutationAnalysisResult:
+    """BUG: silently skips comparison-swap mutants."""
+    if case.operators == (MutationOperator.COMPARISON_SWAP,):
+        return MutationAnalysisResult(0, 0, 0, 0, 0, 0.0, ())
+    return oracle_mutation_analyze(case)
+
+
+def survivors_counted_as_killed(case: MutationAnalysisCase) -> MutationAnalysisResult:
+    """BUG: converts surviving mutants into killed mutants in the summary."""
+    actual = oracle_mutation_analyze(case)
+    return MutationAnalysisResult(
+        actual.total,
+        actual.total,
+        0,
+        actual.errors,
+        actual.timeouts,
+        1.0 if actual.total else 0.0,
+        actual.descriptions,
+    )
+
+
+def prove(impl: Callable[[MutationAnalysisCase], MutationAnalysisResult]) -> bool:
+    """True iff the analyzer diverges from any frozen literal expectation."""
+    for case in MUTATION_ANALYSIS_CORPUS:
+        try:
+            actual = impl(case)
+        except Exception:
+            return True
+        if (
+            actual.total != case.expected_total
+            or actual.killed != case.expected_killed
+            or actual.survived != case.expected_survived
+            or actual.errors != 0
+            or actual.timeouts != 0
+            or round(actual.mutation_score, 3) != case.expected_score
+            or actual.descriptions != case.expected_descriptions
+        ):
+            return True
+    return False
+
+
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_mutation_analyze"]
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_mutation_analyze,
+    mutants=(
+        TeethMutant("no_mutants_analyzer", no_mutants_analyzer,
+                    "drops all generated mutants and makes coverage vacuous"),
+        TeethMutant("comparison_disabled_analyzer", comparison_disabled_analyzer,
+                    "skips comparison-swap operators"),
+        TeethMutant("survivors_counted_as_killed", survivors_counted_as_killed,
+                    "inflates mutation score by counting survivors as killed"),
+    ),
+    corpus_size=len(MUTATION_ANALYSIS_CORPUS),
+    kind="oracle_swap",
+    notes="Frozen mutation-generation and summary corpus.",
+)
+
+
+def list_scenarios() -> list[str]:
+    return [case.name for case in MUTATION_ANALYSIS_CORPUS]
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
@@ -942,16 +1120,24 @@ def _run_self_test(verbose: bool = False) -> int:
         "assert classify(0) == -1"
     )
     d = MutationRunner(test).run(src).to_dict()
-    checks = [
-        ("generated multiple mutants", d["total"] >= 2, f"total={d['total']}"),
-        ("killed at least one mutant", d["killed"] >= 1, f"killed={d['killed']}"),
-        ("mutation score in (0, 1]", 0 < d["mutation_score"] <= 1, f"score={d['mutation_score']}"),
-    ]
-    failures = [n for n, ok, _ in checks if not ok]
-    for n, ok, dt in checks:
-        print(f"  [{'PASS' if ok else 'FAIL'}] {n}  ({dt})")
-    print(f"\n  {len(checks) - len(failures)}/{len(checks)} checks passed")
-    return 0 if not failures else 1
+    report = Report("core/mutation")
+    report.record("generated_multiple_mutants", d["total"] >= 2, detail=f"total={d['total']}")
+    report.record("killed_at_least_one_mutant", d["killed"] >= 1, detail=f"killed={d['killed']}")
+    report.record(
+        "mutation_score_in_range",
+        0 < d["mutation_score"] <= 1,
+        detail=f"score={d['mutation_score']}",
+    )
+    for case in MUTATION_ANALYSIS_CORPUS:
+        actual = oracle_mutation_analyze(case)
+        report.add(f"oracle_total:{case.name}", case.expected_total, actual.total)
+        report.add(f"oracle_killed:{case.name}", case.expected_killed, actual.killed)
+        report.add(f"oracle_survived:{case.name}", case.expected_survived, actual.survived)
+        report.add(f"oracle_score:{case.name}", case.expected_score, actual.mutation_score)
+        report.add(f"oracle_descriptions:{case.name}",
+                   list(case.expected_descriptions), list(actual.descriptions))
+    report.assert_teeth(TEETH)
+    return report.emit()
 
 
 def _cli():
@@ -978,8 +1164,14 @@ def _cli():
 
     parser.add_argument('--self-test', action='store_true',
                         help='Run built-in scenarios and exit')
+    parser.add_argument('--list-scenarios', action='store_true',
+                        help='List frozen TEETH scenario names and exit')
     parser.add_argument('--verbose', action='store_true')
     args = parser.parse_args()
+
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        return
 
     if args.self_test:
         raise SystemExit(_run_self_test(verbose=args.verbose))

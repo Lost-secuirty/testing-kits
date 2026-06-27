@@ -34,8 +34,15 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, Path as _Path
 from typing import Any
+
+if __package__ in {None, ""}:
+    _ROOT = _Path(__file__).resolve().parents[2]
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+
+from harnesses._teeth import Mutant, Report, Teeth
 
 
 @dataclass
@@ -204,6 +211,121 @@ def audit_suite(fns: list[Callable], config: AuditConfig) -> list[AuditResult]:
 
 
 # ---------------------------------------------------------------------------
+# TEETH: frozen hermeticity observations + planted analyzer defects
+# ---------------------------------------------------------------------------
+
+
+DEPENDENCY_ORDER = ("time", "random", "env", "home", "order")
+
+
+@dataclass(frozen=True)
+class HermeticityAuditCase:
+    name: str
+    observations: tuple[tuple[str, tuple[str, ...]], ...]
+    expected_contaminating: tuple[str, ...]
+
+
+HERMETICITY_AUDIT_CORPUS: tuple[HermeticityAuditCase, ...] = (
+    HermeticityAuditCase(
+        name="pure_test_has_stable_observations",
+        observations=(
+            ("time", ("pass", "pass", "pass")),
+            ("random", ("pass", "pass", "pass")),
+            ("env", ("pass", "pass", "pass")),
+            ("home", ("pass", "pass", "pass")),
+            ("order", ("pass", "pass", "pass")),
+        ),
+        expected_contaminating=(),
+    ),
+    HermeticityAuditCase(
+        name="wall_clock_dependency_changes_outcome",
+        observations=(
+            ("time", ("pass", "fail", "pass")),
+            ("random", ("pass", "pass", "pass")),
+            ("env", ("pass", "pass", "pass")),
+            ("home", ("pass", "pass", "pass")),
+            ("order", ("pass", "pass", "pass")),
+        ),
+        expected_contaminating=("time",),
+    ),
+    HermeticityAuditCase(
+        name="random_env_and_home_dependencies_change_outcome",
+        observations=(
+            ("time", ("pass", "pass", "pass")),
+            ("random", ("low", "high", "low")),
+            ("env", ("missing", "present", "other")),
+            ("home", ("home-a", "home-b", "home-c")),
+            ("order", ("pass", "pass", "pass")),
+        ),
+        expected_contaminating=("random", "env", "home"),
+    ),
+    HermeticityAuditCase(
+        name="test_order_dependency_changes_outcome",
+        observations=(
+            ("time", ("pass", "pass", "pass")),
+            ("random", ("pass", "pass", "pass")),
+            ("env", ("pass", "pass", "pass")),
+            ("home", ("pass", "pass", "pass")),
+            ("order", ("first", "later", "later")),
+        ),
+        expected_contaminating=("order",),
+    ),
+)
+
+
+def oracle_hermeticity_audit(case: HermeticityAuditCase) -> tuple[str, ...]:
+    varied = {
+        dependency
+        for dependency, samples in case.observations
+        if len(set(samples)) > 1
+    }
+    return tuple(dep for dep in DEPENDENCY_ORDER if dep in varied)
+
+
+def baseline_only_hermeticity_auditor(case: HermeticityAuditCase) -> tuple[str, ...]:
+    return ()
+
+
+def time_random_only_hermeticity_auditor(case: HermeticityAuditCase) -> tuple[str, ...]:
+    varied = {
+        dependency
+        for dependency, samples in case.observations
+        if dependency in {"time", "random"} and len(set(samples)) > 1
+    }
+    return tuple(dep for dep in DEPENDENCY_ORDER if dep in varied)
+
+
+def noisy_hermeticity_auditor(case: HermeticityAuditCase) -> tuple[str, ...]:
+    if case.observations:
+        return DEPENDENCY_ORDER
+    return ()
+
+
+def prove(impl: Callable[[HermeticityAuditCase], tuple[str, ...]]) -> bool:
+    return any(impl(case) != case.expected_contaminating for case in HERMETICITY_AUDIT_CORPUS)
+
+
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_hermeticity_audit"]
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_hermeticity_audit,
+    mutants=(
+        Mutant("baseline_only_hermeticity_auditor", baseline_only_hermeticity_auditor,
+               "never compares varied environmental observations"),
+        Mutant("time_random_only_hermeticity_auditor", time_random_only_hermeticity_auditor,
+               "misses env, HOME, and order-dependent flake sources"),
+        Mutant("noisy_hermeticity_auditor", noisy_hermeticity_auditor,
+               "false-alarms every clean observation stream"),
+    ),
+    corpus_size=len(HERMETICITY_AUDIT_CORPUS),
+    kind="auditor",
+    notes="Frozen observation streams for time, random, env, HOME, and order dependencies.",
+)
+
+
+# ---------------------------------------------------------------------------
 # Self-test fixtures
 # ---------------------------------------------------------------------------
 
@@ -262,7 +384,9 @@ def list_scenarios() -> list[str]:
     return [fn.__name__ for fn in SELF_TEST_FUNCTIONS]
 
 
-def _run_self_test(config: AuditConfig, verbose: bool = False) -> int:
+def _run_self_test(config: AuditConfig | None = None, verbose: bool = False) -> int:
+    if config is None:  # gate-callable: vacuity_gate calls _run_self_test()
+        config = AuditConfig()
     failures: list[str] = []
     expected_hermetic = {
         "hermetic_passes": True,
@@ -289,8 +413,18 @@ def _run_self_test(config: AuditConfig, verbose: bool = False) -> int:
         for f in failures:
             print(f"  - {f}", file=sys.stderr)
         return 1
+    report = Report("core/hermeticity")
+    for case in HERMETICITY_AUDIT_CORPUS:
+        report.add(
+            f"oracle_hermeticity_audit:{case.name}",
+            list(case.expected_contaminating),
+            list(oracle_hermeticity_audit(case)),
+        )
+    report.assert_teeth(TEETH)
+    if not report.passed:
+        return report.emit()
     print(f"OK: {len(results)} audits matched expected hermeticity.")
-    return 0
+    return report.emit()
 
 
 def build_parser() -> argparse.ArgumentParser:

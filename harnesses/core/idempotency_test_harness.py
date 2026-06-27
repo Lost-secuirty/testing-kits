@@ -13,11 +13,12 @@ Tests retry-safety and idempotency patterns including:
 - Mock HTTP server with idempotency key enforcement
 """
 
+import argparse
 import http.server
 import json
 
 # Make the shared teeth contract importable whether run as a module or a script.
-import sys as _sys
+import sys
 import threading
 import time
 import urllib.error
@@ -29,9 +30,9 @@ from enum import Enum
 from pathlib import Path as _Path
 from typing import Any
 
-if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
-    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
-from harnesses._teeth import Mutant, Teeth  # noqa: E402
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Enums and Data Types
@@ -540,6 +541,11 @@ def _prove(store_factory: Callable[[], Any]) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle's retrieval must turn this harness's self-test
+# red. _run_self_test calls _prove(IdempotencyStore) by module-global name, so the
+# gate's neuter of IdempotencyStore.get is what breaks it (not a captured reference).
+VACUITY_TARGETS = ["IdempotencyStore.get"]
+
 TEETH = Teeth(
     prove=_prove,
     oracle=IdempotencyStore,
@@ -818,3 +824,38 @@ def http_get(url: str) -> dict[str, Any]:
             "status_code": e.code,
             "body": json.loads(e.read().decode("utf-8")),
         }
+
+
+# ---------------------------------------------------------------------------
+# Report-based self-test — asserts the teeth via the module-global oracle so the
+# vacuity gate's neuter of IdempotencyStore is caught here, not only in the
+# external teeth_check. Pure: no clock/network/filesystem/RNG.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(verbose: bool = False, as_json: bool = False) -> int:
+    report = Report("core/idempotency")
+    # The correct store (called by global name) must round-trip every frozen
+    # response; neutering IdempotencyStore.get makes _prove(IdempotencyStore) True,
+    # which fails this check and turns the self-test red.
+    report.record("oracle_persists_response", _prove(IdempotencyStore) is False,
+                  detail="a correct store must return the original response on replay")
+    report.record("mutant_caught:response_not_persisted", _prove(StateOnlyStore) is True,
+                  detail="state-only store records COMPLETED but drops the response")
+    # Universal swap-check: oracle clean and every planted mutant caught.
+    report.assert_teeth(TEETH)
+    return report.emit(as_json=as_json)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Idempotency-key store harness")
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    args = parser.parse_args(argv)
+    # Default action is the self-test (repo convention); --self-test is accepted
+    # explicitly for the harness registry's subprocess invocation.
+    return _run_self_test(as_json=args.json)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

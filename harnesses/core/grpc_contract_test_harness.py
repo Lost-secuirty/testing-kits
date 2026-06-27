@@ -407,6 +407,9 @@ def _prove(impl: Callable[..., object]) -> bool:
     return getattr(report, field_name) >= 1
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["enum_accessor_oracle"]
+
 TEETH = Teeth(
     prove=_prove,
     oracle=enum_accessor_oracle,

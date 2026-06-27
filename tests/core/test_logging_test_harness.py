@@ -3,13 +3,17 @@ Tests for Logging / Observability Test Harness (Harness 17 of 36).
 ~88 tests, pure stdlib.
 """
 
+import dataclasses
 import json
 import unittest
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
+from harnesses._teeth import verify
 from harnesses.core.logging_test_harness import (
+    LOG_CORPUS,
+    TEETH,
     CorrelationTracker,
     ErrorContextChecker,
     LogEntry,
@@ -20,6 +24,8 @@ from harnesses.core.logging_test_harness import (
     PerformanceLogChecker,
     SensitiveDataScanner,
     TimestampValidator,
+    oracle_validate,
+    prove,
     run_full_report,
 )
 
@@ -752,6 +758,76 @@ class TestMockLoggingHandler(unittest.TestCase):
         for t in threads:
             t.join()
         self.assertEqual(self.server.entry_count(), n)
+
+
+# ---------------------------------------------------------------------------
+# Teeth tests — the universal swap-check for this harness's planted mutants.
+# ---------------------------------------------------------------------------
+
+class TestTeeth(unittest.TestCase):
+    """Verify the log-format-validity teeth: the correct oracle is never
+    flagged, every planted validator mutant IS flagged, the corpus is non-empty,
+    and the prove() check is non-circular (frozen literals, not oracle-derived).
+    """
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(len(LOG_CORPUS), 1)
+        self.assertEqual(TEETH.corpus_size, len(LOG_CORPUS))
+
+    def test_prove_oracle_is_false(self):
+        # The correct oracle agrees with every frozen literal -> not caught.
+        self.assertFalse(prove(oracle_validate))
+
+    def test_prove_each_mutant_is_true(self):
+        # Every planted defect disagrees with the corpus -> caught.
+        self.assertGreaterEqual(len(TEETH.mutants), 1)
+        for mutant in TEETH.mutants:
+            with self.subTest(mutant=mutant.name):
+                self.assertTrue(prove(mutant.impl),
+                                f"mutant {mutant.name} must be caught")
+
+    def test_universal_swap_check_verifies(self):
+        result = verify(TEETH)
+        self.assertIsNone(result["error"])
+        self.assertTrue(result["oracle_clean"])
+        self.assertEqual(result["mutants_uncaught"], [])
+        self.assertTrue(result["teeth_verified"])
+
+    def test_each_mutant_caught_by_at_least_two_cases(self):
+        # Robustness: no single-load-bearing fixture for either planted mutant.
+        for mutant in TEETH.mutants:
+            caught = [
+                c.name for c in LOG_CORPUS
+                if bool(mutant.impl(c.entry)) != c.expected_valid
+            ]
+            with self.subTest(mutant=mutant.name):
+                self.assertGreaterEqual(
+                    len(caught), 2,
+                    f"{mutant.name} should be caught by >=2 cases, got {caught}",
+                )
+
+    def test_prove_is_noncircular(self):
+        # Flipping ONE frozen literal must make prove(oracle) return True; this
+        # is impossible if prove derived expectations from the oracle at runtime.
+        flipped = list(LOG_CORPUS)
+        flipped[0] = dataclasses.replace(
+            flipped[0], expected_valid=not flipped[0].expected_valid
+        )
+        # Patch the module global prove() closes over (no second harness import).
+        module_ns = prove.__globals__
+        original = module_ns["LOG_CORPUS"]
+        try:
+            module_ns["LOG_CORPUS"] = tuple(flipped)
+            self.assertTrue(prove(oracle_validate))
+        finally:
+            module_ns["LOG_CORPUS"] = original
+        # Sanity: restored corpus makes the oracle clean again.
+        self.assertFalse(prove(oracle_validate))
+
+    def test_oracle_matches_every_frozen_literal(self):
+        for case in LOG_CORPUS:
+            with self.subTest(case=case.name):
+                self.assertEqual(oracle_validate(case.entry), case.expected_valid)
 
 
 if __name__ == "__main__":

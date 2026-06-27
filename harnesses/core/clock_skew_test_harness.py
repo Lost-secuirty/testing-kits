@@ -30,7 +30,15 @@ import argparse
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path as _Path
 from typing import Any
+
+if __package__ in {None, ""}:
+    _ROOT = _Path(__file__).resolve().parents[2]
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+
+from harnesses._teeth import Mutant, Report, Teeth
 
 # ---------------------------------------------------------------------------
 # FakeClock
@@ -300,26 +308,212 @@ SCENARIOS: dict[str, Callable[[], SkewResult]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# TEETH: frozen clock-skew corpus + planted analyzer defects
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ClockSkewAuditCase:
+    """One frozen distributed-time observation with literal expected events."""
+
+    name: str
+    kind: str
+    expected_events: tuple[str, ...]
+
+
+def _value_label(value: Any) -> str:
+    return "None" if value is None else str(value)
+
+
+CLOCK_SKEW_AUDIT_CORPUS: tuple[ClockSkewAuditCase, ...] = (
+    ClockSkewAuditCase(
+        name="ttl_jump_forward_safe_vs_unsafe",
+        kind="ttl_jump_forward",
+        expected_events=("safe:v", "unsafe:None"),
+    ),
+    ClockSkewAuditCase(
+        name="monotonic_regression_detected",
+        kind="monotonic_regression",
+        expected_events=("monotonic_regressed:yes",),
+    ),
+    ClockSkewAuditCase(
+        name="lww_implausible_skew_rejected",
+        kind="lww_implausible_skew",
+        expected_events=("safe:B", "unsafe:C"),
+    ),
+    ClockSkewAuditCase(
+        name="future_dated_expiry_uses_monotonic",
+        kind="future_dated_expiry",
+        expected_events=("value:v",),
+    ),
+)
+
+
+def _audit_ttl_jump_forward(_case: ClockSkewAuditCase) -> tuple[str, ...]:
+    clock = FakeClock()
+    safe_cache = TTLCache(lambda: clock.time(), lambda: clock.monotonic(), ttl=60.0, safe=True)
+    safe_cache.set("k", "v")
+    clock.jump_forward(300.0)
+    safe_value = safe_cache.get("k")
+
+    clock2 = FakeClock()
+    unsafe_cache = TTLCache(lambda: clock2.time(), lambda: clock2.monotonic(),
+                            ttl=60.0, safe=False)
+    unsafe_cache.set("k", "v")
+    clock2.jump_forward(300.0)
+    unsafe_value = unsafe_cache.get("k")
+    return (f"safe:{_value_label(safe_value)}", f"unsafe:{_value_label(unsafe_value)}")
+
+
+def _audit_monotonic_regression(_case: ClockSkewAuditCase) -> tuple[str, ...]:
+    clock = FakeClock()
+    before = clock.monotonic()
+    clock.regress_monotonic(10.0)
+    after = clock.monotonic()
+    return (f"monotonic_regressed:{'yes' if after < before else 'no'}",)
+
+
+def _lww_skew_ops() -> list[WriteOp]:
+    base = 1_700_000_000.0
+    return [
+        WriteOp("A", base, "k", "A"),
+        WriteOp("B", base + 5, "k", "B"),
+        WriteOp("C", base + 3600, "k", "C"),
+    ]
+
+
+def _audit_lww_implausible_skew(_case: ClockSkewAuditCase) -> tuple[str, ...]:
+    ops = _lww_skew_ops()
+    safe_result = last_write_wins(ops, safe=True)
+    unsafe_result = last_write_wins(ops, safe=False)
+    return (
+        f"safe:{_value_label(safe_result.get('k'))}",
+        f"unsafe:{_value_label(unsafe_result.get('k'))}",
+    )
+
+
+def _audit_future_dated_expiry(_case: ClockSkewAuditCase) -> tuple[str, ...]:
+    clock = FakeClock()
+    cache = TTLCache(lambda: clock.time(), lambda: clock.monotonic(), ttl=60.0, safe=True)
+    clock.jump_forward(3600.0)
+    cache.set("k", "v")
+    clock.jump_back(3600.0)
+    return (f"value:{_value_label(cache.get('k'))}",)
+
+
+CLOCK_SKEW_AUDITORS: dict[str, Callable[[ClockSkewAuditCase], tuple[str, ...]]] = {
+    "ttl_jump_forward": _audit_ttl_jump_forward,
+    "monotonic_regression": _audit_monotonic_regression,
+    "lww_implausible_skew": _audit_lww_implausible_skew,
+    "future_dated_expiry": _audit_future_dated_expiry,
+}
+
+
+def oracle_clock_skew_audit(case: ClockSkewAuditCase) -> tuple[str, ...]:
+    """Correct pure analyzer over frozen distributed-time cases."""
+    try:
+        auditor = CLOCK_SKEW_AUDITORS[case.kind]
+    except KeyError as exc:
+        raise ValueError(f"unknown clock-skew audit kind: {case.kind}") from exc
+    return auditor(case)
+
+
+def wall_clock_ttl_auditor(case: ClockSkewAuditCase) -> tuple[str, ...]:
+    """BUG: uses wall-clock TTL checks even for the supposedly safe path."""
+    if case.kind == "ttl_jump_forward":
+        clock = FakeClock()
+        safe_cache = TTLCache(lambda: clock.time(), lambda: clock.monotonic(), ttl=60.0, safe=False)
+        safe_cache.set("k", "v")
+        clock.jump_forward(300.0)
+        safe_value = safe_cache.get("k")
+
+        clock2 = FakeClock()
+        unsafe_cache = TTLCache(lambda: clock2.time(), lambda: clock2.monotonic(),
+                                ttl=60.0, safe=False)
+        unsafe_cache.set("k", "v")
+        clock2.jump_forward(300.0)
+        unsafe_value = unsafe_cache.get("k")
+        return (f"safe:{_value_label(safe_value)}", f"unsafe:{_value_label(unsafe_value)}")
+    return oracle_clock_skew_audit(case)
+
+
+def monotonic_blind_auditor(case: ClockSkewAuditCase) -> tuple[str, ...]:
+    """BUG: never detects monotonic-clock regression."""
+    if case.kind == "monotonic_regression":
+        return ("monotonic_regressed:no",)
+    return oracle_clock_skew_audit(case)
+
+
+def trusts_lww_outlier_auditor(case: ClockSkewAuditCase) -> tuple[str, ...]:
+    """BUG: accepts implausibly future-dated writes during LWW merge."""
+    if case.kind == "lww_implausible_skew":
+        result = last_write_wins(_lww_skew_ops(), safe=False)
+        return (f"safe:{_value_label(result.get('k'))}", f"unsafe:{_value_label(result.get('k'))}")
+    return oracle_clock_skew_audit(case)
+
+
+def prove(impl: Callable[[ClockSkewAuditCase], tuple[str, ...]]) -> bool:
+    """True iff the analyzer diverges from any frozen clock-skew expectation."""
+    for case in CLOCK_SKEW_AUDIT_CORPUS:
+        try:
+            if tuple(impl(case)) != case.expected_events:
+                return True
+        except Exception:
+            return True
+    return False
+
+
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_clock_skew_audit"]
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_clock_skew_audit,
+    mutants=(
+        Mutant("wall_clock_ttl_auditor", wall_clock_ttl_auditor,
+               "uses wall time for TTL expiry and misses NTP jumps"),
+        Mutant("monotonic_blind_auditor", monotonic_blind_auditor,
+               "misses monotonic regression after VM resume / clock anomalies"),
+        Mutant("trusts_lww_outlier_auditor", trusts_lww_outlier_auditor,
+               "accepts implausible future timestamps in last-write-wins merge"),
+    ),
+    corpus_size=len(CLOCK_SKEW_AUDIT_CORPUS),
+    kind="oracle_swap",
+    notes="Frozen TTL, monotonic regression, future expiry, and LWW skew corpus.",
+)
+
+
 def list_scenarios() -> list[str]:
     return list(SCENARIOS.keys())
 
 
-def _run_self_test(verbose: bool = False) -> int:
+def list_teeth_scenarios() -> list[str]:
+    return [case.name for case in CLOCK_SKEW_AUDIT_CORPUS]
+
+
+def _run_self_test(verbose: bool = False, as_json: bool = False) -> int:
     results = [fn() for fn in SCENARIOS.values()]
-    failures = [r for r in results if not r.passed]
-    for r in results:
-        mark = "OK  " if r.passed else "FAIL"
-        print(f"  {mark}  {r.name:25s} {r.detail}")
-    if failures:
-        print(f"FAILED: {len(failures)}/{len(results)}", file=sys.stderr)
-        return 1
-    print(f"OK: {len(results)} scenarios passed.")
-    return 0
+    if verbose and not as_json:
+        for r in results:
+            mark = "OK  " if r.passed else "FAIL"
+            print(f"  {mark}  {r.name:25s} {r.detail}")
+    report = Report("core/clock_skew")
+    for result in results:
+        report.record(f"scenario:{result.name}", result.passed, detail=result.detail)
+    for case in CLOCK_SKEW_AUDIT_CORPUS:
+        report.add(
+            f"oracle_clock_skew_audit:{case.name}",
+            list(case.expected_events),
+            list(oracle_clock_skew_audit(case)),
+        )
+    report.assert_teeth(TEETH)
+    return report.emit(as_json=as_json)
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Clock-skew bug harness")
     p.add_argument("--self-test", action="store_true")
+    p.add_argument("--json", action="store_true")
     p.add_argument("--list-scenarios", action="store_true")
     p.add_argument("--verbose", action="store_true")
     return p
@@ -331,8 +525,8 @@ def main() -> int:
         for s in list_scenarios():
             print(s)
         return 0
-    if args.self_test:
-        return _run_self_test(verbose=args.verbose)
+    if args.self_test or args.json:
+        return _run_self_test(verbose=args.verbose, as_json=args.json)
     build_parser().print_help()
     return 0
 

@@ -12,38 +12,54 @@ Pure stdlib, zero external dependencies.
 from __future__ import annotations
 
 import json
+import sys
 import unicodedata
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path as _Path
 from threading import Thread
 from typing import Any
+
+if __package__ in {None, ""}:
+    _ROOT = _Path(__file__).resolve().parents[2]
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+
+from harnesses._teeth import Mutant, Report, Teeth
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
 DEFAULT_PORT = 19160
+FAMILY_ZWJ = "👨‍👩‍👧"
+MOJIBAKE_CAFE = "café".encode("utf-8").decode("latin-1")
 
 # BOM byte sequences
 BOM_UTF8 = b"\xef\xbb\xbf"
 BOM_UTF16_LE = b"\xff\xfe"
 BOM_UTF16_BE = b"\xfe\xff"
 
-# RTL / bidi override characters that could indicate Trojan Source attack
-BIDI_OVERRIDE_CHARS = {
-    "‪",  # LEFT-TO-RIGHT EMBEDDING
-    "‫",  # RIGHT-TO-LEFT EMBEDDING
-    "‬",  # POP DIRECTIONAL FORMATTING
-    "‭",  # LEFT-TO-RIGHT OVERRIDE
-    "‮",  # RIGHT-TO-LEFT OVERRIDE
-    "⁦",  # LEFT-TO-RIGHT ISOLATE
-    "⁧",  # RIGHT-TO-LEFT ISOLATE
-    "⁨",  # FIRST STRONG ISOLATE
-    "⁩",  # POP DIRECTIONAL ISOLATE
-    "‏",  # RIGHT-TO-LEFT MARK
-}
+# RTL / bidi override characters that could indicate Trojan Source attack.
+BIDI_OVERRIDE_CODEPOINTS = (
+    0x202A,  # LEFT-TO-RIGHT EMBEDDING
+    0x202B,  # RIGHT-TO-LEFT EMBEDDING
+    0x202C,  # POP DIRECTIONAL FORMATTING
+    0x202D,  # LEFT-TO-RIGHT OVERRIDE
+    0x202E,  # RIGHT-TO-LEFT OVERRIDE
+    0x2066,  # LEFT-TO-RIGHT ISOLATE
+    0x2067,  # RIGHT-TO-LEFT ISOLATE
+    0x2068,  # FIRST STRONG ISOLATE
+    0x2069,  # POP DIRECTIONAL ISOLATE
+    0x200F,  # RIGHT-TO-LEFT MARK
+)
+BIDI_OVERRIDE_CHARS = {chr(codepoint) for codepoint in BIDI_OVERRIDE_CODEPOINTS}
+BIDI_RLO = chr(0x202E)
+BIDI_RLO_SAMPLE = f"Hello{BIDI_RLO}World"
+MOJIBAKE_MARKERS = ("Ã", "Â", "â", "�")
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +190,19 @@ class EncodingTester:
                 round_trip_ok=False,
                 error=str(exc),
             )
+
+
+def looks_like_mojibake(text: str) -> bool:
+    """Return True when text appears to be an already-corrupted mojibake artifact."""
+    if not any(marker in text for marker in MOJIBAKE_MARKERS):
+        return False
+    if "�" in text:
+        return True
+    try:
+        repaired = text.encode("latin-1").decode("utf-8")
+    except UnicodeError:
+        return False
+    return repaired != text
 
 
 # ---------------------------------------------------------------------------
@@ -602,6 +631,225 @@ class BidiDetector:
 
 
 # ---------------------------------------------------------------------------
+# TEETH: frozen Unicode audit corpus + planted analyzer defects
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class I18nAuditCase:
+    """One frozen i18n observation with literal expected audit events."""
+
+    name: str
+    kind: str
+    text: str = ""
+    other: str = ""
+    max_bytes: int = 0
+    expected_events: tuple[str, ...] = ()
+
+
+I18N_AUDIT_CORPUS: tuple[I18nAuditCase, ...] = (
+    I18nAuditCase(
+        name="nfc_nfd_canonical_equivalence",
+        kind="normalization",
+        text="é",
+        other="e\u0301",
+        expected_events=("raw_equal:no", "normalized_equal:yes"),
+    ),
+    I18nAuditCase(
+        name="mojibake_detected",
+        kind="mojibake",
+        text=MOJIBAKE_CAFE,
+        expected_events=("mojibake:yes",),
+    ),
+    I18nAuditCase(
+        name="mojibake_clean_sample_not_flagged",
+        kind="mojibake",
+        text="café",
+        expected_events=("mojibake:no",),
+    ),
+    I18nAuditCase(
+        name="zwj_family_single_grapheme",
+        kind="grapheme",
+        text=FAMILY_ZWJ,
+        expected_events=("python_len:5", "graphemes:1", "has_zwj:yes"),
+    ),
+    I18nAuditCase(
+        name="utf8_truncation_safe",
+        kind="truncate",
+        text="café",
+        max_bytes=4,
+        expected_events=("truncated:caf", "valid_utf8:yes"),
+    ),
+    I18nAuditCase(
+        name="east_asian_width",
+        kind="width",
+        text="A日B",
+        expected_events=("display_width:4",),
+    ),
+    I18nAuditCase(
+        name="bidi_override_detected",
+        kind="bidi",
+        text="Hello\u202eWorld",
+        expected_events=("bidi_override:yes", "unsafe:yes"),
+    ),
+)
+
+
+def _audit_normalization(case: I18nAuditCase) -> tuple[str, ...]:
+    tester = NormalizationTester()
+    return (
+        f"raw_equal:{'yes' if case.text == case.other else 'no'}",
+        f"normalized_equal:{'yes' if tester.are_equivalent(case.text, case.other) else 'no'}",
+    )
+
+
+def _audit_mojibake(case: I18nAuditCase) -> tuple[str, ...]:
+    return (f"mojibake:{'yes' if looks_like_mojibake(case.text) else 'no'}",)
+
+
+def _audit_grapheme(case: I18nAuditCase) -> tuple[str, ...]:
+    result = SurrogateTester.analyze(case.text)
+    return (
+        f"python_len:{result.python_len}",
+        f"graphemes:{result.grapheme_count}",
+        f"has_zwj:{'yes' if result.has_zwj else 'no'}",
+    )
+
+
+def _is_utf8_encodable(text: str) -> bool:
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def _audit_truncate(case: I18nAuditCase) -> tuple[str, ...]:
+    truncated = safe_truncate_bytes(case.text, case.max_bytes)
+    valid = "yes" if _is_utf8_encodable(truncated) else "no"
+    return (f"truncated:{truncated}", f"valid_utf8:{valid}")
+
+
+def _audit_width(case: I18nAuditCase) -> tuple[str, ...]:
+    width = DisplayWidthCalculator.display_width(case.text)
+    return (f"display_width:{width}",)
+
+
+def _audit_bidi(case: I18nAuditCase) -> tuple[str, ...]:
+    result = BidiDetector.scan_for_trojan_source(case.text)
+    return (
+        f"bidi_override:{'yes' if result['has_bidi_override'] else 'no'}",
+        f"unsafe:{'yes' if result['is_unsafe'] else 'no'}",
+    )
+
+
+I18N_AUDITORS: dict[str, Callable[[I18nAuditCase], tuple[str, ...]]] = {
+    "normalization": _audit_normalization,
+    "mojibake": _audit_mojibake,
+    "grapheme": _audit_grapheme,
+    "truncate": _audit_truncate,
+    "width": _audit_width,
+    "bidi": _audit_bidi,
+}
+
+
+def oracle_i18n_audit(case: I18nAuditCase) -> tuple[str, ...]:
+    """Correct pure analyzer over frozen Unicode/i18n cases."""
+    try:
+        auditor = I18N_AUDITORS[case.kind]
+    except KeyError as exc:
+        raise ValueError(f"unknown i18n audit kind: {case.kind}") from exc
+    return auditor(case)
+
+
+def raw_normalization_auditor(case: I18nAuditCase) -> tuple[str, ...]:
+    """BUG: compares raw code points and skips canonical normalization."""
+    if case.kind == "normalization":
+        raw = "yes" if case.text == case.other else "no"
+        return (f"raw_equal:{raw}", f"normalized_equal:{raw}")
+    return oracle_i18n_audit(case)
+
+
+def generated_mojibake_auditor(case: I18nAuditCase) -> tuple[str, ...]:
+    """BUG: generates mojibake from clean text instead of detecting corrupted input."""
+    if case.kind == "mojibake":
+        result = EncodingTester().detect_mojibake(case.text)
+        return (f"mojibake:{'yes' if result.is_mojibake else 'no'}",)
+    return oracle_i18n_audit(case)
+
+
+def naive_grapheme_auditor(case: I18nAuditCase) -> tuple[str, ...]:
+    """BUG: treats Python code-point length as user-visible grapheme count."""
+    if case.kind == "grapheme":
+        result = SurrogateTester.analyze(case.text)
+        return (
+            f"python_len:{result.python_len}",
+            f"graphemes:{result.python_len}",
+            f"has_zwj:{'yes' if result.has_zwj else 'no'}",
+        )
+    return oracle_i18n_audit(case)
+
+
+def byte_slice_truncation_auditor(case: I18nAuditCase) -> tuple[str, ...]:
+    """BUG: slices raw UTF-8 bytes and can split a multi-byte scalar."""
+    if case.kind == "truncate":
+        raw = case.text.encode("utf-8")[:case.max_bytes]
+        try:
+            truncated = raw.decode("utf-8")
+            valid = "yes"
+        except UnicodeDecodeError:
+            truncated = "<invalid>"
+            valid = "no"
+        return (f"truncated:{truncated}", f"valid_utf8:{valid}")
+    return oracle_i18n_audit(case)
+
+
+def bidi_blind_auditor(case: I18nAuditCase) -> tuple[str, ...]:
+    """BUG: ignores directional override characters."""
+    if case.kind == "bidi":
+        return ("bidi_override:no", "unsafe:no")
+    return oracle_i18n_audit(case)
+
+
+def prove(impl: Callable[[I18nAuditCase], tuple[str, ...]]) -> bool:
+    """True iff the analyzer diverges from any frozen i18n expectation."""
+    for case in I18N_AUDIT_CORPUS:
+        try:
+            if tuple(impl(case)) != case.expected_events:
+                return True
+        except Exception:
+            return True
+    return False
+
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_i18n_audit,
+    mutants=(
+        Mutant("raw_normalization_auditor", raw_normalization_auditor,
+               "misses canonical NFC/NFD equivalence"),
+        Mutant("generated_mojibake_auditor", generated_mojibake_auditor,
+               "generates mojibake from clean text instead of detecting corrupted input"),
+        Mutant("naive_grapheme_auditor", naive_grapheme_auditor,
+               "counts code points instead of grapheme clusters"),
+        Mutant("byte_slice_truncation_auditor", byte_slice_truncation_auditor,
+               "splits UTF-8 multi-byte characters while truncating"),
+        Mutant("bidi_blind_auditor", bidi_blind_auditor,
+               "misses bidi override / Trojan Source indicators"),
+    ),
+    corpus_size=len(I18N_AUDIT_CORPUS),
+    kind="oracle_swap",
+    notes="Frozen Unicode normalization, grapheme, truncation, width, and bidi corpus.",
+)
+
+# Vacuity gate target: the module-global oracle whose return the gate neuters.
+VACUITY_TARGETS = ["oracle_i18n_audit"]
+
+
+def list_scenarios() -> list[str]:
+    return [case.name for case in I18N_AUDIT_CORPUS]
+
+
+# ---------------------------------------------------------------------------
 # Combined I18n Analyzer
 # ---------------------------------------------------------------------------
 
@@ -771,7 +1019,7 @@ class MockI18nHandler(BaseHTTPRequestHandler):
         elif path == "/bidi/detect":
             detector = BidiDetector()
             safe_text = "Hello World"
-            unsafe_text = "Hello‮World"  # RTL override
+            unsafe_text = BIDI_RLO_SAMPLE
             self._send_json({
                 "safe": detector.scan_for_trojan_source(safe_text),
                 "unsafe": detector.scan_for_trojan_source(unsafe_text),
@@ -834,89 +1082,79 @@ def stop_server(server: HTTPServer) -> None:
 # Self-test / CLI entry point
 # ---------------------------------------------------------------------------
 
-def _self_test() -> int:
+def _self_test(as_json: bool = False) -> int:
     """Run a quick smoke-test and return exit code (0 = pass)."""
 
-    failures = []
+    report = Report("core/i18n")
 
     # 1. Encoding round-trip
     tester = EncodingTester()
-    for enc in ["utf-8", "utf-16", "latin-1"]:
-        text = "Hello, World!"
-        r = tester.test_roundtrip(text, enc)
-        if not r.round_trip_ok:
-            failures.append(f"Encoding round-trip failed for {enc}")
+    roundtrips = [
+        tester.test_roundtrip("Hello, World!", enc).round_trip_ok
+        for enc in ("utf-8", "utf-16", "latin-1")
+    ]
+    report.record("encoding_roundtrips_green", all(roundtrips), detail=f"roundtrips={roundtrips}")
 
     # 2. Mojibake detection
     r = tester.detect_mojibake("café")
-    if not r.is_mojibake:
-        failures.append("Mojibake not detected")
+    report.record("mojibake_detected", r.is_mojibake)
 
     # 3. BOM detection
     data = BOM_UTF8 + b"hello"
     bom = BOMDetector.detect(data)
-    if bom != "utf-8-sig":
-        failures.append(f"BOM detection failed: {bom!r}")
+    report.add("bom_detect_utf8_sig", "utf-8-sig", bom)
 
     # 4. BOM stripping
     stripped, bom_type = BOMDetector.strip(data)
-    if stripped != b"hello":
-        failures.append(f"BOM strip failed: {stripped!r}")
+    report.add("bom_strip_bytes", b"hello", stripped)
+    report.add("bom_strip_type", "utf-8-sig", bom_type)
 
     # 5. Grapheme clusters
-    family = "👨‍👩‍👧"
-    gr = SurrogateTester().analyze(family)
-    if gr.grapheme_count != 1:
-        failures.append(f"Grapheme count wrong: {gr.grapheme_count}")
+    gr = SurrogateTester().analyze(FAMILY_ZWJ)
+    report.add("family_grapheme_count", 1, gr.grapheme_count)
 
     # 6. NFC/NFD normalization
     e_pre = "é"
     e_dec = "é"
     nt = NormalizationTester()
-    if not nt.are_equivalent(e_pre, e_dec):
-        failures.append("NFC equivalence failed")
+    report.record("nfc_nfd_equivalent", nt.are_equivalent(e_pre, e_dec))
 
     # 7. Dedup bug
     dedup = nt.demonstrate_dedup_bug(e_pre, e_dec)
-    if not dedup["dedup_bug_demonstrated"]:
-        failures.append("Dedup bug not demonstrated")
+    report.record("dedup_bug_demonstrated", bool(dedup["dedup_bug_demonstrated"]))
 
     # 8. Casefolding
     ct = CasefoldTester()
     german = ct.demonstrate_german_sharp_s()
-    if german["casefold"] != "ss":
-        failures.append(f"German ß casefold wrong: {german['casefold']!r}")
+    report.add("german_sharp_s_casefold", "ss", german["casefold"])
 
     # 9. Byte-safe truncation
     text = "café"  # 5 bytes in UTF-8 (c-a-f-é where é is 2 bytes)
     truncated = safe_truncate_bytes(text, 4)
-    try:
-        truncated.encode("utf-8")
-    except UnicodeEncodeError:
-        failures.append("safe_truncate_bytes produced invalid UTF-8")
+    report.record("safe_truncate_valid_utf8", _is_utf8_encodable(truncated))
 
     # 10. Display width
     calc = DisplayWidthCalculator()
-    if calc.display_width("A") != 1:
-        failures.append("ASCII display width wrong")
-    if calc.display_width("日") != 2:
-        failures.append("CJK display width wrong")
+    report.add("ascii_display_width", 1, calc.display_width("A"))
+    report.add("cjk_display_width", 2, calc.display_width("日"))
 
     # 11. Bidi detection
     detector = BidiDetector()
-    if not detector.contains_bidi_override("Hello‮World"):
-        failures.append("Bidi override not detected")
-    if detector.contains_bidi_override("Hello World"):
-        failures.append("False positive bidi override")
+    report.record("bidi_override_detected", detector.contains_bidi_override(BIDI_RLO_SAMPLE))
+    report.record("bidi_safe_text_clean", not detector.contains_bidi_override("Hello World"))
+    for case in I18N_AUDIT_CORPUS:
+        report.add(
+            f"oracle_i18n_audit:{case.name}",
+            list(case.expected_events),
+            list(oracle_i18n_audit(case)),
+        )
+    report.assert_teeth(TEETH)
+    return report.emit(as_json=as_json)
 
-    if failures:
-        print("SELF-TEST FAILURES:")
-        for f in failures:
-            print(f"  - {f}")
-        return 1
-    else:
-        print("All self-tests passed.")
-        return 0
+
+def _run_self_test(verbose: bool = False, as_json: bool = False) -> int:
+    """Gate-callable alias for the self-test (all params default; no-arg invokable)."""
+    return _self_test(as_json=as_json)
 
 
 if __name__ == "__main__":
@@ -925,12 +1163,20 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="i18n / Unicode / Encoding Test Harness")
     parser.add_argument("--self-test", action="store_true", help="Run self-tests and exit")
+    parser.add_argument("--list-scenarios", action="store_true",
+                        help="List frozen TEETH scenario names and exit")
+    parser.add_argument("--json", action="store_true",
+                        help="Output self-test report as JSON")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Server port")
     parser.add_argument("--serve", action="store_true", help="Start mock server")
     args = parser.parse_args()
 
+    if args.list_scenarios:
+        print("\n".join(list_scenarios()))
+        sys.exit(0)
+
     if args.self_test:
-        sys.exit(_self_test())
+        sys.exit(_self_test(as_json=args.json))
 
     if args.serve:
         server = start_server(args.port)

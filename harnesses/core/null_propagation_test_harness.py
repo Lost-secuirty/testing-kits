@@ -32,7 +32,6 @@ import math
 import sys
 
 # Make the shared teeth contract importable whether run as a module or a script.
-import sys as _sys
 from collections.abc import Callable
 from dataclasses import dataclass, is_dataclass
 from dataclasses import fields as dc_fields
@@ -40,8 +39,8 @@ from enum import Enum
 from pathlib import Path as _Path
 from typing import Any
 
-if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
-    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -563,9 +562,21 @@ def oracle(*args: Any, **kwargs: Any) -> Any:  # pragma: no cover - dispatch shi
 # prove() must be clean for the oracle object too. We make the canonical oracle a
 # composite that prove() recognises as clean across the full corpus.
 class _CompositeOracle:
-    """Callable registry recognised by prove() as clean on every probe target."""
+    """Callable registry recognised by prove() as clean on every probe target.
+
+    ``evaluate(target, sample)`` is the load-bearing oracle method: it dispatches
+    to the GOOD twin for ``target`` and returns its computed value on ``sample``.
+    The self-test calls it by its module-global name against a frozen corpus with
+    frozen expected literals, so neutering ``_CompositeOracle.evaluate`` (mutating
+    its return to a type-faithful wrong value) drives that corpus loop RED.
+    """
 
     __name__ = "null_safe_oracle"
+
+    def evaluate(self, target: str, sample: dict) -> Any:
+        """Compute the correct value for ``target`` on ``sample`` via its GOOD twin."""
+        good = _ORACLES[target]
+        return good(**sample)
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover
         raise NotImplementedError
@@ -605,12 +616,32 @@ TEETH = Teeth(
     notes="a correct impl guards every null/optional position; each mutant mishandles one",
 )
 
+# The load-bearing oracle CALLABLE is _CompositeOracle.evaluate: it computes each
+# target's correct value, and the self-test compares that value (by the oracle's
+# module-global name) against a frozen literal. Neutering this method's RETURN
+# (vacuity gate) drives the value-corpus loop in _run_self_test() red.
+VACUITY_TARGETS = ["_CompositeOracle.evaluate"]
+
+# Frozen value corpus: (target, sample, expected). `expected` is a hand-written
+# literal NOT derived from the oracle, so the comparison is non-circular. Each row
+# is the correct value the GOOD twin must return on a clean sample.
+_VALUE_CORPUS: tuple[tuple[str, dict, Any], ...] = (
+    ("zipcode", {"user": _SAMPLE_USER}, "94110"),
+    ("format", {"user": {"name": "Alice"}}, "Alice"),
+    ("sum", {"values": [1.0, 2.0, 3.0]}, 6.0),
+    ("missing_key", {"record": {"id": "x7"}}, "x7"),
+    ("first_item", {"items": [10, 20, 30]}, 10),
+)
+
 
 def list_scenarios() -> list[str]:
     return [t.name for t in _self_test_targets()]
 
 
-def _run_self_test(config: NullProbeConfig, verbose: bool = False, as_json: bool = False) -> int:
+def _run_self_test(config: NullProbeConfig | None = None, verbose: bool = False,
+                   as_json: bool = False) -> int:
+    if config is None:
+        config = NullProbeConfig()
     runner = NullProbeRunner(config)
     targets = _self_test_targets()
     results = runner.run(targets)
@@ -642,6 +673,17 @@ def _run_self_test(config: NullProbeConfig, verbose: bool = False, as_json: bool
         if name == "silently_wrong_format":
             report.record("silent_coercion_detected", bool(bad),
                           detail="harness must detect silent coercion")
+
+    # Oracle VALUE check: call the load-bearing oracle method by its MODULE-GLOBAL
+    # name (_COMPOSITE_ORACLE.evaluate) against a frozen value corpus and compare
+    # each return to a frozen literal. This is what the vacuity gate's return-neuter
+    # of _CompositeOracle.evaluate breaks: a mutated (wrong-but-typed) return fails
+    # these equality assertions and the self-test goes red. Non-circular: `expected`
+    # is a hand-written literal, never computed by the oracle.
+    for target, sample, expected in _VALUE_CORPUS:
+        report.add(f"oracle_value:{target}", expected,
+                   _COMPOSITE_ORACLE.evaluate(target, sample),
+                   detail="oracle must compute the frozen-correct value")
 
     # Teeth: the oracle is clean and every planted mutant IS caught (fail loud here too).
     report.assert_teeth(TEETH)

@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "files": {
+    ".githooks/pre-commit": "0510e24e672fadeca729c62dc9c2c96fff6550ee4cb67a399cadaacfe068b08d",
+    ".github/control-policy.json": "955d602355d093b9dad5f90e2d1b76c1a1369a9dbc73e7d1070f6677dc7dc384",
+    "harnesses/_teeth.py": "9b76f721d58c276f6521da1468e1b747a93dfecd55e9f20abf25eae6694c92bd",
+    "tools/control_audit.py": "168897185a74238bb422f11c566aada97c1f7421a1ea4d7739744bb3e6509dd8",
+    "tools/corpus_size_checker.py": "ff17e8c2a81d339f0aee9e3fa16dadd27b74968229448274a61f426057223b39",
+    "tools/dead_expr_checker.py": "2fe24794f277dfb5b276734b19c1ad3ab31ece10a5845827fbf7e7f10b456b04",
+    "tools/file_guard.py": "a9ed1445d01b5e4e94eb8d56eb3f14a1581220bbf8958003c2e8772f8e08f7aa",
+    "tools/fragility_checker.py": "9cd2ab25c260b3eb5834863d44102f68ae6e810cb0d69874e9e840dca5c11254",
+    "tools/gate_canary.py": "ba03770ea10f2b9efb8970c5b7edfb73c679a589d4f359c55cdf23eb643c8a08",
+    "tools/harness_registry.py": "ecf35748bb42d172d67eb2ea10a7e3360a5e381ee37285a0c676cb40862b2378",
+    "tools/proof_audit.py": "16515c09bfe9b0515eaac3ae152b38e1b10e042b01f62ccf6cc2e699feb96efa",
+    "tools/prove_circularity_checker.py": "ab92f9eccf8bdcf290cb893e235d60d23c053e7033c1c04f0ad4310a2e075f02",
+    "tools/prove_purity_checker.py": "22845729e3858f916fce847d66e1793579c4211cf2b4ea6c72a3addb5607520c",
+    "tools/scan_staged.py": "82f12f1d4b7018b6883b1fc23ad5e69b36bea54ae7910ba8ba96020fd7fb9987",
+    "tools/teeth_check.py": "9f2b2550d2f400b31810887c8c3ff18eca89b45de98d7dfafa7a49659a4e6996",
+    "tools/vacuity_gate.py": "40b76b5dd53dae878074566f8fbd7b511925c28b6498cb3f3d9005d1b4264c52"
+  }
+}

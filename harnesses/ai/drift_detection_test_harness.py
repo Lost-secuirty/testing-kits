@@ -541,8 +541,8 @@ class DriftVerdictCase:
 # alert threshold OFFLINE, then baked in as the True/False literals below. They are
 # constants — prove() never calls psi() to re-derive them, so the gate cannot be
 # fooled by a circular oracle comparison. (Reference PSI values, for the record:
-# reverse_drift~2.94, big_shift~2.46, empty_bin~0.76 => drift; stable_jitter~0.0009,
-# identical=0.0, mild_shift~0.016 => no drift.)
+# reverse_drift~2.94, big_shift~2.46, empty_bin~0.76, base_zero_to_nonzero~0.58 => drift;
+# stable_jitter~0.0009, identical=0.0, mild_shift~0.016 => no drift.)
 DRIFT_VERDICT_CORPUS: tuple[DriftVerdictCase, ...] = (
     DriftVerdictCase(
         "reverse_drift",
@@ -557,6 +557,13 @@ DRIFT_VERDICT_CORPUS: tuple[DriftVerdictCase, ...] = (
         (0.22, 0.22, 0.20, 0.20, 0.10, 0.06), (0.255, 0.255, 0.23, 0.23, 0.03, 0.00),
         True, "one bin drains to zero -> PSI ~0.76 WITH the epsilon floor; a "
               "no-floor variant skips that bin and misses the drift"),
+    DriftVerdictCase(
+        "base_zero_to_nonzero",
+        (0.30, 0.25, 0.20, 0.15, 0.10, 0.00), (0.25, 0.20, 0.20, 0.20, 0.10, 0.05),
+        True, "a bin EMPTY in the reference fills to 0.05 live -> PSI ~0.58 WITH the "
+              "epsilon floor; the no-floor variant skips that bin and misses the drift. "
+              "The opposite zero-edge to empty_bin (base->nonzero vs cur->zero), so "
+              "psi_no_epsilon_floor is caught by two independent cases, not just one"),
     DriftVerdictCase(
         "stable_jitter",
         (0.45, 0.30, 0.15, 0.07, 0.03), (0.44, 0.30, 0.16, 0.07, 0.03),
@@ -623,6 +630,9 @@ def prove(impl: Callable[[tuple, tuple], bool]) -> bool:
             return True
     return False
 
+
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_drift_detector"]
 
 TEETH = Teeth(
     prove=prove,

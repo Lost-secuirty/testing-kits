@@ -894,6 +894,9 @@ def prove(grade_fn: Callable[[str, str], bool]) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_grade"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_grade,

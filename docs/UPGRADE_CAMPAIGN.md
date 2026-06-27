@@ -6,9 +6,14 @@ and **reports its findings** (structured). Gate + contract are documented in
 [PROOF_TEST_STANDARD.md](PROOF_TEST_STANDARD.md); the machinery lives in
 `harnesses/_teeth.py`, `tools/proof_audit.py`, `tools/teeth_check.py`.
 
+This file is a campaign history and planning record. For the current documented
+count snapshot, check `docs/GOLDEN_STATS.md`; for fresh proof, run the relevant
+proof commands.
+
 ## Scope & rules
 
-- **In scope: 69 harnesses** — core (52), security (10), ai (7).
+- **Original campaign scope: 69 harnesses** — core (52), security (10), ai (7).
+- **Current documented non-pharmacy TEETH scope after Batch 10: 84 required harnesses** — the original 69 plus 15 OWASP web/LLM harnesses.
 - **Out of scope: pharmacy (8)** — kept on the legacy soft gate; the operator will
   do that category later.
 - Batch size: **≤10 when upgrading**, 6 for brand-new harnesses.
@@ -19,15 +24,20 @@ and **reports its findings** (structured). Gate + contract are documented in
   → `--self-test`/`--json` `Report` → pair unittest → (security/ai: proof test) →
   flip `pending → required` → draft PR (operator merges).
 
-## Status snapshot (Batch 4, 2026-06-16)
+## Status snapshot
 
-| Scope | Count | Meaning |
-|---|---:|---|
-| required (teeth verified) | 45 | proven by the swap-check; gate blocks on these |
-| pending | 24 | in scope, no `TEETH` yet — counted, non-blocking |
-| legacy (pharmacy) | 8 | older soft gate, out of campaign |
+| Snapshot | Scope | Count | Meaning |
+|---|---|---:|---|
+| Batch 9, 2026-06-18 | required (teeth verified) | 69 | Original non-pharmacy campaign complete; swap-check covers required harnesses. |
+| Batch 9, 2026-06-18 | pending | 0 | Original in-scope campaign had no pending harnesses left. |
+| Batch 9, 2026-06-18 | legacy (pharmacy) | 8 | Older soft gate, out of campaign. |
+| Batch 10, 2026-06-21 | required (teeth verified) | 84 | Batch 10 added 15 OWASP web/LLM harnesses as required TEETH harnesses. |
+| Batch 10, 2026-06-21 | pending | 0 | No pending harnesses in the documented Batch 10 snapshot. |
+| Batch 10, 2026-06-21 | legacy (pharmacy) | 8 | Pharmacy-domain harnesses remain separately labelled legacy. |
 
-**required (45):** Batch 0 (9) core/{check_digit_identifier,feature_flag,graphql,
+Do not treat this table as fresh proof output. Re-run `make proof` before release claims.
+
+**required after Batch 9 (69):** Batch 0 (9) core/{check_digit_identifier,feature_flag,graphql,
 grpc_contract,idempotency,queue,tracing}, security/{ci_workflow_hardening,diff_secret_gate}
 · Batch 1 (10) core/{api,cache,cli,config,contract,null_propagation,pagination,serialization,
 statemachine}, security/authz · Batch 2 (10) core/{db,scraper,fuzz,numeric,concurrency,
@@ -35,7 +45,16 @@ error_path_leak,schema_evolution}, security/{supplychain,upload}, ai/agent_memor
 Batch 3 (10) core/{statistical_rng_oracle,payments,canvas_scene_state,game_loop_simulation,
 iot_telemetry,browser_e2e,lexical_date_canonicalization}, security/cwe_kev_regression,
 ai/{agent_eval,drift_detection} · Batch 4 (6) core/{chaos,datetime,errorpath,pipeline,
-property}, ai/llm_eval.
+property}, ai/llm_eval · Batch 5 (6) core/{logging,memory,ratelimit,regression_snapshot,
+webhook}, security/appsec · Batch 6 (3) core/{mutation,network}, security/security ·
+Batch 7 (5) core/{stress,i18n,a11y,clock_skew}, ai/agentic · Batch 8 (5)
+core/{cardinality,dormant_code,hermeticity,search_relevance}, ai/prompt_injection.
+· Batch 9 (5) core/{circuitbreaker,complexity}, security/{jwt,pii_redaction}, ai/rag_eval.
+
+**Batch 10 additions (15):** security/{crypto,misconfig,advanced_injection,supplychain_depth,
+security_logging,rate_limit,session,exceptional_conditions,ast_sast} and
+ai/{excessive_agency,insecure_output_handling,sensitive_disclosure,unbounded_consumption,
+secure_codegen_eval,prompt_ab}.
 
 ## Batch roadmap (provisional; exact membership ranked at each batch start)
 
@@ -68,11 +87,41 @@ property}, ai/llm_eval.
   deferred — its headline socket/DNS/timeout behavior is non-deterministic, so it earns its own
   extraction batch (the `prompt_injection` rationale). Built via a bounded 6-agent Workflow;
   gate 39 → 45 required / 24 pending / 8 legacy / 0 failing.
-- **Batch 5+ — drain the remaining 24 pending → SILVER, then GOLD enrich**, plus the NEW
-  NOVEL_COMPOSITION candidates below.
-- **Candidate NEW harnesses (NOVEL_COMPOSITION; from the 2026-06-15 Gemini Deep Research
-  docs — vet before building; keep pure-stdlib + a frozen-literal corpus + non-circular
-  prove):**
+- **Batch 5 — DONE (2026-06-16):** real TEETH wired into 6 more pending harnesses, all
+  flipped pending → required: core/{logging,memory,ratelimit,regression_snapshot,webhook},
+  security/appsec. Mostly `oracle_swap`; security/appsec is an `auditor` (SSRF allow/deny over
+  a frozen target corpus). webhook + ratelimit drive a deterministic `FakeClock` (HMAC replay
+  window, token-bucket refill) so no wall-clock enters `prove`. Each `prove` judges a
+  frozen-literal corpus (non-circular, swap-verified; confirmed by reading every `prove` body
+  + a flip-a-literal test per harness). Built via a bounded 6-agent Workflow; gate 45 → 51
+  required / 18 pending / 8 legacy / 0 failing. Known future-hardening item: memory's
+  `threshold_boundary` mutant is single-case (inherent to a `>=`/`>` slope bug).
+- **Batch 6 — DONE (2026-06-18):** real TEETH wired into 3 more pending harnesses, all
+  flipped pending → required: core/{mutation,network}, security/security. Gate 51 → 54
+  required / 15 pending / 8 legacy / 0 failing.
+- **Batch 7 — DONE (2026-06-18):** real TEETH wired into 5 more pending harnesses, all
+  flipped pending → required: core/{stress,i18n,a11y,clock_skew}, ai/agentic. Research anchors:
+  k6 open-vs-closed load models for stress, Unicode/W3C normalization for i18n, WCAG 2.2 for
+  a11y, agent process/trajectory evaluation papers for agentic tool-use checks, and RFC 5905
+  for clock-skew/NTP context. Gate 54 → 59 required / 10 pending / 8 legacy / 0 failing.
+- **Batch 8 — DONE (2026-06-18):** real TEETH wired into 5 more pending harnesses, all
+  flipped pending → required: core/{cardinality,dormant_code,hermeticity,search_relevance},
+  ai/prompt_injection. Research anchors: Coverage.py branch coverage for dormant-path
+  discovery, OpenTelemetry cardinality guidance, Bazel hermetic-test expectations, OWASP
+  LLM01 prompt injection, and OpenSearch relevance evaluation. Gate 59 → 64 required /
+  5 pending / 8 legacy / 0 failing.
+- **Batch 9 — DONE (2026-06-18):** real TEETH wired into the last 5 pending harnesses,
+  all flipped pending → required: core/{circuitbreaker,complexity}, security/{jwt,
+  pii_redaction}, ai/rag_eval. Research anchors: Azure circuit-breaker pattern,
+  RFC 8725/RFC 7519 for JWT verification, NIST SP 800-122 for PII protection,
+  Microsoft RAG evaluators / TREC relevance-evaluation practice, and Radon plus
+  Sonar Cognitive Complexity for maintainability metrics. Gate 64 → 69 required /
+  0 pending / 8 legacy / 0 failing.
+- **Batch 10 — DONE (2026-06-21):** 15 OWASP Top 10:2025 web + LLM harnesses added as required
+  TEETH harnesses. Documented snapshot: 84 required / 0 pending / 8 legacy / 0 failing.
+- **Post-Batch 10:** docs consistency, mapping freshness, proof-claim hygiene, and legacy/pharmacy
+  boundary language take priority over new harness inventory.
+- **Historical candidate backlog (not approved by this file):**
   1. **gherkin_spec_determinism** — enforce constrained-Gherkin rules (declarative-not-
      imperative, single `Feature`, strict Given/When/Then order, no XPath/DB-schema leak);
      mutant = an imperative / multi-behavior / mechanic-leaking scenario that slips through.
@@ -91,16 +140,19 @@ property}, ai/llm_eval.
   Provenance + the doc fact-check corrections live in memory `project_gemini_doc_idea_backlog`.
 
 ## Per-tier research to apply (verified 2026-06-14; act at the batch)
-- **security/jwt** — CVE-2026-48526 (public JWK string accepted as HMAC secret →
-  forged HS256, alg confusion), CVE-2026-48523 (alg allow-list bypass). Mutants.
+- **security/jwt** — applied in Batch 9: alg=none, alg allow-list, signature, time-claim,
+  and required-claim mutants. Future enrichment can add public-JWK-as-HMAC-secret fixtures
+  if the harness grows beyond HS256-only stdlib verification.
 - **security/ci_workflow_hardening** (already GOLD — enrich) — pwn_request
   CVE-2026-45132 (CVSS 10), actions-cool tag-redirect, Shai-Hulud/Miasma OIDC token
   theft. New rules + mutants.
-- **ai/\*** — arXiv:2606.11686 "Layer-Isolated Evaluation" (validates the no-LLM,
+- **ai/** — arXiv:2606.11686 "Layer-Isolated Evaluation" (validates the no-LLM,
   per-slice, CI-gated approach + an adoptable layer taxonomy); Microsoft ASSERT
   (spec→eval scenario generator — freeze outputs into fixtures).
 
 ## Known issues found in Batch 0 (fix in the relevant tier batch)
+
+These are historical Batch 0 findings. Check live proof output before treating any item here as current.
 
 - **core/datetime** — looked GOLD (grep hit on a "buggy"/"naive" string) but is a
   class library: no oracle predicate, no buggy twin, no frozen corpus, and its
@@ -114,20 +166,24 @@ property}, ai/llm_eval.
 ## Full in-scope status
 Legend: `R` required · `P` pending · (pharmacy = legacy, omitted).
 
-**core (52):** R api, browser_e2e, cache, canvas_scene_state, chaos, check_digit_identifier,
-cli, concurrency, config, contract, datetime, db, error_path_leak, errorpath, feature_flag,
-fuzz, game_loop_simulation, graphql, grpc_contract, idempotency, iot_telemetry,
-lexical_date_canonicalization, null_propagation, numeric, pagination, payments, pipeline,
-property, queue, schema_evolution, scraper, serialization, statemachine,
-statistical_rng_oracle, tracing · P a11y, cardinality, circuitbreaker, clock_skew, complexity,
-dormant_code, hermeticity, i18n, logging, memory, mutation, network, ratelimit,
-regression_snapshot, search_relevance, stress, webhook
+**core (52):** R a11y, api, browser_e2e, cache, canvas_scene_state, cardinality, chaos,
+check_digit_identifier, circuitbreaker, cli, clock_skew, complexity, concurrency, config,
+contract, datetime, db, dormant_code, error_path_leak, errorpath, feature_flag, fuzz,
+game_loop_simulation, graphql, grpc_contract, hermeticity, idempotency, i18n, iot_telemetry,
+lexical_date_canonicalization, logging, memory, mutation, network, null_propagation,
+numeric, pagination, payments, pipeline, property, queue, ratelimit, regression_snapshot,
+schema_evolution, scraper, search_relevance, serialization, statemachine,
+statistical_rng_oracle, stress, tracing, webhook
 
-**security (10):** R authz, ci_workflow_hardening, cwe_kev_regression, diff_secret_gate,
-supplychain, upload · P appsec, jwt, pii_redaction, security
+**security (19):** R advanced_injection, appsec, ast_sast, authz, ci_workflow_hardening,
+crypto, cwe_kev_regression, diff_secret_gate, exceptional_conditions, jwt, misconfig,
+pii_redaction, rate_limit, security, security_logging, session, supplychain,
+supplychain_depth, upload
 
-**ai (7):** R agent_eval, agent_memory_context, drift_detection, llm_eval · P agentic,
-prompt_injection, rag_eval
+**ai (13):** R agent_eval, agent_memory_context, agentic, drift_detection, excessive_agency,
+insecure_output_handling, llm_eval, prompt_ab, prompt_injection, rag_eval, secure_codegen_eval,
+sensitive_disclosure, unbounded_consumption
 
-> `core/stress` also still uses the non-standard `stress_harness.py` filename
-> (vs `*_test_harness.py`); rename to `stress_test_harness.py` during its batch.
+> `core/stress` was renamed `stress_harness.py` -> `stress_test_harness.py` on 2026-06-18,
+> closing the last naming exception (it had been promoted under the old name in Batch 7 to
+> keep that proof diff scoped). The standard name also makes it discoverable to the vacuity gate.

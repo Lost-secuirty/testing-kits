@@ -30,6 +30,14 @@ import sys
 import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path as _Path
+
+if __package__ in {None, ""}:
+    _ROOT = _Path(__file__).resolve().parents[2]
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+
+from harnesses._teeth import Mutant, Report, Teeth
 
 RESERVED_PORT = 19320  # documented; harness runs in-process
 
@@ -289,6 +297,113 @@ def analyzer_failures(cases: list[tuple[str, str, bool]],
 
 
 # ---------------------------------------------------------------------------
+# TEETH: frozen search-relevance audits + planted ranking/analyzer defects
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SearchRelevanceAuditCase:
+    name: str
+    check: str
+    expected_events: tuple[str, ...]
+
+
+SEARCH_RELEVANCE_AUDIT_CORPUS: tuple[SearchRelevanceAuditCase, ...] = (
+    SearchRelevanceAuditCase(
+        name="lexical_ranker_meets_relevance_floors",
+        check="benchmark",
+        expected_events=("meets_floors",),
+    ),
+    SearchRelevanceAuditCase(
+        name="analyzer_handles_fold_and_segmentation_cases",
+        check="analyzer",
+        expected_events=("analyzer_clean",),
+    ),
+    SearchRelevanceAuditCase(
+        name="tie_break_orders_by_doc_id",
+        check="tie_break",
+        expected_events=("stable_tiebreak",),
+    ),
+    SearchRelevanceAuditCase(
+        name="empty_query_returns_no_results",
+        check="empty_query",
+        expected_events=("empty_query_zero",),
+    ),
+)
+
+
+def oracle_search_relevance_audit(case: SearchRelevanceAuditCase) -> tuple[str, ...]:
+    cfg = SearchConfig()
+    if case.check == "benchmark":
+        rep = evaluate(QUERY_SETS, DOCS, cfg)
+        return ("meets_floors",) if rep.meets_floors(cfg) else ()
+    if case.check == "analyzer":
+        return ("analyzer_clean",) if analyzer_failures(ANALYZER_CASES, analyze) == 0 else ()
+    if case.check == "tie_break":
+        docs = [Doc("zeta", "alpha"), Doc("alpha", "alpha"), Doc("mike", "alpha")]
+        return ("stable_tiebreak",) if search("alpha", docs) == ["alpha", "mike", "zeta"] else ()
+    if case.check == "empty_query":
+        ranked = search("", DOCS)
+        return ("empty_query_zero",) if ranked == [] and mrr(ranked, {"r"}) < 1e-12 else ()
+    raise ValueError(f"unknown search relevance audit check: {case.check}")
+
+
+def reversed_ranker_search_auditor(case: SearchRelevanceAuditCase) -> tuple[str, ...]:
+    if case.check != "benchmark":
+        return oracle_search_relevance_audit(case)
+    cfg = SearchConfig()
+    rep = evaluate(QUERY_SETS, DOCS, cfg, search_fn=reversed_search)
+    return ("meets_floors",) if rep.meets_floors(cfg) else ()
+
+
+def no_fold_search_auditor(case: SearchRelevanceAuditCase) -> tuple[str, ...]:
+    if case.check != "analyzer":
+        return oracle_search_relevance_audit(case)
+    return ("analyzer_clean",) if analyzer_failures(ANALYZER_CASES, no_fold_analyze) == 0 else ()
+
+
+def unstable_tiebreak_search_auditor(case: SearchRelevanceAuditCase) -> tuple[str, ...]:
+    if case.check != "tie_break":
+        return oracle_search_relevance_audit(case)
+    docs = [Doc("zeta", "alpha"), Doc("alpha", "alpha"), Doc("mike", "alpha")]
+    ranked = sorted(search("alpha", docs), reverse=True)
+    return ("stable_tiebreak",) if ranked == ["alpha", "mike", "zeta"] else ()
+
+
+def empty_query_returns_all_auditor(case: SearchRelevanceAuditCase) -> tuple[str, ...]:
+    if case.check != "empty_query":
+        return oracle_search_relevance_audit(case)
+    ranked = [doc.doc_id for doc in DOCS]
+    return ("empty_query_zero",) if ranked == [] and mrr(ranked, {"r"}) < 1e-12 else ()
+
+
+def prove(impl: Callable[[SearchRelevanceAuditCase], tuple[str, ...]]) -> bool:
+    return any(impl(case) != case.expected_events for case in SEARCH_RELEVANCE_AUDIT_CORPUS)
+
+
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_search_relevance_audit"]
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_search_relevance_audit,
+    mutants=(
+        Mutant("reversed_ranker_search_auditor", reversed_ranker_search_auditor,
+               "ranks worst-overlap results first and falls below NDCG floors"),
+        Mutant("no_fold_search_auditor", no_fold_search_auditor,
+               "skips case, accent, stem, stopword, NFKC, and CJK analyzer handling"),
+        Mutant("unstable_tiebreak_search_auditor", unstable_tiebreak_search_auditor,
+               "uses an unstable tie-break order for equal-overlap documents"),
+        Mutant("empty_query_returns_all_auditor", empty_query_returns_all_auditor,
+               "returns documents for an empty query instead of a zero-result baseline"),
+    ),
+    corpus_size=len(SEARCH_RELEVANCE_AUDIT_CORPUS),
+    kind="auditor",
+    notes="Frozen ranking-floor, analyzer, tie-break, and empty-query relevance corpus.",
+)
+
+
+# ---------------------------------------------------------------------------
 # Scenarios
 # ---------------------------------------------------------------------------
 
@@ -477,8 +592,18 @@ def _run_self_test(verbose: bool = False) -> int:
     if failures:
         print(f"FAILED: {len(failures)}/{len(results)}", file=sys.stderr)
         return 1
+    report = Report("core/search_relevance")
+    for case in SEARCH_RELEVANCE_AUDIT_CORPUS:
+        report.add(
+            f"oracle_search_relevance_audit:{case.name}",
+            list(case.expected_events),
+            list(oracle_search_relevance_audit(case)),
+        )
+    report.assert_teeth(TEETH)
+    if not report.passed:
+        return report.emit()
     print(f"OK: {len(results)} scenarios passed.")
-    return 0
+    return report.emit()
 
 
 def build_parser() -> argparse.ArgumentParser:

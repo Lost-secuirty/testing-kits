@@ -31,15 +31,14 @@ import random
 import sys
 
 # Make the shared teeth contract importable whether run as a module or a script.
-import sys as _sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path as _Path
 from typing import Any
 
-if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
-    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -520,6 +519,9 @@ def prove(handle: Callable[[ErrorScenario], str]) -> bool:
     return False
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_handle"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_handle,
@@ -572,7 +574,9 @@ def _self_test_targets() -> list[TargetSpec]:
     ]
 
 
-def _run_self_test(config: LeakProbeConfig, verbose: bool = False) -> int:
+def _run_self_test(config: LeakProbeConfig | None = None, verbose: bool = False) -> int:
+    if config is None:  # gate-callable: vacuity_gate calls _run_self_test()
+        config = LeakProbeConfig()
     runner = LeakRunner(config)
     results = [runner.run(t) for t in _self_test_targets()]
 
@@ -604,10 +608,22 @@ def _run_self_test(config: LeakProbeConfig, verbose: bool = False) -> int:
         print(f"  {verdict}  {r.name:30s} final_live={r.final_live:+d} "
               f"errors={r.errors_injected}/{r.iterations}")
 
-    if failures:
+    # Error-PATH information-leak teeth — call oracle_handle by its MODULE-GLOBAL
+    # name against the frozen corpus so the vacuity gate's neuter of oracle_handle
+    # turns this self-test RED. The expected side is the frozen, non-circular
+    # `public_message` literal baked into each ErrorScenario — never derived from
+    # the oracle. assert_teeth(TEETH) additionally proves the planted mutants.
+    report = Report("core/error_path_leak")
+    for sc in LEAK_CORPUS:
+        report.add(f"handle:{sc.name}", sc.public_message, oracle_handle(sc), detail=sc.note)
+    report.assert_teeth(TEETH)
+
+    if failures or not report.passed:
         print("FAILED:", file=sys.stderr)
         for f in failures:
             print(f"  - {f}", file=sys.stderr)
+        if not report.passed:
+            report.emit()  # prints each failing check to stderr
         return 1
     print("OK: every scenario matched its expectation.")
     return 0

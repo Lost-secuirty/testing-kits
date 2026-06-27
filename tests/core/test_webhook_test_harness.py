@@ -10,6 +10,8 @@ import unittest
 import uuid
 
 from harnesses.core.webhook_test_harness import (
+    SIG_CORPUS,
+    TEETH,
     Clock,
     DeadLetterQueue,
     DeliveryAttempt,
@@ -23,7 +25,12 @@ from harnesses.core.webhook_test_harness import (
     WebhookEvent,
     WebhookReport,
     WebhookSender,
+    list_scenarios,
+    off_by_one_tolerance,
+    oracle_validate,
+    prove,
     sign,
+    skips_replay_check,
     verify,
 )
 
@@ -985,6 +992,86 @@ class TestEndToEnd(unittest.TestCase):
         self.assertIsNotNone(items[0][1])
         self.assertIsInstance(items[0][1], str)
         self.assertGreater(len(items[0][1]), 0)
+
+
+# ===========================================================================
+# 13. Teeth — frozen signature/replay corpus catches a planted validator bug
+# ===========================================================================
+
+class TestTeeth(unittest.TestCase):
+    """The campaign teeth contract: prove(oracle) is False, prove(mutant) is
+    True for every planted mutant, and the frozen corpus is non-empty and
+    non-circular."""
+
+    def test_oracle_is_clean(self):
+        # The correct validator must NOT be flagged by its own corpus.
+        self.assertFalse(prove(oracle_validate))
+
+    def test_every_mutant_caught(self):
+        for mutant in TEETH.mutants:
+            with self.subTest(mutant=mutant.name):
+                self.assertTrue(prove(mutant.impl),
+                                f"mutant {mutant.name} slipped past the corpus")
+
+    def test_skips_replay_check_caught(self):
+        self.assertTrue(prove(skips_replay_check))
+
+    def test_off_by_one_tolerance_caught(self):
+        self.assertTrue(prove(off_by_one_tolerance))
+
+    def test_corpus_nonempty(self):
+        self.assertGreaterEqual(len(SIG_CORPUS), 1)
+        self.assertEqual(TEETH.corpus_size, len(SIG_CORPUS))
+
+    def test_teeth_kind_and_mutants(self):
+        self.assertEqual(TEETH.kind, "oracle_swap")
+        self.assertGreaterEqual(len(TEETH.mutants), 1)
+        self.assertIs(TEETH.oracle, oracle_validate)
+
+    def test_oracle_reproduces_every_frozen_verdict(self):
+        # Each frozen (expected_ok, expected_reason) must match the real oracle.
+        for case in SIG_CORPUS:
+            with self.subTest(case=case.name):
+                ok, reason = oracle_validate(
+                    case.payload, case.sig, case.event_id, case.event_timestamp,
+                )
+                self.assertEqual(ok, case.expected_ok)
+                self.assertEqual(reason, case.expected_reason)
+
+    def test_prove_is_noncircular(self):
+        # Flipping ONE frozen literal must make the SHIPPED prove(oracle) report
+        # caught. This proves prove() compares to baked literals, not the oracle.
+        import dataclasses
+
+        corrupted = dataclasses.replace(
+            SIG_CORPUS[0], expected_ok=not SIG_CORPUS[0].expected_ok,
+        )
+        patched = (corrupted,) + tuple(SIG_CORPUS[1:])
+        # Patch the module global prove() closes over (no second harness import).
+        module_ns = prove.__globals__
+        original = module_ns["SIG_CORPUS"]
+        try:
+            # Sanity: against the real corpus the oracle is clean...
+            self.assertFalse(prove(oracle_validate))
+            # ...but flip one literal and the same oracle is now "caught", which
+            # is only possible if prove compares to the frozen literal.
+            module_ns["SIG_CORPUS"] = patched
+            self.assertTrue(prove(oracle_validate))
+        finally:
+            module_ns["SIG_CORPUS"] = original
+
+    def test_prove_catches_raising_impl(self):
+        def boom(*_args, **_kwargs):
+            raise RuntimeError("kaboom")
+
+        self.assertTrue(prove(boom))
+
+    def test_list_scenarios_matches_corpus(self):
+        self.assertEqual(list_scenarios(), [c.name for c in SIG_CORPUS])
+
+    def test_self_test_passes(self):
+        from harnesses.core.webhook_test_harness import _run_self_test
+        self.assertEqual(_run_self_test(as_json=False), 0)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # Test Harness Inventory
 
-**Total: 77 harnesses.** Per-harness self-test and proof status is generated locally by
+**Total: 92 harnesses.** Per-harness self-test and proof status is generated locally by
 `make report` and uploaded by CI as a workflow artifact. Entries #1–43 are
 documented in full below; #44–53 are bridged in a compact table; #54–59,
 #60–62, #63–67, #68–72, #73, and #74–77 follow in full. As of the `fix-status-green` work every
@@ -51,8 +51,8 @@ Batch 7 adds a proof-test convention: new harnesses keep the paired unittest fil
 
 ## 1. Stress Test Harness
 
-**File:** `harnesses/core/stress_harness.py` (744 lines)
-**Tests:** `tests/core/test_stress_harness.py` — 52 tests
+**File:** `harnesses/core/stress_test_harness.py` (979 lines)
+**Tests:** `tests/core/test_stress_test_harness.py` — 53 tests
 **Port:** 8080 (default)
 
 Hammers an HTTP endpoint with concurrent requests to find performance limits. Measures throughput (req/sec), latency percentiles (p50/p95/p99), error rates, and connection failures under load. Supports configurable concurrency, duration, ramp-up, and request patterns. Uses asyncio for high-throughput load generation with live reporting.
@@ -625,12 +625,12 @@ Classic IR ranking metrics over fixed graded judgment sets plus an analyzer corn
 ## 57. RAG Eval Test Harness
 
 **File:** `harnesses/ai/rag_eval_test_harness.py`
-**Tests:** `tests/ai/test_rag_eval_test_harness.py` — 21 tests
+**Tests:** `tests/ai/test_rag_eval_test_harness.py` (+ `_proof.py`) — 24 tests
 **Port:** none (in-process)
 
-Scores retrieval-augmented answers on four axes RAG fails silently on: retrieval recall@k, citation faithfulness (a citation counts only if it was retrieved AND its passage supports a claim), answer grounding (claims present in the post-overflow context), and context-window overflow (greedy-pack drop of tail passages). A deterministic lexical retriever over an engineered 20-passage / 6-case corpus lets the oracle meet recall ≥ 0.80 / faithfulness ≥ 0.90 / grounding ≥ 0.80. A keyword-only (AND) retriever drops below the recall floor, a truncating retriever degrades grounding, and a citation fabricator drops below the faithfulness floor. 19 self-test scenarios. Distinct from `ai/llm_eval` (answer graders, no retrieval) and `ai/prompt_injection` (safety corpus).
+Scores retrieval-augmented answers on four axes RAG fails silently on: retrieval recall@k, citation faithfulness (a citation counts only if it was retrieved AND its passage supports a claim), answer grounding (claims present in the post-overflow context), and context-window overflow (greedy-pack drop of tail passages). A deterministic lexical retriever over an engineered 20-passage / 6-case corpus lets the oracle meet recall ≥ 0.80 / faithfulness ≥ 0.90 / grounding ≥ 0.80. The current TEETH proof checks frozen recall-floor, fabricated-citation, overflow-grounding, and zero-recall cases; planted auditors catch keyword-only retrieval, citation-fabrication blindness, overflow blindness, and invented hits for empty retrieval. 19 self-test scenarios. Distinct from `ai/llm_eval` (answer graders, no retrieval) and `ai/prompt_injection` (safety corpus).
 
-**Key components:** `Passage`, `RagCase`, `RagConfig`, `retrieve`, `keyword_only_retrieve`, `truncating_retrieve`, `recall_at_k`, `citation_audit`, `grounding_audit`, `context_overflow`, `evaluate`, `RagReport`
+**Key components:** `Passage`, `RagCase`, `RagConfig`, `retrieve`, `keyword_only_retrieve`, `truncating_retrieve`, `recall_at_k`, `citation_audit`, `grounding_audit`, `context_overflow`, `evaluate`, `RagReport`, `RAG_AUDIT_CORPUS`, `oracle_rag_audit`, `TEETH`
 
 ---
 
@@ -661,51 +661,62 @@ Composes a Decimal `Money` (banker's rounding + exact largest-remainder `allocat
 ## 60. Circuit Breaker Resilience Test Harness
 
 **File:** `harnesses/core/circuitbreaker_test_harness.py`
-**Tests:** `tests/core/test_circuitbreaker_test_harness.py` — 17 tests
+**Tests:** `tests/core/test_circuitbreaker_test_harness.py` (+ `_proof.py`) — 20 tests
 **Port:** 19330
 
 Tests the circuit-breaker pattern under an injectable `FakeClock`: CLOSED → OPEN
 on a failure threshold, OPEN rejects calls fast (`CircuitOpenError`), OPEN →
 HALF_OPEN after a reset timeout, HALF_OPEN → CLOSED on a probe success / → OPEN
 on probe failure. `CircuitBreakerOracle` is the reference state model the live
-`CircuitBreaker` is checked against. 13 self-test scenarios. Ported from the
-batch-4 resilience branch into the reorg (port reassigned from 19300 to avoid
-colliding with `core/payments`).
+`CircuitBreaker` is checked against. The current TEETH proof replays frozen
+event logs for threshold trips, success resets, half-open close/retrip, probe
+caps, and pre-timeout open rejection; planted auditors cover late-open,
+reset-blind, half-open-failure-closing, cap-ignoring, and open-window bugs.
+13 self-test scenarios. Ported from the batch-4 resilience branch into the reorg
+(port reassigned from 19300 to avoid colliding with `core/payments`).
 
-**Key components:** `CircuitBreaker`, `CircuitBreakerOracle`, `FakeClock`, `CircuitOpenError`, `CircuitHandler`, `CBTestResult`, `start_mock_server`
+**Key components:** `CircuitBreaker`, `CircuitBreakerOracle`, `FakeClock`, `CircuitOpenError`, `CircuitHandler`, `CBTestResult`, `start_mock_server`, `CIRCUIT_BREAKER_AUDIT_CORPUS`, `oracle_circuitbreaker_audit`, `TEETH`
 
 ---
 
 ## 61. JWT (HS256) Verification Test Harness
 
 **File:** `harnesses/security/jwt_test_harness.py`
-**Tests:** `tests/security/test_jwt_test_harness.py` — 18 tests
+**Tests:** `tests/security/test_jwt_test_harness.py` (+ `_proof.py`) — 21 tests
 **Port:** 19400
 
 Tests JWT encode and — more importantly — *verification* against the classic
 auth-bypass attacks: `alg=none` acceptance, HS/RS algorithm confusion,
 signature stripping/forgery, and expiry handling, using stdlib `hmac`/`hashlib`.
-`VerifyResult` reports pass/fail with a reason string. 14 self-test scenarios.
-Ported from the batch-4 branch (port reassigned 19320 → 19400). Complements the
-injection-focused `security/security` and `security/appsec` harnesses.
+`VerifyResult` reports pass/fail with a reason string. The current TEETH proof
+checks valid-token, `alg=none`, algorithm allow-list, signature tamper,
+expiration, and required-claim cases; planted auditors cover alg-none acceptance,
+allow-list bypass, signature blindness, time-claim blindness, and required-claim
+blindness. 14 self-test scenarios. Ported from the batch-4 branch (port
+reassigned 19320 → 19400). Complements the injection-focused `security/security`
+and `security/appsec` harnesses.
 
-**Key components:** `encode`, `verify`, `VerifyResult`, `JwtHandler`, `JwtTestResult`, `start_mock_server`
+**Key components:** `encode`, `verify`, `VerifyResult`, `JwtHandler`, `JwtTestResult`, `start_mock_server`, `JWT_AUDIT_CORPUS`, `oracle_jwt_audit`, `TEETH`
 
 ---
 
 ## 62. PII / PHI Redaction Test Harness
 
 **File:** `harnesses/security/pii_redaction_test_harness.py`
-**Tests:** `tests/security/test_pii_redaction_test_harness.py` — 20 tests
+**Tests:** `tests/security/test_pii_redaction_test_harness.py` (+ `_proof.py`) — 23 tests
 **Port:** 19410
 
 Tests detection + redaction of PII/PHI (emails, phone numbers, SSNs, card
 numbers, etc.) via stdlib `re` detectors, scored against a `RedactionOracle`
 with precision/recall over a labelled corpus (catches both under-redaction
-leaks and over-redaction false positives). 14 self-test scenarios. Ported from
-the batch-4 branch (port reassigned 19310 → 19410).
+leaks and over-redaction false positives). The current TEETH proof checks mixed
+entity counts, raw-secret removal, digit-run removal, safe-number over-redaction
+guards, ZIP preservation, mask-mode SSN behavior, and idempotency; planted
+auditors cover SSN blindness, digit leakage, Luhn-blind over-redaction, and
+non-idempotent redaction. 14 self-test scenarios. Ported from the batch-4 branch
+(port reassigned 19310 → 19410).
 
-**Key components:** `Redactor`, `RedactionOracle`, `RedactionHandler`, `RedactTestResult`, `start_mock_server`
+**Key components:** `Redactor`, `RedactionOracle`, `RedactionHandler`, `RedactTestResult`, `start_mock_server`, `PII_AUDIT_CORPUS`, `oracle_pii_audit`, `TEETH`
 
 ---
 
@@ -786,12 +797,12 @@ Batch 7 makes proof explicit: each harness keeps a deterministic safe fixture an
 ## 73. Complexity / Bloat Test Harness
 
 **File:** `harnesses/core/complexity_test_harness.py`
-**Tests:** `tests/core/test_complexity_test_harness.py` — 25 tests
+**Tests:** `tests/core/test_complexity_test_harness.py` (+ `_proof.py`) — 28 tests
 **Port:** none (in-process)
 
-Flags code bloat and maintainability regressions in AI-generated or human code. Computes cyclomatic complexity, cognitive complexity, function length, parameter count, and nesting depth with stdlib `ast`, then gates files or directories against configured thresholds. The self-test pins hand-computed metric values, proves a bad high-complexity fixture is flagged, and proves clean code passes.
+Flags code bloat and maintainability regressions in AI-generated or human code. Computes cyclomatic complexity, cognitive complexity, function length, parameter count, and nesting depth with stdlib `ast`, then gates files or directories against configured thresholds. The self-test pins hand-computed metric values, proves a bad high-complexity fixture is flagged, and proves clean code passes. The current TEETH proof checks clean code, cognitive/nesting breaches, length bloat, parameter-count bloat, and nested-vs-flat cognitive contrast; planted auditors cover cyclomatic-only, length-blind, params-blind, and nesting-blind behavior.
 
-**Key components:** `Thresholds`, `FunctionMetrics`, `ComplexityVisitor`, `analyze_source`, `analyze_path`, `gate_metrics`, `run_self_test`
+**Key components:** `Thresholds`, `FunctionMetrics`, `analyze_source`, `analyze_path`, `COMPLEXITY_AUDIT_CORPUS`, `oracle_complexity_audit`, `TEETH`
 
 ---
 
@@ -920,6 +931,34 @@ production packaging, or CLI expansion.
 | 19410 | PII / PHI Redaction                        |
 | —     | Database, CLI, SRS, Backup-Restore, Expiry-Window, Tracing, Queue, RAG Eval, the #44–53 research-pass harnesses, all of batch 6 (Agent Eval, IoT Telemetry, gRPC Contract, Browser/E2E, Drift Detection), batch 7, and batch 8 (CI Workflow Hardening, Diff Secret-Gate, Check-Digit Identifier, Lexical Date Canonicalization) — no networked mock server (SQLite / subprocess / in-process oracle) |
 
+## Batch 10 — OWASP Top 10:2025 web + LLM harnesses (#78–92, shipped 2026-06-21)
+
+Fifteen harnesses extending OWASP Top 10:2025 (web) and OWASP Top 10 for LLM
+Applications 2025 coverage. All declare `TEETH` (required); each ships a paired
+unittest and a planted-bad proof test.
+
+**security/ — OWASP Top 10:2025 (web)**
+- `crypto` — A04 Cryptographic Failures: password hashing, weak RNG, ECB/legacy ciphers, hard-coded secrets, TLS verification.
+- `misconfig` — A02 Security Misconfiguration: debug mode, wildcard CORS, default creds, cookie flags, file permissions.
+- `advanced_injection` — A05 Injection: SSTI, NoSQL, LDAP.
+- `supplychain_depth` — A03 Software Supply Chain Failures: **SBOM completeness + signature integrity** (the net-new surface; typosquat / CI-hardening / diff-secrets are already covered by `security/{supplychain,ci_workflow_hardening,diff_secret_gate}`).
+- `security_logging` — A09 Security Logging & Alerting Failures: audit coverage, log injection, alert thresholds, hash-chain tamper-evidence.
+- `rate_limit` — A06 Insecure Design: throttle, lockout, business-rule abuse, replay/nonce.
+- `session` — A07 Authentication Failures / A01 Broken Access Control: session fixation, CSRF token, session-id entropy, timeout.
+- `exceptional_conditions` — A10 Mishandling of Exceptional Conditions (new in 2025): fail-open guards, swallowed exceptions, error leakage, resource leaks.
+- `ast_sast` — cross-cutting zero-dep AST SAST: CWE-tagged rules; the oracle for `ai/secure_codegen_eval`.
+
+**ai/ — OWASP Top 10 for LLM Applications 2025**
+- `excessive_agency` — LLM06 Excessive Agency: tool allowlist, destructive-action confirmation, blast-radius cap.
+- `insecure_output_handling` — LLM05 Improper Output Handling: output sinks, XSS, structured-output validation.
+- `sensitive_disclosure` — LLM02 Sensitive Information Disclosure: secret / PII / system-prompt-leak detection.
+- `unbounded_consumption` — LLM10 Unbounded Consumption: token budget, loop guard, cost ceiling.
+- `secure_codegen_eval` — scores generated code on correctness + security (secure-pass@k); repair-loop lift.
+- `prompt_ab` — A/B a prompting technique's secure-pass@k delta over the OWASP set.
+
+Deferred (noted, not built): OWASP web A08 (Software/Data Integrity Failures);
+LLM04 (Data Poisoning), LLM07 (System Prompt Leakage), LLM09 (Misinformation).
+
 ## Running Everything
 
 ```bash
@@ -929,7 +968,7 @@ make proof         # run --self-test plus proof audit for every harness
 make report        # regenerate STATUS.md and STATUS.json
 ```
 
-**77 harnesses.** Live per-harness self-test and proof status is in `STATUS.md`
+**92 harnesses.** Live per-harness self-test and proof status is in `STATUS.md`
 and `STATUS.json` (auto-generated by `make report`). The earlier `pharmacy/srs`, `core/hermeticity`,
 and Windows portability (`prompt_injection`/`partial_fill`/`memory`) issues were
 resolved in the 2026-05-29 fix-status pass (see `HARNESS_ROADMAP.md` →

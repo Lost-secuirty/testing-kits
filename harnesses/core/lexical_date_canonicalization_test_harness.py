@@ -46,13 +46,12 @@ import argparse
 import sys
 
 # Make the shared teeth contract importable whether run as a module or a script.
-import sys as _sys
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path as _Path
 
-if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
-    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -414,6 +413,10 @@ CANONICALIZE_CORPUS: tuple[CanonicalizeCase, ...] = (
                      "two-digit year 26 pivots to 2026 (POSIX pivot)"),
     CanonicalizeCase("us_slash_two_digit_year_high", "5/9/99", "1999-05-09",
                      "two-digit year 99 pivots to 1999 (POSIX pivot)"),
+    CanonicalizeCase("us_slash_two_digit_year_pivot_edge", "5/9/68", "2068-05-09",
+                     "68 is the UPPER edge of the POSIX %y window (00-68 -> 2000-2068); "
+                     "the no-pivot mutant maps it to 1968 -> a 2nd independent catch so "
+                     "the mutant does not rest on the single year-26 fixture"),
     CanonicalizeCase("iso_datetime_utc", "2026-5-9T07:30:00Z", "2026-05-09T07:30:00Z",
                      "datetime with UTC 'Z': the zone must be preserved"),
     CanonicalizeCase("iso_datetime_offset", "2026-10-01T9:5:0+5:30",
@@ -443,6 +446,9 @@ def prove(impl) -> bool:
             return True
     return False
 
+
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["canonicalize_iso"]
 
 TEETH = Teeth(
     prove=prove,

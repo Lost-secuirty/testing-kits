@@ -13,7 +13,6 @@ import socket
 import sys
 
 # Make the shared teeth contract importable whether run as a module or a script.
-import sys as _sys
 import threading
 import time
 import traceback
@@ -25,8 +24,8 @@ from pathlib import Path as _Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-if str(_Path(__file__).resolve().parents[2]) not in _sys.path:
-    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 import contextlib
 
 from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
@@ -1391,6 +1390,10 @@ def prove(impl: Callable[[Any], Any]) -> bool:
     return report.crashed_runs >= 1
 
 
+# Vacuity gate: intentionally UNMAPPED (advisory). This oracle's contract is
+# crash-safety (the oracle's contract is 'never crashes', not a return value),
+# which the gate's return-value neuter cannot model. Teeth are proof-verified
+# via TEETH + tools/proof_audit.py / teeth_check.py.
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_target,

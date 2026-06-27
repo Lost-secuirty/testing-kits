@@ -8,6 +8,7 @@ Includes a mock HTTP server on a dynamic port (default 18990).
 
 from __future__ import annotations
 
+import argparse
 import builtins
 import dataclasses
 import difflib
@@ -16,6 +17,7 @@ import http.server
 import json
 import os
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -24,7 +26,13 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from datetime import datetime, timezone
+from pathlib import Path as _Path
 from typing import Any
+
+# Make the shared teeth contract importable whether run as a module or a script.
+if str(_Path(__file__).resolve().parents[2]) not in sys.path:
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from harnesses._teeth import Mutant, Report, Teeth  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Snapshot dataclass
@@ -631,24 +639,273 @@ def make_test(
 
 
 # ---------------------------------------------------------------------------
-# Simple CLI entry-point (optional)
+# TEETH: a FROZEN corpus of (actual, stored, expected_match) snapshot-comparison
+# cases and the EXACT match verdict a CORRECT key-order-insensitive comparator
+# MUST produce.
+#
+# The oracle-able core is the pure SnapshotComparator.compare_json_normalized
+# decision: two JSON-like structures MATCH iff they are equal regardless of dict
+# key order, recursing into nested dicts AND lists. We scope the teeth to that
+# pure (actual, stored) -> bool verdict, deliberately EXCLUDING SnapshotStore
+# (filesystem/tempdir) and Snapshot.created_at (clock) so prove() stays pure and
+# deterministic — no clock, network, filesystem, threads, or RNG.
+#
+# A regression/snapshot comparator only has teeth if it CATCHES a comparator that
+# (a) stops at the top level and never recurses into nested values — so a changed
+# DEEP value sails through as a false MATCH (the classic "we only diffed the top
+# keys" regression-suite blind spot); or (b) drops key-order normalization — so a
+# semantically identical snapshot with reordered dict keys is flagged as a false
+# MISMATCH (a noisy, trust-eroding regression failure). The contract every correct
+# normalized comparator must hold:
+#
+#   * dict key ORDER is irrelevant at every depth (normalize before comparing);
+#   * a difference in ANY nested value — however deep, inside dicts OR lists —
+#     is a real mismatch and must be reported.
+#
+# An impl is a callable ``match(actual, stored) -> bool`` returning the match
+# verdict. prove() judges each impl against the corpus's FROZEN LITERAL
+# expected_match booleans (hand-decided from the contract above, NEVER read back
+# from the oracle at runtime), so the check is non-circular. prove(impl) is True
+# iff any verdict diverges from the frozen literal — i.e. the planted comparator
+# bug is caught.
+#
+# The two planted mutants model genuine real-world comparator defects (per the
+# campaign plan):
+#
+#   * no_recurse — compares only the top-level dict keys/values shallowly and
+#     does NOT recurse, so a changed nested value wrongly MATCHES (a deep
+#     regression slips past the snapshot gate);
+#   * order_sensitive — drops the recursive key-order normalization (plain ==),
+#     so a reordered-key dict wrongly MISMATCHES (a false regression alarm).
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
-    import sys
 
+@dataclasses.dataclass(frozen=True)
+class CompareCase:
+    """One frozen comparison case with a literal, hand-decided match verdict."""
+    name: str
+    actual: Any
+    stored: Any
+    expected_match: bool   # the EXACT verdict a correct normalized comparator yields
+    note: str = ""
+
+
+# Cases chosen so the correct oracle matches every literal AND each planted mutant
+# is caught by >=2 cases (no single-load-bearing fixture). Every ``expected_match``
+# is a hand-decided constant from the contract, never derived at runtime.
+#
+#   * reordered_keys_* (match=True): same content, dict keys reordered at the top
+#     AND inside a nested dict. order_sensitive wrongly reports MISMATCH on both.
+#   * changed_nested_* (match=False): identical top-level shape but a genuinely
+#     changed value buried inside a nested dict / inside a list-of-dicts.
+#     no_recurse wrongly reports MATCH on both (it never looks that deep).
+#   * top_level_diff (match=False): a decoy whose difference is at the TOP level,
+#     which BOTH mutants still catch — so it cannot prop up either mutant alone.
+COMPARE_CORPUS: tuple[CompareCase, ...] = (
+    # --- reordered keys: must MATCH (order is irrelevant at every depth) ---
+    CompareCase(
+        "reordered_top_keys",
+        {"b": 2, "a": 1, "c": 3},
+        {"a": 1, "b": 2, "c": 3},
+        True,
+        "top-level dict keys reordered: order_sensitive wrongly mismatches",
+    ),
+    CompareCase(
+        "reordered_nested_keys",
+        {"outer": {"z": 9, "y": 8, "x": 7}, "k": 0},
+        {"k": 0, "outer": {"x": 7, "y": 8, "z": 9}},
+        True,
+        "nested dict keys reordered: order_sensitive wrongly mismatches",
+    ),
+    # --- changed nested value: must MISMATCH (a deep regression is real) ---
+    CompareCase(
+        "changed_nested_dict_value",
+        {"id": 1, "meta": {"role": "user", "tier": "gold"}},
+        {"id": 1, "meta": {"role": "user", "tier": "silver"}},
+        False,
+        "a value changed one level deep: no_recurse wrongly matches",
+    ),
+    CompareCase(
+        "changed_value_in_list_of_dicts",
+        {"items": [{"sku": "A", "qty": 1}, {"sku": "B", "qty": 5}]},
+        {"items": [{"sku": "A", "qty": 1}, {"sku": "B", "qty": 9}]},
+        False,
+        "a value changed inside a list-of-dicts: no_recurse wrongly matches",
+    ),
+    # --- top-level difference: must MISMATCH (decoy both mutants catch) ---
+    CompareCase(
+        "top_level_value_diff",
+        {"status": "ok", "count": 1},
+        {"status": "ok", "count": 2},
+        False,
+        "top-level value differs: both mutants catch this, so neither leans on it",
+    ),
+    # --- identical scalars / empty: must MATCH (decoy; baseline sanity) ---
+    CompareCase(
+        "identical_scalars",
+        {"a": 1, "b": [1, 2, 3], "c": None},
+        {"a": 1, "b": [1, 2, 3], "c": None},
+        True,
+        "byte-identical content: every correct impl matches",
+    ),
+)
+
+
+# --- ORACLE: the harness's own correct normalized-match decision ---------------
+
+def oracle_match(actual: Any, stored: Any) -> bool:
+    """Correct key-order-insensitive structural match.
+
+    Recursively normalizes dict key order at EVERY depth (sorting dict items and
+    recursing through both dict values and list elements), then compares for
+    equality. This is the pure verdict behind
+    ``SnapshotComparator.compare_json_normalized``.
+    """
+    def _normalise(v: Any) -> Any:
+        if isinstance(v, dict):
+            return {k: _normalise(val) for k, val in sorted(v.items())}
+        if isinstance(v, list):
+            return [_normalise(i) for i in v]
+        return v
+
+    return _normalise(actual) == _normalise(stored)
+
+
+# --- Planted buggy twins (each models a real comparator defect) ----------------
+
+def _shallow_value_matches(av: Any, sv: Any) -> bool:
+    """One key's NON-recursive comparison for ``no_recurse_match``: two nested
+    containers are deemed equal by TYPE alone (never recursed) — the planted
+    bug; everything else falls back to plain equality."""
+    if isinstance(av, (dict, list)) and isinstance(sv, (dict, list)):
+        return type(av) is type(sv)
+    return av == sv
+
+
+def no_recurse_match(actual: Any, stored: Any) -> bool:
+    """BUG: compares only the TOP level and never recurses into nested values.
+
+    For two dicts it checks that the key sets match and that each top-level value
+    is either equal OR (when both are dicts/lists) merely the same *type* — it
+    stops there instead of recursing. So a value changed one-or-more levels deep
+    (inside a nested dict, or inside a list-of-dicts) sails through as a false
+    MATCH. Models the "our snapshot diff only looked at the top keys" regression
+    blind spot.
+    """
+    if isinstance(actual, dict) and isinstance(stored, dict):
+        if sorted(actual.keys()) != sorted(stored.keys()):
+            return False
+        return all(_shallow_value_matches(actual[k], stored[k]) for k in actual)
+    return actual == stored
+
+
+def order_sensitive_match(actual: Any, stored: Any) -> bool:
+    """BUG: drops key-order normalization and compares with plain ``==``.
+
+    Python dict equality is actually order-insensitive, so the realistic defect
+    is to compare the SERIALIZED form without sorting keys: ``json.dumps`` without
+    ``sort_keys=True`` preserves insertion order, so two semantically identical
+    snapshots whose dict keys were written in a different order produce different
+    strings and are flagged as a false MISMATCH. Models a comparator that diffs
+    raw serialized text instead of normalized structure.
+    """
+    return json.dumps(actual, ensure_ascii=False) == json.dumps(stored, ensure_ascii=False)
+
+
+def prove(impl: Callable[[Any, Any], bool]) -> bool:
+    """True iff ``impl`` produces the WRONG match verdict for any frozen corpus
+    case (i.e. the comparator bug is caught): the boolean verdict diverges from
+    the hand-decided literal, or the impl raises.
+
+    Non-circular + deterministic: every expectation is a literal baked into
+    COMPARE_CORPUS, never read from the oracle; pure structural comparison only,
+    no RNG/clock/threads/network/filesystem. An impl that raises on a corpus case
+    counts as caught.
+    """
+    for case in COMPARE_CORPUS:
+        try:
+            verdict = impl(case.actual, case.stored)
+        except Exception:  # noqa: BLE001 — raising on a corpus case counts as caught
+            return True
+        if bool(verdict) != case.expected_match:
+            return True
+    return False
+
+
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_match"]
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_match,
+    mutants=(
+        Mutant("no_recurse", no_recurse_match,
+               "compares only top-level keys/values and never recurses, so a "
+               "value changed inside a nested dict or a list-of-dicts wrongly "
+               "MATCHES — a deep regression slips past the snapshot gate"),
+        Mutant("order_sensitive", order_sensitive_match,
+               "diffs serialized text without sort_keys, dropping key-order "
+               "normalization, so a reordered-key dict wrongly MISMATCHES — a "
+               "false regression alarm on a semantically identical snapshot"),
+    ),
+    corpus_size=len(COMPARE_CORPUS),
+    kind="oracle_swap",
+    notes="a correct normalized comparator treats dict key order as irrelevant "
+          "at every depth yet reports any nested value change as a real mismatch",
+)
+
+
+def list_teeth_scenarios() -> list[str]:
+    """Names of the frozen comparison corpus cases (the teeth scenarios)."""
+    return [c.name for c in COMPARE_CORPUS]
+
+
+# ---------------------------------------------------------------------------
+# Self-test — fails loud, reports findings.
+# ---------------------------------------------------------------------------
+
+def _run_self_test(as_json: bool = False) -> int:
+    """Exercise the normalized-comparator core this harness guards and assert the
+    teeth: the real ``SnapshotComparator.compare_json_normalized`` reproduces
+    every frozen verdict, the standalone oracle matches every literal, and the
+    universal swap-check passes (oracle clean, every planted mutant caught)."""
+    report = Report("core/regression_snapshot")
+    comparator = SnapshotComparator()
+
+    # 1. The real comparator method reproduces every frozen verdict exactly,
+    #    proving the teeth oracle is faithful to the shipped implementation.
+    for case in COMPARE_CORPUS:
+        snap = Snapshot.create("teeth", case.stored)
+        got = comparator.compare_json_normalized(case.actual, snap).match
+        report.add(f"comparator:{case.name}", case.expected_match, got, detail=case.note)
+
+    # 2. The standalone oracle reproduces every frozen verdict literal.
+    for case in COMPARE_CORPUS:
+        report.add(f"oracle:{case.name}", case.expected_match,
+                   oracle_match(case.actual, case.stored), detail=case.note)
+
+    # 3. Teeth: prove(oracle) is False AND every planted mutant is caught.
+    report.assert_teeth(TEETH)
+
+    return report.emit(as_json=as_json)
+
+
+def _run_demo() -> None:
+    """Original interactive demo: snapshot save/load, runner, and mock server.
+
+    Kept under the CLI only (never at import). The mock HTTP server binds a port,
+    so it lives here and is excluded from the pure, deterministic teeth.
+    """
     print("Regression & Snapshot Test Harness — demo mode")
     store = SnapshotStore()
     print(f"Snapshot store: {store.directory}")
 
-    # Demo: save and reload a snapshot
     snap = store.save("demo", {"hello": "world", "count": 42})
     print(f"Saved  : {snap}")
     reloaded = store.load("demo")
     print(f"Loaded : {reloaded}")
     print(f"Checksum valid: {reloaded.verify_checksum()}")
 
-    # Demo: regression runner
     runner = RegressionRunner(store)
     store.delete("demo")  # ensure first run
 
@@ -659,7 +916,6 @@ if __name__ == "__main__":
     r2 = runner.run(t)
     print(f"Run 2 (match): {r2}")
 
-    # Demo: server
     with MockRegressionServer(store) as srv:
         print(f"Server running on {srv.base_url}")
         status, body = srv.get("/health")
@@ -669,4 +925,32 @@ if __name__ == "__main__":
 
     store.destroy()
     print("Done.")
-    sys.exit(0)
+
+
+# ---------------------------------------------------------------------------
+# CLI — default action is the self-test (repo convention).
+# ---------------------------------------------------------------------------
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Regression & snapshot comparator controls + teeth self-test"
+    )
+    parser.add_argument("--self-test", action="store_true", help="run built-in checks")
+    parser.add_argument("--json", action="store_true",
+                        help="emit machine-readable findings (implies --self-test)")
+    parser.add_argument("--list-scenarios", action="store_true")
+    parser.add_argument("--demo", action="store_true",
+                        help="run the interactive snapshot/server demo")
+    args = parser.parse_args(argv)
+
+    if args.list_scenarios:
+        print("\n".join(list_teeth_scenarios()))
+        return 0
+    if args.demo:
+        _run_demo()
+        return 0
+    return _run_self_test(as_json=args.json)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

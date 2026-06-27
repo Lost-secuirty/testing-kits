@@ -63,7 +63,16 @@ import ast
 import os
 import sys
 import textwrap
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path as _Path
+
+if __package__ in {None, ""}:
+    _ROOT = _Path(__file__).resolve().parents[2]
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+
+from harnesses._teeth import Mutant, Report, Teeth
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -511,6 +520,234 @@ def _bloated_source() -> str:
     """).strip() + "\n"
 
 
+# ---------------------------------------------------------------------------
+# TEETH: frozen complexity audits + planted metric-blind defects
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ComplexityAuditCase:
+    name: str
+    check: str
+    source: str
+    thresholds: Thresholds
+    expected_events: tuple[str, ...]
+
+
+_NESTED_SOURCE = textwrap.dedent("""
+    def tangled(a, b, c):
+        if a:
+            if b:
+                if c:
+                    return 1
+        return 0
+""").strip() + "\n"
+
+_LENGTHY_SOURCE = textwrap.dedent("""
+    def lengthy():
+        a = 1
+        b = 2
+        c = 3
+        d = 4
+        e = 5
+        f = 6
+        g = a + b + c + d + e + f
+        return g
+""").strip() + "\n"
+
+_WIDE_SOURCE = "def wide(a, b, c, d, e, f, g):\n    return a\n"
+
+_NESTED_VS_FLAT_SOURCE = textwrap.dedent("""
+    def flat(a, b, c):
+        if a:
+            return 1
+        if b:
+            return 2
+        if c:
+            return 3
+        return 0
+
+    def nested(a, b, c):
+        if a:
+            if b:
+                if c:
+                    return 1
+        return 0
+""").strip() + "\n"
+
+
+COMPLEXITY_AUDIT_CORPUS = (
+    ComplexityAuditCase(
+        name="clean_function_has_no_flags",
+        check="gate",
+        source="def add(a, b):\n    return a + b\n",
+        thresholds=Thresholds(),
+        expected_events=("no_flags",),
+    ),
+    ComplexityAuditCase(
+        name="cognitive_and_nesting_thresholds_flag",
+        check="gate",
+        source=_NESTED_SOURCE,
+        thresholds=Thresholds(
+            max_cyclomatic=99,
+            max_cognitive=2,
+            max_lines=99,
+            max_nesting=2,
+            max_params=99,
+        ),
+        expected_events=("flag:tangled", "breach:cognitive", "breach:nesting"),
+    ),
+    ComplexityAuditCase(
+        name="length_threshold_flags_bloat",
+        check="gate",
+        source=_LENGTHY_SOURCE,
+        thresholds=Thresholds(
+            max_cyclomatic=99,
+            max_cognitive=99,
+            max_lines=4,
+            max_nesting=99,
+            max_params=99,
+        ),
+        expected_events=("flag:lengthy", "breach:length"),
+    ),
+    ComplexityAuditCase(
+        name="parameter_threshold_flags_wide_signature",
+        check="gate",
+        source=_WIDE_SOURCE,
+        thresholds=Thresholds(
+            max_cyclomatic=99,
+            max_cognitive=99,
+            max_lines=99,
+            max_nesting=99,
+            max_params=6,
+        ),
+        expected_events=("flag:wide", "breach:params"),
+    ),
+    ComplexityAuditCase(
+        name="nested_code_is_cognitively_harder_than_flat_code",
+        check="nested_vs_flat",
+        source=_NESTED_VS_FLAT_SOURCE,
+        thresholds=Thresholds(),
+        expected_events=("nested_more_cognitive", "nested_depth:3"),
+    ),
+)
+
+
+def _breach_events(violations: list[str]) -> list[str]:
+    events = []
+    for prefix, event in (
+        ("cyclomatic", "breach:cyclomatic"),
+        ("cognitive", "breach:cognitive"),
+        ("length", "breach:length"),
+        ("nesting", "breach:nesting"),
+        ("params", "breach:params"),
+    ):
+        if any(v.startswith(prefix) for v in violations):
+            events.append(event)
+    return events
+
+
+def _gate_events(source: str, thresholds: Thresholds) -> tuple[str, ...]:
+    report = analyze_source(source, path="<audit>")
+    flagged = report.flagged(thresholds)
+    if not flagged:
+        return ("no_flags",)
+    events = []
+    for fn, violations in flagged:
+        events.append(f"flag:{fn.name}")
+        events.extend(_breach_events(violations))
+    return tuple(events)
+
+
+def _metrics_by_name(source: str) -> dict[str, FunctionMetrics]:
+    return {fn.name: fn for fn in analyze_source(source, path="<audit>").functions}
+
+
+def oracle_complexity_audit(case: ComplexityAuditCase) -> tuple[str, ...]:
+    if case.check == "gate":
+        return _gate_events(case.source, case.thresholds)
+    if case.check == "nested_vs_flat":
+        metrics = _metrics_by_name(case.source)
+        events = []
+        if metrics["nested"].cognitive > metrics["flat"].cognitive:
+            events.append("nested_more_cognitive")
+        if metrics["nested"].max_nesting == 3:
+            events.append("nested_depth:3")
+        return tuple(events)
+    raise ValueError(f"unknown complexity audit check: {case.check}")
+
+
+def cyclomatic_only_complexity_auditor(case: ComplexityAuditCase) -> tuple[str, ...]:
+    if case.name != "cognitive_and_nesting_thresholds_flag":
+        return oracle_complexity_audit(case)
+    thresholds = Thresholds(
+        max_cyclomatic=case.thresholds.max_cyclomatic,
+        max_cognitive=99,
+        max_lines=case.thresholds.max_lines,
+        max_nesting=99,
+        max_params=case.thresholds.max_params,
+    )
+    return _gate_events(case.source, thresholds)
+
+
+def length_blind_complexity_auditor(case: ComplexityAuditCase) -> tuple[str, ...]:
+    if case.name != "length_threshold_flags_bloat":
+        return oracle_complexity_audit(case)
+    thresholds = Thresholds(
+        max_cyclomatic=case.thresholds.max_cyclomatic,
+        max_cognitive=case.thresholds.max_cognitive,
+        max_lines=99,
+        max_nesting=case.thresholds.max_nesting,
+        max_params=case.thresholds.max_params,
+    )
+    return _gate_events(case.source, thresholds)
+
+
+def params_blind_complexity_auditor(case: ComplexityAuditCase) -> tuple[str, ...]:
+    if case.name != "parameter_threshold_flags_wide_signature":
+        return oracle_complexity_audit(case)
+    thresholds = Thresholds(
+        max_cyclomatic=case.thresholds.max_cyclomatic,
+        max_cognitive=case.thresholds.max_cognitive,
+        max_lines=case.thresholds.max_lines,
+        max_nesting=case.thresholds.max_nesting,
+        max_params=99,
+    )
+    return _gate_events(case.source, thresholds)
+
+
+def nesting_blind_complexity_auditor(case: ComplexityAuditCase) -> tuple[str, ...]:
+    if case.name != "nested_code_is_cognitively_harder_than_flat_code":
+        return oracle_complexity_audit(case)
+    return ("nested_more_cognitive",)
+
+
+def prove(impl: Callable[[ComplexityAuditCase], tuple[str, ...]]) -> bool:
+    return any(impl(case) != case.expected_events for case in COMPLEXITY_AUDIT_CORPUS)
+
+
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_complexity_audit"]
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_complexity_audit,
+    mutants=(
+        Mutant("cyclomatic_only_complexity_auditor", cyclomatic_only_complexity_auditor,
+               "ignores cognitive-complexity and nesting threshold breaches"),
+        Mutant("length_blind_complexity_auditor", length_blind_complexity_auditor,
+               "ignores bloat through function length"),
+        Mutant("params_blind_complexity_auditor", params_blind_complexity_auditor,
+               "ignores wide signatures with too many parameters"),
+        Mutant("nesting_blind_complexity_auditor", nesting_blind_complexity_auditor,
+               "drops the nested-depth signal while preserving a flat cognitive comparison"),
+    ),
+    corpus_size=len(COMPLEXITY_AUDIT_CORPUS),
+    kind="auditor",
+    notes="Frozen maintainability corpus for clean code, cognitive/nesting, length, params, and nesting contrast.",
+)
+
+
 def list_scenarios() -> list[str]:
     return [label for label, *_ in SELF_TEST_CASES] + [
         "bloated_function_is_flagged",
@@ -518,10 +755,8 @@ def list_scenarios() -> list[str]:
     ]
 
 
-def _run_self_test(verbose: bool = False) -> int:
+def _metric_selftest_failures(verbose: bool) -> list[str]:
     failures: list[str] = []
-
-    # 1) metric correctness: analyzer must reproduce hand-computed values.
     for label, src, exp_cyc, exp_cog in SELF_TEST_CASES:
         report = analyze_source(src, path=label)
         fn = report.functions[0]
@@ -532,26 +767,47 @@ def _run_self_test(verbose: bool = False) -> int:
             failures.append(f"{label}: cyclomatic {fn.cyclomatic} != {exp_cyc}")
         if fn.cognitive != exp_cog:
             failures.append(f"{label}: cognitive {fn.cognitive} != {exp_cog}")
+    return failures
 
-    # 2) the gate must FLAG a bloated function...
+
+def _gate_selftest_failures() -> list[str]:
+    failures: list[str] = []
     t = Thresholds()
     bloated = analyze_source(_bloated_source(), path="bloated")
     if not bloated.flagged(t):
         failures.append("bloated function was not flagged")
-
-    # 3) ...and PASS a clean one.
     clean = analyze_source(SELF_TEST_CASES[0][1], path="clean")
     if clean.flagged(t):
         failures.append("trivial function was wrongly flagged")
+    return failures
 
+
+def _print_selftest_failures(failures: list[str]) -> None:
+    print(f"FAILED ({len(failures)}):", file=sys.stderr)
+    for line in failures:
+        print(f"  - {line}", file=sys.stderr)
+
+
+def _emit_complexity_teeth_report() -> int:
+    report = Report("core/complexity")
+    for case in COMPLEXITY_AUDIT_CORPUS:
+        report.add(
+            f"oracle_complexity_audit:{case.name}",
+            list(case.expected_events),
+            list(oracle_complexity_audit(case)),
+        )
+    report.assert_teeth(TEETH)
+    return report.emit()
+
+
+def _run_self_test(verbose: bool = False) -> int:
+    failures = _metric_selftest_failures(verbose) + _gate_selftest_failures()
     if failures:
-        print(f"FAILED ({len(failures)}):", file=sys.stderr)
-        for line in failures:
-            print(f"  - {line}", file=sys.stderr)
+        _print_selftest_failures(failures)
         return 1
     print(f"OK: {len(SELF_TEST_CASES)} metric cases match; gate flags bloat "
           f"and passes clean code.")
-    return 0
+    return _emit_complexity_teeth_report()
 
 
 # ---------------------------------------------------------------------------

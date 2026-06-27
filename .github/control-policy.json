@@ -23,7 +23,8 @@
     ".github/control-policy.json",
     ".github/workflows/controls.yml",
     ".github/workflows/scan.yml",
-    ".github/dependabot.yml"
+    ".github/dependabot.yml",
+    "docs/CI_AND_LIVE_STATE.md"
   ],
   "required_workflows": [
     "repository-controls",

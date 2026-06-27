@@ -27,7 +27,15 @@ import sys
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path as _Path
 from typing import Any
+
+if __package__ in {None, ""}:
+    _ROOT = _Path(__file__).resolve().parents[2]
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+
+from harnesses._teeth import Mutant, Report, Teeth
 
 
 @dataclass
@@ -85,6 +93,145 @@ def assert_bounded_cardinality(probe: CardinalityProbe, dim: str,
             f"dimension {dim!r} has {distinct} distinct values, "
             f"exceeds bound {max_distinct}"
         )
+
+
+# ---------------------------------------------------------------------------
+# TEETH: frozen cardinality streams + planted analyzer defects
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CardinalityAuditCase:
+    name: str
+    emissions: tuple[tuple[str, str], ...]
+    threshold: float
+    expected_reports: tuple[tuple[str, int, int, bool], ...]
+
+
+_LOW_CARDINALITY_EVENTS = tuple(
+    ("user_tier", ("free", "pro", "enterprise")[i % 3]) for i in range(12)
+)
+_HIGH_CARDINALITY_EVENTS = tuple(("request_id", f"req-{i:03d}") for i in range(12))
+_MIXED_CARDINALITY_EVENTS = tuple(
+    event
+    for i in range(12)
+    for event in (
+        ("route_template", ("/users/{id}", "/orders/{id}", "/items/{id}")[i % 3]),
+        ("session_id", f"session-{i:03d}"),
+    )
+)
+
+
+CARDINALITY_AUDIT_CORPUS: tuple[CardinalityAuditCase, ...] = (
+    CardinalityAuditCase(
+        name="bounded_user_tier_metric_label",
+        emissions=_LOW_CARDINALITY_EVENTS,
+        threshold=0.5,
+        expected_reports=(("user_tier", 12, 3, True),),
+    ),
+    CardinalityAuditCase(
+        name="unbounded_request_id_metric_label",
+        emissions=_HIGH_CARDINALITY_EVENTS,
+        threshold=0.5,
+        expected_reports=(("request_id", 12, 12, False),),
+    ),
+    CardinalityAuditCase(
+        name="mixed_route_template_and_session_id",
+        emissions=_MIXED_CARDINALITY_EVENTS,
+        threshold=0.5,
+        expected_reports=(
+            ("route_template", 12, 3, True),
+            ("session_id", 12, 12, False),
+        ),
+    ),
+)
+
+
+def _serialize_reports(reports: list[CardinalityReport]) -> tuple[tuple[str, int, int, bool], ...]:
+    return tuple(
+        (r.dimension, r.samples, r.distinct, r.bounded)
+        for r in sorted(reports, key=lambda item: item.dimension)
+    )
+
+
+def oracle_cardinality_audit(case: CardinalityAuditCase) -> tuple[tuple[str, int, int, bool], ...]:
+    probe = CardinalityProbe([])
+    for dim, value in case.emissions:
+        probe.emit(dim, value)
+    return _serialize_reports(probe.report(threshold=case.threshold))
+
+
+def first_value_only_cardinality_auditor(
+    case: CardinalityAuditCase,
+) -> tuple[tuple[str, int, int, bool], ...]:
+    probe = CardinalityProbe([])
+    seen: set[str] = set()
+    for dim, value in case.emissions:
+        if dim in seen:
+            probe._samples[dim] += 1
+            continue
+        seen.add(dim)
+        probe.emit(dim, value)
+    return _serialize_reports(probe.report(threshold=case.threshold))
+
+
+def sample_count_cardinality_auditor(
+    case: CardinalityAuditCase,
+) -> tuple[tuple[str, int, int, bool], ...]:
+    samples: dict[str, int] = {}
+    for dim, _value in case.emissions:
+        samples[dim] = samples.get(dim, 0) + 1
+    reports = [
+        CardinalityReport(
+            dimension=dim,
+            samples=n,
+            distinct=n,
+            growth_ratio=1.0 if n else 0.0,
+            bounded=(1.0 if n else 0.0) <= case.threshold,
+            detail="sample count used as distinct count",
+        )
+        for dim, n in samples.items()
+    ]
+    return _serialize_reports(reports)
+
+
+def first_dimension_only_cardinality_auditor(
+    case: CardinalityAuditCase,
+) -> tuple[tuple[str, int, int, bool], ...]:
+    if not case.emissions:
+        return ()
+    first_dim = case.emissions[0][0]
+    filtered = tuple(event for event in case.emissions if event[0] == first_dim)
+    return oracle_cardinality_audit(CardinalityAuditCase(
+        name=case.name,
+        emissions=filtered,
+        threshold=case.threshold,
+        expected_reports=(),
+    ))
+
+
+def prove(impl: Callable[[CardinalityAuditCase], tuple[tuple[str, int, int, bool], ...]]) -> bool:
+    return any(impl(case) != case.expected_reports for case in CARDINALITY_AUDIT_CORPUS)
+
+
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_cardinality_audit"]
+
+TEETH = Teeth(
+    prove=prove,
+    oracle=oracle_cardinality_audit,
+    mutants=(
+        Mutant("first_value_only_cardinality_auditor", first_value_only_cardinality_auditor,
+               "collapses a dimension after the first observed value"),
+        Mutant("sample_count_cardinality_auditor", sample_count_cardinality_auditor,
+               "treats every sample as distinct and false-alarms bounded labels"),
+        Mutant("first_dimension_only_cardinality_auditor", first_dimension_only_cardinality_auditor,
+               "drops later dimensions in a mixed metric stream"),
+    ),
+    corpus_size=len(CARDINALITY_AUDIT_CORPUS),
+    kind="auditor",
+    notes="Frozen bounded, unbounded, and mixed-dimension cardinality streams.",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +293,9 @@ def list_scenarios() -> list[str]:
     return list(SCENARIOS.keys())
 
 
-def _run_self_test(config: CardinalityConfig, verbose: bool = False) -> int:
+def _run_self_test(config: CardinalityConfig | None = None, verbose: bool = False) -> int:
+    if config is None:  # gate-callable: vacuity_gate calls _run_self_test()
+        config = CardinalityConfig()
     failures: list[str] = []
     for name, (emit_fn, dim, expected_bounded) in SCENARIOS.items():
         probe = CardinalityProbe([dim])
@@ -167,8 +316,18 @@ def _run_self_test(config: CardinalityConfig, verbose: bool = False) -> int:
         for f in failures:
             print(f"  - {f}", file=sys.stderr)
         return 1
+    report = Report("core/cardinality")
+    for case in CARDINALITY_AUDIT_CORPUS:
+        report.add(
+            f"oracle_cardinality_audit:{case.name}",
+            list(case.expected_reports),
+            list(oracle_cardinality_audit(case)),
+        )
+    report.assert_teeth(TEETH)
+    if not report.passed:
+        return report.emit()
     print(f"OK: {len(SCENARIOS)} scenarios matched their cardinality expectations.")
-    return 0
+    return report.emit()
 
 
 def build_parser() -> argparse.ArgumentParser:

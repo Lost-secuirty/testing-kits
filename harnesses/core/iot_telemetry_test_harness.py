@@ -485,6 +485,9 @@ def prove(impl: Callable[[list[Message], tuple[float, ...]], AggResult]) -> bool
     return got != AGG_EXPECTED
 
 
+# Vacuity gate: neutering the oracle must turn this harness's self-test red.
+VACUITY_TARGETS = ["oracle_aggregate"]
+
 TEETH = Teeth(
     prove=prove,
     oracle=oracle_aggregate,
@@ -503,7 +506,10 @@ TEETH = Teeth(
                "rolls the reading mean with an explicit float `acc += x` loop -> "
                "binary-float drift puts the mean a ULP off the exact rational value"),
     ),
-    corpus_size=len(STREAM),
+    # One aggregate scenario: prove() compares a single fingerprint of the whole STREAM against
+    # AGG_EXPECTED, so the proof is one rich case (each mutant perturbs a different fingerprint
+    # dimension) — not len(STREAM)=19 input messages, which overstated the breadth.
+    corpus_size=1,
     kind="oracle_swap",
     notes="a telemetry ingester must keep server time canonical, dedupe QoS-1/2 "
           "retransmits to exactly-once, re-sequence out-of-order arrivals, drop "
