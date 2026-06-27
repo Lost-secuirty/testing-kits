@@ -79,6 +79,8 @@ jobs:
         run: python -m unittest discover -s tests -t . -p "test_*.py"
       - name: Run harness proof audit
         run: python tools/proof_audit.py --run-selftests
+      - name: Verify generated reports
+        run: python tools/generate_report.py --check
 
   package:
     name: Package, install, and dependency audit
