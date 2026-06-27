@@ -32,6 +32,17 @@ The current proof language is a ratchet, not a blanket proof claim.
 
 Re-run `make proof` before treating the proof snapshot as a fresh release claim. Do not describe this repo as total correctness proof for any target application.
 
+## Install
+
+The harness collection is published to PyPI. It is pure standard library with zero runtime dependencies:
+
+```bash
+pip install testing-kits
+python -c "import harnesses; print('ok')"
+```
+
+The PyPI package ships the importable `harnesses` collection. The proof toolchain, paired tests, gate suite, and docs live in the repository — clone it to run `make proof` and reproduce the proof baseline.
+
 ## Quick start
 
 ```bash

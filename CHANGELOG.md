@@ -12,9 +12,12 @@ correctness for any target software.
 
 ## [Unreleased]
 
-Slated for the first tagged public release (`1.0.0`). No changes are pending merge; this
-section consolidates the current shape of the library for that release. On release, this
-heading becomes `## [1.0.0] - <date>` and the version is bumped in `pyproject.toml`.
+_Nothing yet._
+
+## [1.0.0] - 2026-06-27
+
+First tagged public release. This section consolidates the current shape of the library;
+the version is set to `1.0.0` in `pyproject.toml` and the collection is published to PyPI.
 
 ### Added — harness collection
 
@@ -58,6 +61,5 @@ heading becomes `## [1.0.0] - <date>` and the version is bumped in `pyproject.to
 
 - MIT `LICENSE`, `SECURITY.md`, a pull-request template, a deep `docs/` set, and `llms.txt`.
 
-<!-- On the 1.0.0 release this becomes a compare link (v1.0.0...HEAD) plus a
-     [1.0.0] release-tag link. -->
-[Unreleased]: https://github.com/Lost-secuirty/testing-kits/commits/main
+[Unreleased]: https://github.com/Lost-secuirty/testing-kits/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Lost-secuirty/testing-kits/releases/tag/v1.0.0
