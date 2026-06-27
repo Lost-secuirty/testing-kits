@@ -1,5 +1,8 @@
 """Test suite for data_poisoning_test_harness (OWASP LLM04:2025)."""
 
+import contextlib
+import io
+import json
 import unittest
 
 from harnesses.ai.data_poisoning_test_harness import (
@@ -18,6 +21,7 @@ from harnesses.ai.data_poisoning_test_harness import (
     _unsigned,
     _untrusted_source,
     list_scenarios,
+    main,
     oracle_poison_audit,
     prove,
 )
@@ -97,6 +101,16 @@ class TestSelfTest(unittest.TestCase):
 
     def test_self_test_passes(self):
         self.assertEqual(_run_self_test(), 0)
+
+    def test_json_mode_is_machine_readable(self):
+        for run in (lambda: _run_self_test(as_json=True), lambda: main(["--json"])):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = run()
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["harness"], "ai/data_poisoning")
+            self.assertTrue(payload["passed"])
 
 
 if __name__ == "__main__":

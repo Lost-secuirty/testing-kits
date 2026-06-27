@@ -330,7 +330,8 @@ def _run_self_test(as_json: bool = False) -> int:
         actual = oracle_poison_audit(case)
         report.add(f"poison:{case.name}", list(case.expected_codes), list(actual),
                    detail=f"{len(case.expected_codes)} finding(s) expected")
-        print(f"poison:{case.name:<36} {list(actual)}")
+        if not as_json:
+            print(f"poison:{case.name:<36} {list(actual)}")
 
     # Teeth: the correct oracle is clean and every planted mutant is caught.
     report.assert_teeth(TEETH)
