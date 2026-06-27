@@ -125,6 +125,8 @@ REGISTRY: list[HarnessCoverage] = [
                     ["CWE-770", "CWE-674"], "token/loop/cost budgets"),
     HarnessCoverage("ai/data_poisoning", ["LLM04"], [],
                     "training/RAG ingestion poisoning: source/trigger/mislabel/flood (LLM04:2025)"),
+    HarnessCoverage("ai/system_prompt_leakage", ["LLM07"],
+                    ["CWE-200", "CWE-1230"], "embedded secret/rule/filter/role leak (LLM07:2025)"),
     HarnessCoverage("ai/secure_codegen_eval", ["cross"], [], "secure-pass@k codegen eval"),
     HarnessCoverage("ai/prompt_ab", ["cross"], [], "prompt-technique A/B over the OWASP set"),
     HarnessCoverage("ai/agent_eval", ["cross"], [], "agent evaluation methodology"),
