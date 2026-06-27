@@ -1,5 +1,8 @@
 """Test suite for misinformation_test_harness (OWASP LLM09:2025)."""
 
+import contextlib
+import io
+import json
 import unittest
 
 from harnesses.ai.misinformation_test_harness import (
@@ -15,6 +18,7 @@ from harnesses.ai.misinformation_test_harness import (
     _run_self_test,
     _supported,
     list_scenarios,
+    main,
     oracle_misinformation_audit,
     prove,
 )
@@ -32,6 +36,9 @@ class TestSupportPredicates(unittest.TestCase):
                                      "lake trout do not tolerate warm water"))
         self.assertFalse(_contradicts("lake trout tolerate warm water",
                                       "lake trout tolerate warm water"))
+        # Negated, but only partial claim-token overlap: not a contradiction.
+        self.assertFalse(_contradicts("lake trout tolerate warm water",
+                                      "lake trout do not spawn in warm streams"))
 
 
 class TestOracle(unittest.TestCase):
@@ -49,9 +56,18 @@ class TestOracle(unittest.TestCase):
         self.assertEqual(oracle_misinformation_audit(case), ("UNSUPPORTED_CLAIM",))
 
     def test_findings_sorted_and_deduped(self):
-        out = oracle_misinformation_audit(
-            next(c for c in CORPUS if c.name == "contradicted_by_context"))
-        self.assertEqual(list(out), sorted(out))
+        # Two distinct uncited claims both raise UNSUPPORTED_CLAIM; the contract
+        # promises a sorted *deduplicated* tuple, so they collapse to one entry.
+        case = AnswerCase(
+            "dedup",
+            (("first uncited claim", ""), ("second uncited claim", "")),
+            (),
+            ("UNSUPPORTED_CLAIM",),
+        )
+        self.assertEqual(
+            oracle_misinformation_audit(case),
+            ("UNSUPPORTED_CLAIM",),
+        )
 
 
 class TestTeeth(unittest.TestCase):
@@ -87,6 +103,16 @@ class TestSelfTest(unittest.TestCase):
 
     def test_self_test_passes(self):
         self.assertEqual(_run_self_test(), 0)
+
+    def test_json_mode_is_machine_readable(self):
+        for run in (lambda: _run_self_test(as_json=True), lambda: main(["--json"])):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = run()
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["harness"], "ai/misinformation")
+            self.assertTrue(payload["passed"])
 
 
 if __name__ == "__main__":

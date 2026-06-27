@@ -286,7 +286,8 @@ def _run_self_test(as_json: bool = False) -> int:
         actual = oracle_misinformation_audit(case)
         report.add(f"misinfo:{case.name}", list(case.expected_findings), list(actual),
                    detail=f"{len(case.expected_findings)} finding(s) expected")
-        print(f"misinfo:{case.name:<28} {list(actual)}")
+        if not as_json:
+            print(f"misinfo:{case.name:<28} {list(actual)}")
 
     # Teeth: the correct oracle is clean and every planted mutant is caught.
     report.assert_teeth(TEETH)
