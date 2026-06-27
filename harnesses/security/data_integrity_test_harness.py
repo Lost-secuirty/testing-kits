@@ -91,8 +91,10 @@ def _autoupdate_unverified(record: dict[str, Any]) -> bool:
     """True iff auto-update is on but the update channel is not verified."""
     if record.get("auto_update") is not True:
         return False
-    channel_verified = record.get("autoupdate_verify", record.get("verify_signature"))
-    return channel_verified is not True
+    # The auto-update channel needs its OWN verification control. A passing
+    # verify_signature on the artifact does NOT vouch for the update channel, so an
+    # absent autoupdate_verify is treated as unverified (CWE-494 unverified update).
+    return record.get("autoupdate_verify") is not True
 
 
 # --------------------------------------------------------------------------- #
@@ -280,6 +282,16 @@ CORPUS: tuple[IntegrityCase, ...] = (
         ("integrity-autoupdate-unverified",),
     ),
     IntegrityCase(
+        # auto_update on, the artifact is signed + checksummed + trusted, but the
+        # dedicated autoupdate_verify control is ABSENT. A signed artifact must not
+        # vouch for an unverified update channel, so this still flags.
+        "autoupdate_missing_channel_control",
+        '{"kind":"update","signature":"ed25519:SAMPLE","verify_signature":true,'
+        '"checksum":"sha256:cafe","checksum_algo":"sha256",'
+        '"source":"https://updates.example-trusted.test/v2","auto_update":true}',
+        ("integrity-autoupdate-unverified",),
+    ),
+    IntegrityCase(
         "all_failures_compound",
         '{"kind":"update","signature":"","verify_signature":false,'
         '"checksum":"md5:dead","checksum_algo":"md5",'
@@ -341,7 +353,8 @@ def _run_self_test(as_json: bool = False) -> int:
         actual = oracle_integrity_audit(case)
         report.add(f"integrity:{case.name}", list(case.expected_codes), list(actual),
                    detail=f"{len(case.expected_codes)} finding(s) expected")
-        print(f"integrity:{case.name:<32} {list(actual)}")
+        if not as_json:
+            print(f"integrity:{case.name:<32} {list(actual)}")
 
     # Teeth: the correct oracle is clean and every planted mutant is caught.
     report.assert_teeth(TEETH)

@@ -1,5 +1,8 @@
 """Test suite for data_integrity_test_harness (OWASP A08:2025)."""
 
+import contextlib
+import io
+import json
 import unittest
 
 from harnesses.security.data_integrity_test_harness import (
@@ -16,6 +19,7 @@ from harnesses.security.data_integrity_test_harness import (
     _run_self_test,
     _untrusted_source,
     list_scenarios,
+    main,
     oracle_integrity_audit,
     prove,
 )
@@ -39,6 +43,13 @@ class TestHelpers(unittest.TestCase):
         self.assertFalse(_autoupdate_unverified({"auto_update": True, "autoupdate_verify": True}))
         self.assertFalse(_autoupdate_unverified({"auto_update": False}))
 
+    def test_autoupdate_requires_dedicated_control(self):
+        # The dedicated autoupdate_verify control is REQUIRED: a missing field is
+        # unverified, and verify_signature on the artifact does not substitute for it.
+        self.assertTrue(_autoupdate_unverified({"auto_update": True}))
+        self.assertTrue(
+            _autoupdate_unverified({"auto_update": True, "verify_signature": True}))
+
 
 class TestOracle(unittest.TestCase):
     def test_corpus_expectations_match_oracle(self):
@@ -59,12 +70,39 @@ class TestOracle(unittest.TestCase):
     def test_does_not_raise_on_garbage_record(self):
         # Malformed/partial records must degrade to findings, never raise.
         garbage = IntegrityCase("garbage", '{"kind":"update"}', ())
-        self.assertIsInstance(oracle_integrity_audit(garbage), tuple)
+        self.assertEqual(
+            oracle_integrity_audit(garbage),
+            (
+                "integrity-no-checksum",
+                "integrity-unsigned",
+                "integrity-untrusted-source",
+            ),
+        )
+
+    def test_autoupdate_missing_control_flags(self):
+        # A signed/checksummed/trusted artifact with auto_update on but no
+        # autoupdate_verify must still flag the unverified update channel.
+        case = next(c for c in CORPUS if c.name == "autoupdate_missing_channel_control")
+        self.assertEqual(oracle_integrity_audit(case), ("integrity-autoupdate-unverified",))
 
 
 class TestTeeth(unittest.TestCase):
     def test_oracle_is_clean(self):
         self.assertFalse(prove(oracle_integrity_audit))
+
+    def test_mutants_wired_exactly(self):
+        # Pin the wiring: dropping a planted mutant from TEETH must fail here, not
+        # silently shrink the proof surface.
+        self.assertEqual(
+            {mutant.impl for mutant in TEETH.mutants},
+            {
+                _bug_present_checksum_counts_as_strong,
+                _bug_skip_signature_gate,
+                _bug_trusts_all_sources,
+                _bug_ignores_unsafe_deserialization,
+                _bug_autoupdate_blind,
+            },
+        )
 
     def test_every_mutant_is_caught(self):
         for mutant in TEETH.mutants:
@@ -91,6 +129,16 @@ class TestSelfTest(unittest.TestCase):
 
     def test_self_test_passes(self):
         self.assertEqual(_run_self_test(), 0)
+
+    def test_json_mode_is_machine_readable(self):
+        for run in (lambda: _run_self_test(as_json=True), lambda: main(["--json"])):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = run()
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["harness"], "security/data_integrity")
+            self.assertTrue(payload["passed"])
 
 
 if __name__ == "__main__":
