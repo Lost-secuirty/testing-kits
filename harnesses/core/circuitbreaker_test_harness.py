@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""circuitbreaker_test_harness.py â€” Circuit Breaker Resilience Harness (2026)
+"""circuitbreaker_test_harness.py — Circuit Breaker Resilience Harness (2026)
 ================================================================================
 Pure-Python (ZERO dependencies) harness for testing the circuit-breaker
 resilience pattern.

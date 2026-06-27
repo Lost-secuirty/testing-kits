@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""jwt_test_harness.py â€” JWT (HS256) Verification Harness (2026)
+"""jwt_test_harness.py — JWT (HS256) Verification Harness (2026)
 ================================================================================
 Pure-Python (ZERO dependencies) harness for testing JSON Web Token signing and,
-more importantly, *verification* â€” including the classic auth-bypass attacks.
+more importantly, *verification* — including the classic auth-bypass attacks.
 
 Implements HS256 only (HMAC-SHA256) using hmac/hashlib/base64 from stdlib.
 
@@ -116,7 +116,7 @@ def verify(token, key, now, algorithms=("HS256",), leeway=0,
     """Verify a JWT. Returns VerifyResult; never raises on bad input.
 
     `now` is an integer epoch time (injected for determinism).
-    `algorithms` is the allow-list the *server* trusts â€” the token header
+    `algorithms` is the allow-list the *server* trusts — the token header
     cannot widen it.
     """
     if not isinstance(token, str):

@@ -33,14 +33,6 @@ As of the documented Batch 11 snapshot, dated 2026-06-27:
 - 8 legacy;
 - 0 failing.
 
-As of the documented Batch 11 snapshot, dated 2026-06-27:
-
-- 100 total harnesses;
-- 92 required;
-- 0 pending;
-- 8 legacy;
-- 0 failing.
-
 This is a documented snapshot, not a fresh proof claim. Rerun proof before using it as release evidence. See `docs/GOLDEN_STATS.md` and `docs/UPGRADE_CAMPAIGN.md` for the source trail.
 
 ## Reproducing a single harness
