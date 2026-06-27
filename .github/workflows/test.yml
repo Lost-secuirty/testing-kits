@@ -53,6 +53,40 @@ jobs:
           name: status-json-py${{ matrix.python }}
           path: STATUS.json
 
+  cross-platform:
+    name: cross-platform
+    # Portability proof: the harness collection is pure-stdlib, so the same suite
+    # and proof audit must pass on Windows and macOS. Runs the underlying Python
+    # commands directly (not `make`, which Windows runners lack). Kept off the
+    # `unittest` matrix so the required `unittest (3.x)` check names are unchanged.
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+        python: ["3.12"]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Compile-check
+        run: python -m compileall -q harnesses tests tools
+      - name: Run unittest suite
+        run: python -m unittest discover -s tests -t . -p "test_*.py"
+      - name: Run harness proof audit
+        run: python tools/proof_audit.py --run-selftests
+      # Deliberately proof-audit only. `generate_report.py --check` runs the full
+      # per-harness self-test sweep, which includes the load-sensitive `core/stress`
+      # harness; that self-test flakes on shared hosted runners (observed FAIL at
+      # ~34s on one windows-latest run, PASS on the same commit's other run, well
+      # under the 90s timeout — an internal timing assertion, not a hang). The proof
+      # audit above is the deterministic portability signal; report-generation logic
+      # is OS-independent and stays covered by the Linux `unittest` matrix.
+
   package:
     name: Package, install, and dependency audit
     runs-on: ubuntu-latest

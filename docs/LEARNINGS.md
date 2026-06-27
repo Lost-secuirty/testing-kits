@@ -139,3 +139,10 @@ Stdlib-AST gates that catch structural failures the swap-check can't. Shared les
   `^{}` peeled entry, lightweight tags don't; use the peeled SHA. `zizmor` flags artipacked (checkout
   without `persist-credentials: false`) and template-injection (`${{ github.* }}` interpolated into a
   `run:` block) → fix both with env-var indirection.
+- The `cross-platform` (Windows/macOS) portability job runs the **deterministic** path only:
+  compileall, the unittest suite, and `proof_audit.py --run-selftests`. Do **not** add
+  `generate_report.py --check` to it — `--check` runs the full per-harness self-test sweep, which
+  includes the load-sensitive `core/stress` harness whose self-test fails an internal timing
+  assertion on shared hosted runners (observed FAIL at ~34s on one `windows-latest` run, PASS on the
+  same commit's other run, far under the 90s timeout). A portability gate must be a reliable signal;
+  report-generation logic is OS-independent and stays covered by the Linux `unittest` matrix.
