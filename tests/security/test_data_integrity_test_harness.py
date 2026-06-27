@@ -38,6 +38,13 @@ class TestHelpers(unittest.TestCase):
         self.assertTrue(_untrusted_source("not-a-url"))
         self.assertFalse(_untrusted_source("https://updates.example-trusted.test/v2"))
 
+    def test_untrusted_source_resists_authority_spoof(self):
+        # Real host is evil.com, not the trusted name in the userinfo segment.
+        self.assertTrue(
+            _untrusted_source("https://updates.example-trusted.test:8443@evil.com/x"))
+        # Mixed-case scheme on a genuinely trusted host stays trusted.
+        self.assertFalse(_untrusted_source("HTTPS://updates.example-trusted.test/v2"))
+
     def test_autoupdate_unverified(self):
         self.assertTrue(_autoupdate_unverified({"auto_update": True, "autoupdate_verify": False}))
         self.assertFalse(_autoupdate_unverified({"auto_update": True, "autoupdate_verify": True}))

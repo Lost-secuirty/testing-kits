@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import urllib.parse
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path as _Path
@@ -76,15 +77,19 @@ def _is_blank(value: Any) -> bool:
 
 
 def _untrusted_source(source: Any) -> bool:
-    """True iff a download source is plain-http, a non-allowlisted host, or not a URL."""
+    """True iff a download source is plain-http, a non-allowlisted host, or not a URL.
+
+    Authority is extracted with urllib.parse, not by hand: a string-prefix parse is
+    bypassable by a userinfo segment (``https://trusted.test:8443@evil.com/x`` has real
+    host ``evil.com``, not ``trusted.test``) and by mixed-case schemes. ``hostname`` is
+    already lowercased by urllib, matching the lowercase allowlist.
+    """
     if not isinstance(source, str) or not source:
         return True
-    if source.startswith("http://"):
+    parsed = urllib.parse.urlparse(source)
+    if parsed.scheme != "https":  # urllib lowercases the scheme; plain-http / non-URL → untrusted
         return True
-    if source.startswith("https://"):
-        host = source[len("https://"):].split("/", 1)[0].split(":", 1)[0]
-        return host not in TRUSTED_HOSTS
-    return True
+    return (parsed.hostname or "") not in TRUSTED_HOSTS
 
 
 def _autoupdate_unverified(record: dict[str, Any]) -> bool:
@@ -265,6 +270,16 @@ CORPUS: tuple[IntegrityCase, ...] = (
         '{"kind":"artifact","signature":"ed25519:SAMPLE","verify_signature":true,'
         '"checksum":"sha256:beef","checksum_algo":"sha256",'
         '"source":"http://203.0.113.9/paste/raw","auto_update":false}',
+        ("integrity-untrusted-source",),
+    ),
+    IntegrityCase(
+        # Userinfo-authority spoof: the real host is evil.com, not the trusted host in
+        # the userinfo segment. A string-prefix host parse is bypassed here; urllib.parse
+        # is not. Signed + checksummed, so the ONLY finding must be the untrusted source.
+        "untrusted_userinfo_spoof_artifact",
+        '{"kind":"artifact","signature":"ed25519:SAMPLE","verify_signature":true,'
+        '"checksum":"sha256:beef","checksum_algo":"sha256",'
+        '"source":"https://updates.example-trusted.test:8443@evil.com/x","auto_update":false}',
         ("integrity-untrusted-source",),
     ),
     IntegrityCase(
