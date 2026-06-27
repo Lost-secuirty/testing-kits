@@ -194,6 +194,8 @@ def _bug_dedup_off_by_one(case: IngestCase) -> tuple[str, ...]:
         if int(record.get("dup_cluster", 1)) >= DEDUP_THRESHOLD + 2:
             findings.add("poison-duplicate-flood")
     except (TypeError, ValueError):
+        # Malformed dup_cluster degrades to "no flood finding", mirroring the
+        # oracle's _is_flood guard. The planted bug is the +2 threshold, not this.
         pass
     return tuple(sorted(findings))
 
