@@ -1,10 +1,39 @@
 [project]
 name = "testing-kits"
-version = "0.2.0"
+version = "1.0.0"
 description = "Pure-stdlib Python testing-harness collection. Zero runtime dependencies."
 requires-python = ">=3.10"
 readme = "README.md"
 license = "MIT"
+authors = [{ name = "Lost-secuirty" }]
+keywords = [
+    "testing",
+    "test-harness",
+    "security",
+    "owasp",
+    "proof",
+    "mutation-testing",
+    "stdlib",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security",
+    "Topic :: Software Development :: Testing",
+]
+
+[project.urls]
+Homepage = "https://github.com/Lost-secuirty/testing-kits"
+Repository = "https://github.com/Lost-secuirty/testing-kits"
+Issues = "https://github.com/Lost-secuirty/testing-kits/issues"
+Changelog = "https://github.com/Lost-secuirty/testing-kits/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["setuptools>=77"]
