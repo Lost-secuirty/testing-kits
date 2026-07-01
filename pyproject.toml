@@ -47,14 +47,14 @@ include = ["harnesses*"]
 # own pinned `pip install` steps, so this group does not gate the required path.
 [dependency-groups]
 dev = [
-    "ruff==0.15.17",
+    "ruff==0.15.19",
     "pytest>=9.1",
     "pytest-cov",
     "pytest-xdist",
     "hypothesis",
     "mutmut>=3.6",        # uses the `source_paths` config key (>=3.6); Linux/WSL only
     "deptry",
-    "zizmor==1.25.2",
+    "zizmor==1.26.1",
 ]
 
 [tool.ruff]
